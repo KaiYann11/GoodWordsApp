@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AppContainer
+import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
@@ -11,6 +12,7 @@ import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.RoutineDraft
+import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.work.AppNotifications
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -51,6 +53,9 @@ class MainViewModel(
 
     val settings = container.settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReminderSettings())
+
+    val serverSyncSettings = container.settingsStore.serverSyncSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerSyncSettings())
 
     private val _sharedText = MutableStateFlow<String?>(null)
     val sharedText: StateFlow<String?> = _sharedText.asStateFlow()
@@ -168,6 +173,12 @@ class MainViewModel(
         }
     }
 
+    fun updateServerSyncSettings(updated: ServerSyncSettings) {
+        viewModelScope.launch {
+            container.settingsStore.updateServerSyncSettings(updated)
+        }
+    }
+
     fun sendTestNotification() {
         viewModelScope.launch {
             val currentSettings = container.settingsStore.getSettings()
@@ -207,6 +218,29 @@ class MainViewModel(
 
     suspend fun importData(uri: Uri): Result<AppImportResult> = runCatching {
         val result = container.appDataImporter.import(uri)
+        _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+        result
+    }
+
+    suspend fun uploadDataToServer(): Result<AppImportResult> = runCatching {
+        val syncSettings = container.settingsStore.getServerSyncSettings()
+        val serverSnapshot = container.serverSyncClient.uploadSnapshot(
+            settings = syncSettings,
+            snapshot = currentSnapshot()
+        )
+        AppImportResult(
+            itemCount = serverSnapshot.items.size,
+            eventCount = serverSnapshot.events.size,
+            routineCount = serverSnapshot.routines.size,
+            routineCheckCount = serverSnapshot.routineChecks.size,
+            routineMemoCount = serverSnapshot.routineMemos.size
+        )
+    }
+
+    suspend fun downloadDataFromServer(): Result<AppImportResult> = runCatching {
+        val syncSettings = container.settingsStore.getServerSyncSettings()
+        val snapshot = container.serverSyncClient.downloadSnapshot(syncSettings)
+        val result = container.appDataImporter.importSnapshot(snapshot)
         _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
         result
     }
@@ -374,4 +408,13 @@ class MainViewModel(
             base - itemId
         }
     }
+
+    private suspend fun currentSnapshot(): AppDataSnapshot = AppDataSnapshot(
+        items = allItems.value,
+        events = historyEvents.value,
+        routines = routines.value,
+        routineChecks = routineChecks.value,
+        routineMemos = routineMemos.value,
+        settings = container.settingsStore.getSettings()
+    )
 }

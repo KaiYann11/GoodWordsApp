@@ -97,6 +97,7 @@ fun AppGoodWordsApp(
     val historyEvents by viewModel.historyEvents.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val serverSyncSettings by viewModel.serverSyncSettings.collectAsStateWithLifecycle()
     val sharedText by viewModel.sharedText.collectAsStateWithLifecycle()
     val openItemRequest by viewModel.openItemRequest.collectAsStateWithLifecycle()
     val confirmedTodayIds by viewModel.confirmedTodayIds.collectAsStateWithLifecycle()
@@ -531,8 +532,10 @@ fun AppGoodWordsApp(
                         AppTab.SETTINGS -> SettingsScreen(
                             modifier = Modifier.padding(innerPadding),
                             settings = settings,
+                            serverSyncSettings = serverSyncSettings,
                             categories = categories,
                             onSettingsChanged = viewModel::updateSettings,
+                            onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
                                 viewModel.sendTestNotification()
                                 coroutineScope.launch {
@@ -574,6 +577,30 @@ fun AppGoodWordsApp(
                                         "${imported.itemCount}개 항목, ${imported.eventCount}개 이력, ${imported.routineCount}개 루틴을 복원했습니다."
                                     } else {
                                         result.exceptionOrNull()?.message ?: "데이터를 가져오지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
+                            onUploadToServer = {
+                                coroutineScope.launch {
+                                    val result = viewModel.uploadDataToServer()
+                                    val message = if (result.isSuccess) {
+                                        val uploaded = result.getOrThrow()
+                                        "서버에 ${uploaded.itemCount}개 항목, ${uploaded.routineCount}개 루틴을 업로드했습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "서버 업로드에 실패했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
+                            onDownloadFromServer = {
+                                coroutineScope.launch {
+                                    val result = viewModel.downloadDataFromServer()
+                                    val message = if (result.isSuccess) {
+                                        val imported = result.getOrThrow()
+                                        "서버에서 ${imported.itemCount}개 항목, ${imported.eventCount}개 이력, ${imported.routineCount}개 루틴을 가져왔습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "서버에서 가져오지 못했습니다."
                                     }
                                     snackbarHostState.showSnackbar(message)
                                 }

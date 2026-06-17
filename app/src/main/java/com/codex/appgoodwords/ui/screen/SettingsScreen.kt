@@ -32,20 +32,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ReminderSettings
+import com.codex.appgoodwords.data.ServerSyncSettings
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 @Composable
 fun SettingsScreen(
     settings: ReminderSettings,
+    serverSyncSettings: ServerSyncSettings,
     categories: List<String>,
     onSettingsChanged: (ReminderSettings) -> Unit,
+    onServerSyncSettingsChanged: (ServerSyncSettings) -> Unit,
     onSendTestNotification: () -> Unit,
     onResetViewCounts: () -> Unit,
     onExportRequested: (Uri) -> Unit,
     onImportRequested: (Uri) -> Unit,
+    onUploadToServer: () -> Unit,
+    onDownloadFromServer: () -> Unit,
     onDeleteCategory: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -66,11 +72,25 @@ fun SettingsScreen(
     }
 
     var intervalMinutesText by rememberSaveable { mutableStateOf(settings.intervalMinutes.toString()) }
+    var serverUrlText by rememberSaveable { mutableStateOf(serverSyncSettings.serverUrl) }
+    var serverApiKeyText by rememberSaveable { mutableStateOf(serverSyncSettings.apiKey) }
 
     LaunchedEffect(settings.intervalMinutes) {
         val normalized = settings.intervalMinutes.toString()
         if (intervalMinutesText != normalized) {
             intervalMinutesText = normalized
+        }
+    }
+
+    LaunchedEffect(serverSyncSettings.serverUrl) {
+        if (serverUrlText != serverSyncSettings.serverUrl) {
+            serverUrlText = serverSyncSettings.serverUrl
+        }
+    }
+
+    LaunchedEffect(serverSyncSettings.apiKey) {
+        if (serverApiKeyText != serverSyncSettings.apiKey) {
+            serverApiKeyText = serverSyncSettings.apiKey
         }
     }
 
@@ -339,6 +359,64 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("데이터 가져오기")
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("서버 동기화", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = serverUrlText,
+                        onValueChange = { value ->
+                            serverUrlText = value
+                            onServerSyncSettingsChanged(
+                                ServerSyncSettings(
+                                    serverUrl = value,
+                                    apiKey = serverApiKeyText
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("서버 주소") },
+                        supportingText = { Text("예: http://10.0.2.2:8765 또는 http://192.168.0.10:8765") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = serverApiKeyText,
+                        onValueChange = { value ->
+                            serverApiKeyText = value
+                            onServerSyncSettingsChanged(
+                                ServerSyncSettings(
+                                    serverUrl = serverUrlText,
+                                    apiKey = value
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("API 키") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                    Button(
+                        onClick = onUploadToServer,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = serverUrlText.isNotBlank()
+                    ) {
+                        Text("서버로 업로드")
+                    }
+                    OutlinedButton(
+                        onClick = onDownloadFromServer,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = serverUrlText.isNotBlank()
+                    ) {
+                        Text("서버에서 가져오기")
                     }
                 }
             }

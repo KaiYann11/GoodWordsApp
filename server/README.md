@@ -1,0 +1,112 @@
+# AppGoodWords Server
+
+DB 파일을 서버 프로세스에서 관리하고, Android 앱과 웹 UI가 같은 REST API를 쓰도록 하는 서버입니다. Node.js 표준 라이브러리만 사용합니다.
+
+## 빠른 실행
+
+```sh
+cd server
+node app_good_words_server.mjs --seed
+```
+
+웹 UI:
+
+```text
+http://127.0.0.1:8765
+```
+
+Windows에서 간단히 실행하려면 `server\run_server.cmd`를 열면 됩니다.
+
+## 맥미니에서 실행
+
+맥미니를 같은 Wi-Fi/LAN의 서버로 쓸 때는 모든 네트워크 인터페이스에서 받도록 실행합니다.
+
+```sh
+cd /path/to/AppGoodWords/server
+chmod +x ./run_server.sh
+APP_GOOD_WORDS_API_KEY="change-me" ./run_server.sh
+```
+
+맥미니의 LAN IP 확인:
+
+```sh
+ipconfig getifaddr en0
+```
+
+다른 기기에서 접속:
+
+```text
+http://<Mac mini LAN IP>:8765
+```
+
+Android 앱 설정 탭의 서버 주소도 같은 값으로 넣습니다.
+
+```text
+http://<Mac mini LAN IP>:8765
+```
+
+맥미니 부팅 시 자동 실행하려면 `launchd/com.appgoodwords.server.plist.example`의 경로와 API 키를 수정한 뒤 아래처럼 등록합니다.
+
+```sh
+cp launchd/com.appgoodwords.server.plist.example ~/Library/LaunchAgents/com.appgoodwords.server.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.appgoodwords.server.plist
+launchctl enable gui/$(id -u)/com.appgoodwords.server
+```
+
+중지:
+
+```sh
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.appgoodwords.server.plist
+```
+
+## LAN/Android 공유
+
+Windows PC나 서버의 같은 포트를 다른 기기에서 접근하게 하려면 바인드 주소를 열어 실행합니다.
+
+```powershell
+.\run_server.ps1 -BindHost 0.0.0.0 -Port 8765 -Seed -ApiKey "change-me"
+```
+
+Android 앱 설정 탭의 서버 주소:
+
+```text
+Android Emulator: http://10.0.2.2:8765
+Physical device:  http://<Mac mini 또는 PC LAN IP>:8765
+```
+
+`-ApiKey`를 사용한 경우 Android 앱과 웹 UI의 API 키 입력란에 같은 값을 넣습니다.
+
+## 동기화 동작
+
+Android 앱 설정 탭에 두 개의 명시적 동기화 버튼이 있습니다.
+
+- `서버로 업로드`: 현재 Android 로컬 DB 전체를 서버 DB 파일로 교체합니다.
+- `서버에서 가져오기`: 서버 DB 파일 전체를 Android 로컬 DB로 교체합니다.
+
+현재 구현은 충돌 병합이 아니라 스냅샷 교체 방식입니다. 여러 기기에서 동시에 수정하는 운영을 하려면 다음 단계로 레코드별 `updatedAt`, 삭제 tombstone, 충돌 정책을 추가해야 합니다.
+
+서버 DB 파일 기본 위치:
+
+```text
+server/app-good-words.db.json
+```
+
+## 주요 API
+
+```text
+GET  /api/health
+GET  /api/snapshot
+PUT  /api/snapshot
+GET  /api/content
+POST /api/content
+PUT  /api/content/{id}
+POST /api/content/{id}/toggle-confirm
+POST /api/content/{id}/favorite
+GET  /api/routines
+POST /api/routines
+PUT  /api/routines/{id}
+POST /api/routines/{id}/check
+POST /api/routines/{id}/memos
+GET  /api/events
+DELETE /api/events?ids=1,2,3
+```

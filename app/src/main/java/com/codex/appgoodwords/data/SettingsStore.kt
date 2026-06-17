@@ -30,6 +30,8 @@ class SettingsStore(
         val dailySummaryEnabled = booleanPreferencesKey("daily_summary_enabled")
         val summaryHour = intPreferencesKey("summary_hour")
         val summaryMinute = intPreferencesKey("summary_minute")
+        val serverUrl = stringPreferencesKey("server_url")
+        val serverApiKey = stringPreferencesKey("server_api_key")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -53,7 +55,16 @@ class SettingsStore(
         )
     }
 
+    val serverSyncSettingsFlow: Flow<ServerSyncSettings> = context.dataStore.data.map { preferences ->
+        ServerSyncSettings(
+            serverUrl = preferences[Keys.serverUrl].orEmpty(),
+            apiKey = preferences[Keys.serverApiKey].orEmpty()
+        )
+    }
+
     suspend fun getSettings(): ReminderSettings = settingsFlow.first()
+
+    suspend fun getServerSyncSettings(): ServerSyncSettings = serverSyncSettingsFlow.first()
 
     suspend fun updateSettings(settings: ReminderSettings) {
         context.dataStore.edit { preferences ->
@@ -70,6 +81,13 @@ class SettingsStore(
             preferences[Keys.dailySummaryEnabled] = settings.dailySummaryEnabled
             preferences[Keys.summaryHour] = settings.summaryHour
             preferences[Keys.summaryMinute] = settings.summaryMinute
+        }
+    }
+
+    suspend fun updateServerSyncSettings(settings: ServerSyncSettings) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.serverUrl] = settings.serverUrl.trim()
+            preferences[Keys.serverApiKey] = settings.apiKey.trim()
         }
     }
 }
