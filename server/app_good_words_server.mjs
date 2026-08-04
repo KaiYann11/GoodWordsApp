@@ -21,6 +21,7 @@ const triggers = new Set([
   "NOTIFICATION_TAP",
   "DETAIL_CHECK",
   "TEST_NOTIFICATION",
+  "WIDGET_REFRESH",
 ]);
 
 const defaultSettings = {

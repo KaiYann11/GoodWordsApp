@@ -7,5 +7,6 @@ enum class ExposureTrigger {
     DETAIL_OPEN,
     NOTIFICATION_TAP,
     DETAIL_CHECK,
-    TEST_NOTIFICATION
+    TEST_NOTIFICATION,
+    WIDGET_REFRESH
 }

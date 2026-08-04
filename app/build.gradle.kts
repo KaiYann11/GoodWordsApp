@@ -77,6 +77,8 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jsoup:jsoup:1.18.1")
     implementation("com.google.android.material:material:1.12.0")
@@ -87,6 +89,8 @@ dependencies {
     // AppDataJson이 org.json을 쓰는데 JVM 유닛 테스트에 붙는 android.jar은 메서드가 예외만 던지는
     // 스텁이라, 실제 구현을 클래스패스에 넣어야 동기화 포맷을 그대로 검증할 수 있다.
     testImplementation("org.json:json:20240303")
+    // Glance 테스트 하네스는 실제 android.os.Bundle이 필요해 JVM 스텁에서는 못 돌린다.
+    androidTestImplementation("androidx.glance:glance-appwidget-testing:1.1.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

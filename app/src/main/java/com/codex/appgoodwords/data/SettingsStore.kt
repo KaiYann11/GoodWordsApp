@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,7 @@ class SettingsStore(
         val summaryMinute = intPreferencesKey("summary_minute")
         val serverUrl = stringPreferencesKey("server_url")
         val serverApiKey = stringPreferencesKey("server_api_key")
+        val widgetContentId = longPreferencesKey("widget_content_id")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -81,6 +83,15 @@ class SettingsStore(
             preferences[Keys.dailySummaryEnabled] = settings.dailySummaryEnabled
             preferences[Keys.summaryHour] = settings.summaryHour
             preferences[Keys.summaryMinute] = settings.summaryMinute
+        }
+    }
+
+    /** 위젯이 지금 보여주는 항목. 0이면 아직 고른 항목이 없다는 뜻이다. */
+    suspend fun getWidgetContentId(): Long = context.dataStore.data.first()[Keys.widgetContentId] ?: 0L
+
+    suspend fun setWidgetContentId(itemId: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.widgetContentId] = itemId
         }
     }
 

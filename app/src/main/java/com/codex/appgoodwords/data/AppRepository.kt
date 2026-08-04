@@ -57,6 +57,8 @@ class AppRepository(
 
     suspend fun fetchLinkMetadata(url: String): LinkMetadata = linkMetadataFetcher.fetch(url)
 
+    suspend fun getContentById(id: Long): ContentItemEntity? = contentItemDao.getById(id)
+
     suspend fun getRandomContent(category: String): ContentItemEntity? {
         return pickCandidate(category)
     }

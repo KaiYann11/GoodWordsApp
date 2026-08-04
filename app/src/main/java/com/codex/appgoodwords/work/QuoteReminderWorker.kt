@@ -1,12 +1,14 @@
 package com.codex.appgoodwords.work
 
 import android.content.Context
+import androidx.glance.appwidget.updateAll
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.codex.appgoodwords.AppGoodWordsApplication
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.widget.QuoteWidget
 import kotlin.random.Random
 
 class QuoteReminderWorker(
@@ -44,6 +46,10 @@ class QuoteReminderWorker(
                     settings = settings,
                     countedAsViewedInNotification = true
                 )
+                // 위젯이 알림과 같은 글귀를 보여주도록 맞춘다. 별도 스케줄 없이
+                // 사용자가 정한 반복 주기대로 위젯도 함께 돌아간다.
+                application.container.settingsStore.setWidgetContentId(target.item.id)
+                QuoteWidget().updateAll(applicationContext)
             }
 
             is ReminderTarget.Routine -> {
