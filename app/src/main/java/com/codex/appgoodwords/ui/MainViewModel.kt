@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AppContainer
+import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
@@ -11,6 +12,10 @@ import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.RoutineDraft
+import com.codex.appgoodwords.data.ServerConnectionInfo
+import com.codex.appgoodwords.data.ServerSyncSettings
+import com.codex.appgoodwords.data.SyncBackup
+import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.work.AppNotifications
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +26,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+
+data class ServerSyncResult(
+    val counts: AppImportResult,
+    val backup: SyncBackup?
+)
 
 class MainViewModel(
     private val container: AppContainer
@@ -52,6 +62,9 @@ class MainViewModel(
     val settings = container.settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReminderSettings())
 
+    val serverSyncSettings = container.settingsStore.serverSyncSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerSyncSettings())
+
     private val _sharedText = MutableStateFlow<String?>(null)
     val sharedText: StateFlow<String?> = _sharedText.asStateFlow()
 
@@ -60,6 +73,12 @@ class MainViewModel(
 
     private val _confirmedTodayIds = MutableStateFlow<Set<Long>>(emptySet())
     val confirmedTodayIds: StateFlow<Set<Long>> = _confirmedTodayIds.asStateFlow()
+
+    private val _syncBackups = MutableStateFlow<List<SyncBackup>>(emptyList())
+    val syncBackups: StateFlow<List<SyncBackup>> = _syncBackups.asStateFlow()
+
+    private val _syncBackupDirectory = MutableStateFlow("")
+    val syncBackupDirectory: StateFlow<String> = _syncBackupDirectory.asStateFlow()
 
     private val routineDayRange = MutableStateFlow(container.repository.todayRangeMillis())
     val routineTodayCounts = combine(routineChecks, routineDayRange) { checks, range ->
@@ -74,6 +93,8 @@ class MainViewModel(
         viewModelScope.launch {
             container.repository.seedDefaultsIfNeeded()
             _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+            _syncBackupDirectory.value = container.syncBackupStore.directoryPath()
+            reloadSyncBackups()
 
             val currentSettings = container.settingsStore.getSettings()
             if (currentSettings.showOnLaunch) {
@@ -168,6 +189,12 @@ class MainViewModel(
         }
     }
 
+    fun updateServerSyncSettings(updated: ServerSyncSettings) {
+        viewModelScope.launch {
+            container.settingsStore.updateServerSyncSettings(updated)
+        }
+    }
+
     fun sendTestNotification() {
         viewModelScope.launch {
             val currentSettings = container.settingsStore.getSettings()
@@ -209,6 +236,56 @@ class MainViewModel(
         val result = container.appDataImporter.import(uri)
         _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
         result
+    }
+
+    suspend fun testServerConnection(): Result<ServerConnectionInfo> = runCatching {
+        container.serverSyncClient.testConnection(container.settingsStore.getServerSyncSettings())
+    }
+
+    suspend fun uploadDataToServer(): Result<ServerSyncResult> = runCatching {
+        val syncSettings = container.settingsStore.getServerSyncSettings()
+        // 서버 데이터를 통째로 덮어쓰기 전에 현재 서버 상태를 백업한다.
+        val serverSnapshotBefore = container.serverSyncClient.downloadSnapshot(syncSettings)
+        val backup = container.syncBackupStore.save(SyncBackupKind.BEFORE_UPLOAD, serverSnapshotBefore)
+        val serverSnapshot = container.serverSyncClient.uploadSnapshot(
+            settings = syncSettings,
+            snapshot = currentSnapshot()
+        )
+        reloadSyncBackups()
+        ServerSyncResult(
+            counts = AppImportResult(
+                itemCount = serverSnapshot.items.size,
+                eventCount = serverSnapshot.events.size,
+                routineCount = serverSnapshot.routines.size,
+                routineCheckCount = serverSnapshot.routineChecks.size,
+                routineMemoCount = serverSnapshot.routineMemos.size
+            ),
+            backup = backup
+        )
+    }
+
+    suspend fun downloadDataFromServer(): Result<ServerSyncResult> = runCatching {
+        val syncSettings = container.settingsStore.getServerSyncSettings()
+        // 내려받기에 실패하면 기기 데이터를 건드리지 않도록 스냅샷을 먼저 받는다.
+        val snapshot = container.serverSyncClient.downloadSnapshot(syncSettings)
+        val backup = container.syncBackupStore.save(SyncBackupKind.BEFORE_DOWNLOAD, currentSnapshot())
+        val result = container.appDataImporter.importSnapshot(snapshot)
+        _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+        reloadSyncBackups()
+        ServerSyncResult(counts = result, backup = backup)
+    }
+
+    suspend fun restoreSyncBackup(backup: SyncBackup): Result<AppImportResult> = runCatching {
+        val snapshot = container.syncBackupStore.load(backup)
+        container.syncBackupStore.save(SyncBackupKind.BEFORE_RESTORE, currentSnapshot())
+        val result = container.appDataImporter.importSnapshot(snapshot)
+        _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+        reloadSyncBackups()
+        result
+    }
+
+    private suspend fun reloadSyncBackups() {
+        _syncBackups.value = container.syncBackupStore.list()
     }
 
     suspend fun resetTodayConfirmed(): Result<Int> = runCatching {
@@ -374,4 +451,13 @@ class MainViewModel(
             base - itemId
         }
     }
+
+    private suspend fun currentSnapshot(): AppDataSnapshot = AppDataSnapshot(
+        items = allItems.value,
+        events = historyEvents.value,
+        routines = routines.value,
+        routineChecks = routineChecks.value,
+        routineMemos = routineMemos.value,
+        settings = container.settingsStore.getSettings()
+    )
 }

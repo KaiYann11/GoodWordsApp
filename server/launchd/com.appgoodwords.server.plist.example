@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.appgoodwords.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>sh</string>
+    <string>/Users/YOUR_USER/AppGoodWords/server/run_server.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>APP_GOOD_WORDS_HOST</key>
+    <string>0.0.0.0</string>
+    <key>APP_GOOD_WORDS_PORT</key>
+    <string>8765</string>
+    <key>APP_GOOD_WORDS_API_KEY</key>
+    <string>change-me</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/appgoodwords-server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/appgoodwords-server.err.log</string>
+</dict>
+</plist>

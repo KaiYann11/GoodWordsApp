@@ -34,6 +34,14 @@ class AppContainer(
         ReminderScheduler(appContext)
     }
 
+    val serverSyncClient: ServerSyncClient by lazy {
+        ServerSyncClient()
+    }
+
+    val syncBackupStore: SyncBackupStore by lazy {
+        SyncBackupStore(appContext)
+    }
+
     val repository: AppRepository by lazy {
         AppRepository(
             contentItemDao = database.contentItemDao(),
