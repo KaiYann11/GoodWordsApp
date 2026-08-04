@@ -38,6 +38,10 @@ class AppContainer(
         ServerSyncClient()
     }
 
+    val syncBackupStore: SyncBackupStore by lazy {
+        SyncBackupStore(appContext)
+    }
+
     val repository: AppRepository by lazy {
         AppRepository(
             contentItemDao = database.contentItemDao(),

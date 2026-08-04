@@ -105,6 +105,8 @@ fun AppGoodWordsApp(
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
     val routineTodayCounts by viewModel.routineTodayCounts.collectAsStateWithLifecycle()
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
+    val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
+    val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
 
     val existingTags = remember(allItems) {
         allItems
@@ -534,6 +536,8 @@ fun AppGoodWordsApp(
                             settings = settings,
                             serverSyncSettings = serverSyncSettings,
                             categories = categories,
+                            syncBackups = syncBackups,
+                            syncBackupDirectory = syncBackupDirectory,
                             onSettingsChanged = viewModel::updateSettings,
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
@@ -581,12 +585,29 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             },
+                            onTestServerConnection = {
+                                coroutineScope.launch {
+                                    val result = viewModel.testServerConnection()
+                                    val message = if (result.isSuccess) {
+                                        val info = result.getOrThrow()
+                                        val summary = "서버 연결 성공: 항목 ${info.itemCount}개, 루틴 ${info.routineCount}개, 이력 ${info.eventCount}개"
+                                        if (info.schemaMatches) {
+                                            summary
+                                        } else {
+                                            "$summary (스키마 다름: 서버 ${info.serverSchemaVersion}, 앱 ${info.appSchemaVersion})"
+                                        }
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "서버에 연결하지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
                             onUploadToServer = {
                                 coroutineScope.launch {
                                     val result = viewModel.uploadDataToServer()
                                     val message = if (result.isSuccess) {
                                         val uploaded = result.getOrThrow()
-                                        "서버에 ${uploaded.itemCount}개 항목, ${uploaded.routineCount}개 루틴을 업로드했습니다."
+                                        "서버에 ${uploaded.counts.itemCount}개 항목, ${uploaded.counts.routineCount}개 루틴을 업로드했습니다. 이전 서버 데이터는 백업에 저장했습니다."
                                     } else {
                                         result.exceptionOrNull()?.message ?: "서버 업로드에 실패했습니다."
                                     }
@@ -597,10 +618,22 @@ fun AppGoodWordsApp(
                                 coroutineScope.launch {
                                     val result = viewModel.downloadDataFromServer()
                                     val message = if (result.isSuccess) {
-                                        val imported = result.getOrThrow()
-                                        "서버에서 ${imported.itemCount}개 항목, ${imported.eventCount}개 이력, ${imported.routineCount}개 루틴을 가져왔습니다."
+                                        val imported = result.getOrThrow().counts
+                                        "서버에서 ${imported.itemCount}개 항목, ${imported.eventCount}개 이력, ${imported.routineCount}개 루틴을 가져왔습니다. 이전 기기 데이터는 백업에 저장했습니다."
                                     } else {
                                         result.exceptionOrNull()?.message ?: "서버에서 가져오지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
+                            onRestoreBackup = { backup ->
+                                coroutineScope.launch {
+                                    val result = viewModel.restoreSyncBackup(backup)
+                                    val message = if (result.isSuccess) {
+                                        val restored = result.getOrThrow()
+                                        "백업에서 ${restored.itemCount}개 항목, ${restored.eventCount}개 이력, ${restored.routineCount}개 루틴을 복원했습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "백업을 복원하지 못했습니다."
                                     }
                                     snackbarHostState.showSnackbar(message)
                                 }

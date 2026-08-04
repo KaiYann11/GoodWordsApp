@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
@@ -23,12 +24,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,22 +40,35 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ServerSyncSettings
+import com.codex.appgoodwords.data.SyncBackup
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+private sealed interface PendingSyncAction {
+    object Upload : PendingSyncAction
+    object Download : PendingSyncAction
+    data class Restore(val backup: SyncBackup) : PendingSyncAction
+}
 
 @Composable
 fun SettingsScreen(
     settings: ReminderSettings,
     serverSyncSettings: ServerSyncSettings,
     categories: List<String>,
+    syncBackups: List<SyncBackup>,
+    syncBackupDirectory: String,
     onSettingsChanged: (ReminderSettings) -> Unit,
     onServerSyncSettingsChanged: (ServerSyncSettings) -> Unit,
     onSendTestNotification: () -> Unit,
     onResetViewCounts: () -> Unit,
     onExportRequested: (Uri) -> Unit,
     onImportRequested: (Uri) -> Unit,
+    onTestServerConnection: () -> Unit,
     onUploadToServer: () -> Unit,
     onDownloadFromServer: () -> Unit,
+    onRestoreBackup: (SyncBackup) -> Unit,
     onDeleteCategory: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -74,6 +91,8 @@ fun SettingsScreen(
     var intervalMinutesText by rememberSaveable { mutableStateOf(settings.intervalMinutes.toString()) }
     var serverUrlText by rememberSaveable { mutableStateOf(serverSyncSettings.serverUrl) }
     var serverApiKeyText by rememberSaveable { mutableStateOf(serverSyncSettings.apiKey) }
+    // 화면이 다시 만들어지면 확인 대화상자를 닫아 실수로 실행되지 않게 한다.
+    var pendingSyncAction by remember { mutableStateOf<PendingSyncAction?>(null) }
 
     LaunchedEffect(settings.intervalMinutes) {
         val normalized = settings.intervalMinutes.toString()
@@ -92,6 +111,21 @@ fun SettingsScreen(
         if (serverApiKeyText != serverSyncSettings.apiKey) {
             serverApiKeyText = serverSyncSettings.apiKey
         }
+    }
+
+    pendingSyncAction?.let { action ->
+        SyncConfirmDialog(
+            action = action,
+            onDismiss = { pendingSyncAction = null },
+            onConfirm = {
+                pendingSyncAction = null
+                when (action) {
+                    PendingSyncAction.Upload -> onUploadToServer()
+                    PendingSyncAction.Download -> onDownloadFromServer()
+                    is PendingSyncAction.Restore -> onRestoreBackup(action.backup)
+                }
+            }
+        )
     }
 
     LazyColumn(
@@ -404,19 +438,79 @@ fun SettingsScreen(
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true
                     )
+                    OutlinedButton(
+                        onClick = onTestServerConnection,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = serverUrlText.isNotBlank()
+                    ) {
+                        Text("연결 테스트")
+                    }
+                    Text(
+                        text = "업로드와 가져오기는 양쪽 데이터를 통째로 교체합니다. 먼저 연결 테스트로 주소와 API 키를 확인해 주세요.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Button(
-                        onClick = onUploadToServer,
+                        onClick = { pendingSyncAction = PendingSyncAction.Upload },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = serverUrlText.isNotBlank()
                     ) {
                         Text("서버로 업로드")
                     }
                     OutlinedButton(
-                        onClick = onDownloadFromServer,
+                        onClick = { pendingSyncAction = PendingSyncAction.Download },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = serverUrlText.isNotBlank()
                     ) {
                         Text("서버에서 가져오기")
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("동기화 백업", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "업로드·가져오기·복원 직전 상태를 자동으로 저장합니다. 최근 10개까지 보관합니다.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (syncBackups.isEmpty()) {
+                        Text(
+                            text = "아직 저장된 백업이 없습니다.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else {
+                        syncBackups.forEach { backup ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = backup.kind.label,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = "${formatBackupTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                TextButton(onClick = { pendingSyncAction = PendingSyncAction.Restore(backup) }) {
+                                    Text("복원")
+                                }
+                            }
+                        }
+                    }
+                    if (syncBackupDirectory.isNotBlank()) {
+                        Text(
+                            text = "저장 위치: $syncBackupDirectory",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }
@@ -431,6 +525,56 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SyncConfirmDialog(
+    action: PendingSyncAction,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val title: String
+    val message: String
+    val confirmLabel: String
+    when (action) {
+        PendingSyncAction.Upload -> {
+            title = "서버로 업로드할까요?"
+            message = "서버의 기존 데이터가 이 기기의 데이터로 완전히 교체됩니다. " +
+                "교체 직전 서버 데이터는 이 기기에 백업으로 저장됩니다."
+            confirmLabel = "업로드"
+        }
+
+        PendingSyncAction.Download -> {
+            title = "서버에서 가져올까요?"
+            message = "이 기기의 기존 데이터가 서버 데이터로 완전히 교체됩니다. " +
+                "교체 직전 기기 데이터는 백업으로 저장됩니다."
+            confirmLabel = "가져오기"
+        }
+
+        is PendingSyncAction.Restore -> {
+            title = "백업을 복원할까요?"
+            message = "이 기기의 기존 데이터가 ${formatBackupTime(action.backup.createdAt)}에 저장한 " +
+                "'${action.backup.kind.label}' 백업으로 완전히 교체됩니다. " +
+                "교체 직전 기기 데이터는 백업으로 저장됩니다."
+            confirmLabel = "복원"
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        }
+    )
 }
 
 @Composable
@@ -459,6 +603,15 @@ private fun formatInterval(intervalMinutes: Int): String {
         intervalMinutes > 60 -> "${intervalMinutes / 60}시간 ${intervalMinutes % 60}분"
         else -> "${intervalMinutes}분"
     }
+}
+
+private fun formatBackupTime(millis: Long): String = LocalDateTime
+    .ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+    .format(DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm"))
+
+private fun formatBackupSize(sizeBytes: Long): String = when {
+    sizeBytes >= 1024 -> "${(sizeBytes + 1023) / 1024}KB"
+    else -> "${sizeBytes}B"
 }
 
 private fun defaultExportFileName(): String {
