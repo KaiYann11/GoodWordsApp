@@ -100,6 +100,20 @@ Android 앱 설정 탭에 세 개의 버튼이 있습니다.
 server/app-good-words.db.json
 ```
 
+## 테스트
+
+서버 스모크 테스트는 Node 표준 테스트 러너로 돌립니다. 임시 디렉터리에 별도 DB를 만들어 실제 서버 프로세스를 띄우므로 `server/app-good-words.db.json`은 건드리지 않습니다.
+
+```sh
+node --test server/tests/server.test.mjs
+```
+
+Android 쪽 JSON 동기화 포맷 테스트:
+
+```sh
+./gradlew testDebugUnitTest
+```
+
 ## 주요 API
 
 ```text
