@@ -106,6 +106,7 @@ dependencies {
     implementation("androidx.glance:glance-material3:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jsoup:jsoup:1.18.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.android.material:material:1.12.0")
 
     ksp("androidx.room:room-compiler:2.6.1")

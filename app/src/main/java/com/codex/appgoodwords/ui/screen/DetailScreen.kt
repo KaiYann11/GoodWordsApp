@@ -2,9 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.widget.ImageView
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.foundation.background
@@ -27,6 +25,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,18 +37,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.SubcomposeAsyncImage
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.net.URL
 
 @Composable
 fun DetailScreen(
@@ -368,7 +369,9 @@ private fun VideoLinkPreview(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            AndroidView(
+            RemoteOrLocalImage(
+                source = previewUrl,
+                contentDescription = "영상 썸네일",
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(220.dp)
@@ -379,17 +382,7 @@ private fun VideoLinkPreview(
                             context.startActivity(intent)
                         } catch (_: ActivityNotFoundException) {
                         }
-                    },
-                factory = { viewContext ->
-                    ImageView(viewContext).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        adjustViewBounds = true
-                        loadImageFromSource(previewUrl)
                     }
-                },
-                update = { imageView ->
-                    imageView.loadImageFromSource(previewUrl)
-                }
             )
             Text(
                 text = sourceUrl,
@@ -403,20 +396,12 @@ private fun VideoLinkPreview(
 @Composable
 private fun MediaImage(uriString: String) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AndroidView(
+        RemoteOrLocalImage(
+            source = uriString,
+            contentDescription = displayNameFromUri(uriString),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp),
-            factory = { context ->
-                ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    adjustViewBounds = true
-                    loadImageFromSource(uriString)
-                }
-            },
-            update = { imageView ->
-                imageView.loadImageFromSource(uriString)
-            }
+                .height(220.dp)
         )
         Text(
             text = displayNameFromUri(uriString),
@@ -424,6 +409,49 @@ private fun MediaImage(uriString: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+/**
+ * 이미지 로딩은 Coil에 맡깁니다.
+ *
+ * 직접 스레드를 띄워 받던 이전 방식은 캐시와 다운샘플링이 없어 스크롤할 때마다 다시 받고,
+ * 큰 이미지에서 메모리를 통째로 잡아먹었습니다. content:// 로컬 파일과 http(s) 원격 주소를
+ * 모두 같은 경로로 처리합니다.
+ */
+@Composable
+private fun RemoteOrLocalImage(
+    source: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier
+) {
+    SubcomposeAsyncImage(
+        model = source,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = ContentScale.Crop,
+        loading = {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(strokeWidth = 2.dp)
+            }
+        },
+        error = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "이미지를 불러오지 못했습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    )
 }
 
 @Composable
@@ -531,26 +559,6 @@ private fun ContentType.displayLabel(): String {
         ContentType.QUOTE -> "글귀"
         ContentType.LINK -> "링크"
         ContentType.VIDEO -> "영상"
-    }
-}
-
-private fun ImageView.loadImageFromSource(source: String) {
-    if (source.startsWith("http://") || source.startsWith("https://")) {
-        setImageDrawable(null)
-        val requestedSource = source
-        tag = requestedSource
-        Thread {
-            val bitmap = runCatching {
-                URL(requestedSource).openStream().use(BitmapFactory::decodeStream)
-            }.getOrNull()
-            post {
-                if (tag == requestedSource && bitmap != null) {
-                    setImageBitmap(bitmap)
-                }
-            }
-        }.start()
-    } else {
-        setImageURI(Uri.parse(source))
     }
 }
 
