@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -6,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 7;
+const schemaVersion = 8;
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
@@ -22,6 +23,13 @@ const triggers = new Set([
   "DETAIL_CHECK",
   "TEST_NOTIFICATION",
   "WIDGET_REFRESH",
+]);
+const deletionEntityTypes = new Set([
+  "CONTENT_ITEM",
+  "EXPOSURE_EVENT",
+  "ROUTINE",
+  "ROUTINE_CHECK",
+  "ROUTINE_MEMO",
 ]);
 
 const defaultSettings = {
@@ -115,6 +123,13 @@ async function route(request, response) {
     const payload = await readJson(request);
     const saved = await withDb((db) => replaceSnapshot(db, payload));
     sendJson(response, 200, snapshot(saved));
+    return;
+  }
+  // 교체가 아니라 합치기. 여러 기기에서 각각 편집해도 한쪽이 사라지지 않는다.
+  if (method === "POST" && url.pathname === "/api/sync") {
+    const payload = await readJson(request);
+    const merged = await withDb((db) => mergeSnapshot(db, payload));
+    sendJson(response, 200, snapshot(merged));
     return;
   }
   if (method === "GET" && url.pathname === "/api/content") {
@@ -355,11 +370,13 @@ function emptyDb() {
     appName,
     schemaVersion,
     settings: { ...defaultSettings },
+    settingsUpdatedAt: 0,
     items: [],
     exposureEvents: [],
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    deletions: [],
   };
 }
 
@@ -368,11 +385,13 @@ function normalizeDb(db) {
     appName,
     schemaVersion,
     settings: { ...defaultSettings, ...(db?.settings || {}) },
+    settingsUpdatedAt: integer(db?.settingsUpdatedAt, 0),
     items: Array.isArray(db?.items) ? db.items.map(normalizeContent).filter(Boolean) : [],
     exposureEvents: Array.isArray(db?.exposureEvents) ? db.exposureEvents.map(normalizeEvent).filter(Boolean) : [],
     routines: Array.isArray(db?.routines) ? db.routines.map(normalizeRoutine).filter(Boolean) : [],
     routineChecks: Array.isArray(db?.routineChecks) ? db.routineChecks.map(normalizeRoutineCheck).filter(Boolean) : [],
     routineMemos: Array.isArray(db?.routineMemos) ? db.routineMemos.map(normalizeRoutineMemo).filter(Boolean) : [],
+    deletions: Array.isArray(db?.deletions) ? db.deletions.map(normalizeDeletion).filter(Boolean) : [],
   };
 }
 
@@ -388,16 +407,96 @@ function snapshot(db) {
     routineCheckCount: normalized.routineChecks.length,
     routineMemoCount: normalized.routineMemos.length,
     settings: normalized.settings,
+    settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: sortDesc(normalized.items, "createdAt"),
     exposureEvents: sortDesc(normalized.exposureEvents, "occurredAt"),
     routines: sortDesc(normalized.routines, "createdAt"),
     routineChecks: sortDesc(normalized.routineChecks, "checkedAt"),
     routineMemos: sortDesc(normalized.routineMemos, "createdAt"),
+    deletions: sortDesc(normalized.deletions, "deletedAt"),
   };
+}
+
+/**
+ * 들어온 스냅샷을 서버 DB에 레코드 단위로 합칩니다.
+ *
+ * 앱의 SyncMerger와 같은 규칙입니다. syncId로 짝지어 updatedAt이 최신인 쪽을 남기고,
+ * 삭제 표식이 레코드의 updatedAt보다 나중이면 삭제를 유지합니다.
+ * 병합을 서버에서 하는 이유는 withDb가 쓰기를 직렬화해 두 기기가 동시에 보내도 안전하기 때문입니다.
+ */
+function mergeSnapshot(db, payload) {
+  const incoming = normalizeDb({
+    settings: payload?.settings,
+    settingsUpdatedAt: payload?.settingsUpdatedAt,
+    items: payload?.items,
+    exposureEvents: payload?.exposureEvents,
+    routines: payload?.routines,
+    routineChecks: payload?.routineChecks,
+    routineMemos: payload?.routineMemos,
+    deletions: payload?.deletions,
+  });
+  const current = normalizeDb(db);
+
+  const deletions = mergeDeletions(current.deletions, incoming.deletions);
+  const deletedAt = new Map(deletions.map((entry) => [entry.syncId, entry.deletedAt]));
+
+  db.items = mergeMutable(current.items, incoming.items, deletedAt);
+  db.routines = mergeMutable(current.routines, incoming.routines, deletedAt);
+  db.routineMemos = mergeMutable(current.routineMemos, incoming.routineMemos, deletedAt);
+  db.exposureEvents = mergeAppendOnly(current.exposureEvents, incoming.exposureEvents, deletedAt);
+  db.routineChecks = mergeAppendOnly(current.routineChecks, incoming.routineChecks, deletedAt);
+  db.deletions = deletions;
+
+  if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
+    db.settings = { ...defaultSettings, ...incoming.settings };
+    db.settingsUpdatedAt = incoming.settingsUpdatedAt;
+  } else {
+    db.settings = { ...defaultSettings, ...current.settings };
+    db.settingsUpdatedAt = current.settingsUpdatedAt;
+  }
+
+  return db;
+}
+
+function mergeMutable(current, incoming, deletedAt) {
+  const merged = new Map();
+  for (const record of current) merged.set(record.syncId, record);
+  for (const record of incoming) {
+    const existing = merged.get(record.syncId);
+    // 같은 시각이면 서버에 있던 쪽을 남겨 결과가 흔들리지 않게 한다.
+    if (!existing || record.updatedAt > existing.updatedAt) merged.set(record.syncId, record);
+  }
+
+  return [...merged.values()].filter((record) => {
+    const removedAt = deletedAt.get(record.syncId);
+    if (removedAt === undefined) return true;
+    // 지운 뒤 다시 고쳤다면 그 수정이 이긴다.
+    return removedAt < record.updatedAt;
+  });
+}
+
+function mergeAppendOnly(current, incoming, deletedAt) {
+  const merged = new Map();
+  for (const record of current) merged.set(record.syncId, record);
+  for (const record of incoming) {
+    if (!merged.has(record.syncId)) merged.set(record.syncId, record);
+  }
+  return [...merged.values()].filter((record) => !deletedAt.has(record.syncId));
+}
+
+function mergeDeletions(current, incoming) {
+  const merged = new Map();
+  for (const entry of [...current, ...incoming]) {
+    const existing = merged.get(entry.syncId);
+    if (!existing || entry.deletedAt > existing.deletedAt) merged.set(entry.syncId, entry);
+  }
+  return [...merged.values()];
 }
 
 function replaceSnapshot(db, payload) {
   db.settings = { ...defaultSettings, ...(payload.settings || {}) };
+  db.settingsUpdatedAt = integer(payload.settingsUpdatedAt, nowMs());
+  db.deletions = Array.isArray(payload.deletions) ? payload.deletions.map(normalizeDeletion).filter(Boolean) : [];
   db.items = Array.isArray(payload.items) ? payload.items.map(normalizeContent).filter(Boolean) : [];
   db.exposureEvents = Array.isArray(payload.exposureEvents)
     ? payload.exposureEvents.map(normalizeEvent).filter(Boolean)
@@ -559,6 +658,10 @@ function normalizeContent(item) {
   if (!item) return null;
   return {
     id: positiveInt(item.id),
+    // 구버전 앱이 보낸 레코드에는 syncId가 없다. 여기서 채워 두면 이후 병합에 참여할 수 있다.
+    syncId: syncId(item.syncId),
+    updatedAt: integer(item.updatedAt, integer(item.createdAt, nowMs())),
+    lastSurfacedAt: nullableInteger(item.lastSurfacedAt),
     type: normalizeEnum(item.type, contentTypes, "QUOTE"),
     title: text(item.title),
     body: text(item.body),
@@ -580,6 +683,7 @@ function normalizeEvent(event) {
   if (!event) return null;
   return {
     id: positiveInt(event.id),
+    syncId: syncId(event.syncId),
     contentItemId: positiveInt(event.contentItemId),
     contentTitle: text(event.contentTitle),
     contentType: normalizeEnum(event.contentType, contentTypes, "QUOTE"),
@@ -593,6 +697,8 @@ function normalizeRoutine(routine) {
   if (!routine) return null;
   return {
     id: positiveInt(routine.id),
+    syncId: syncId(routine.syncId),
+    updatedAt: integer(routine.updatedAt, integer(routine.createdAt, nowMs())),
     title: text(routine.title),
     note: text(routine.note),
     category: text(routine.category),
@@ -605,6 +711,7 @@ function normalizeRoutineCheck(check) {
   if (!check) return null;
   return {
     id: positiveInt(check.id),
+    syncId: syncId(check.syncId),
     routineId: positiveInt(check.routineId),
     routineTitle: text(check.routineTitle),
     checkedAt: integer(check.checkedAt, nowMs()),
@@ -615,11 +722,31 @@ function normalizeRoutineMemo(memo) {
   if (!memo) return null;
   return {
     id: positiveInt(memo.id),
+    syncId: syncId(memo.syncId),
+    updatedAt: integer(memo.updatedAt, integer(memo.createdAt, nowMs())),
     routineId: positiveInt(memo.routineId),
     routineTitle: text(memo.routineTitle),
     body: text(memo.body),
     createdAt: integer(memo.createdAt, nowMs()),
   };
+}
+
+function normalizeDeletion(deletion) {
+  if (!deletion) return null;
+  const id = text(deletion.syncId);
+  const entityType = normalizeEnum(deletion.entityType, deletionEntityTypes, null);
+  if (!id || !entityType) return null;
+  return {
+    syncId: id,
+    entityType,
+    deletedAt: integer(deletion.deletedAt, nowMs()),
+  };
+}
+
+/** 앱과 같은 규칙으로 식별자를 채운다. 없으면 새로 만든다. */
+function syncId(value) {
+  const given = text(value);
+  return given || randomUUID();
 }
 
 function requireItem(db, itemId) {

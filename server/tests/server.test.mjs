@@ -41,12 +41,16 @@ function api(path, { method = "GET", body, key = apiKey } = {}) {
 
 function emptySnapshot(overrides = {}) {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
+    // 앱은 항상 값을 보낸다. 여기서 빠뜨리면 서버가 현재 시각으로 채워
+    // 이후 병합의 작은 타임스탬프가 절대 이기지 못한다.
+    settingsUpdatedAt: 0,
     items: [],
     exposureEvents: [],
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    deletions: [],
     ...overrides,
   };
 }
@@ -151,6 +155,171 @@ describe("스냅샷 동기화", () => {
     for (const key of ["schemaVersion", "settings", "items", "exposureEvents", "routines", "routineChecks", "routineMemos"]) {
       assert.ok(key in stored, `${key}가 응답에 없습니다.`);
     }
+  });
+});
+
+describe("병합 동기화", () => {
+  function item(overrides) {
+    return {
+      id: 1,
+      syncId: "item-1",
+      updatedAt: 1000,
+      type: "QUOTE",
+      title: "제목",
+      body: "본문",
+      createdAt: 1000,
+      ...overrides,
+    };
+  }
+
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ deletions: [] }) });
+  }
+
+  it("양쪽에만 있는 레코드를 모두 남긴다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ syncId: "a", title: "서버쪽" })] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ syncId: "b", title: "기기쪽" })] }),
+      })
+    ).json();
+
+    assert.deepEqual(new Set(merged.items.map((entry) => entry.syncId)), new Set(["a", "b"]));
+  });
+
+  it("같은 레코드는 updatedAt이 최신인 쪽이 남는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ title: "예전", updatedAt: 1000 })] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ title: "최신", updatedAt: 5000 })] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+    assert.equal(merged.items[0].title, "최신");
+  });
+
+  it("더 오래된 수정은 최신 레코드를 덮지 않는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ title: "최신", updatedAt: 5000 })] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ title: "예전", updatedAt: 1000 })] }),
+      })
+    ).json();
+
+    assert.equal(merged.items[0].title, "최신");
+  });
+
+  it("삭제 표식이 있으면 서버에 남아 있어도 지워진다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ syncId: "a", updatedAt: 1000 })] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: 4000 }],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 0);
+    assert.equal(merged.deletions.length, 1);
+  });
+
+  it("지운 뒤의 수정은 삭제를 이긴다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: 1000 }] }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ syncId: "a", title: "되살림", updatedAt: 9000 })] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+    assert.equal(merged.items[0].title, "되살림");
+  });
+
+  it("이벤트는 합집합으로 쌓이고 중복되지 않는다", async () => {
+    await resetServer();
+    const event = (id) => ({
+      syncId: id,
+      contentItemId: 1,
+      contentTitle: "제목",
+      contentType: "QUOTE",
+      eventType: "CONFIRMED",
+      trigger: "MANUAL_REFRESH",
+      occurredAt: 1000,
+    });
+
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ exposureEvents: [event("e1"), event("e2")] }) });
+    const merged = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ exposureEvents: [event("e2"), event("e3")] }) })
+    ).json();
+
+    assert.deepEqual(new Set(merged.exposureEvents.map((entry) => entry.syncId)), new Set(["e1", "e2", "e3"]));
+  });
+
+  it("syncId 없이 온 구버전 레코드도 받아들인다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [{ id: 7, type: "QUOTE", title: "구버전", body: "본문", createdAt: 1000 }] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+    assert.ok(merged.items[0].syncId, "서버가 syncId를 채워야 합니다.");
+    assert.equal(merged.items[0].updatedAt, 1000);
+  });
+
+  it("동시에 들어온 병합 요청이 서로를 덮어쓰지 않는다", async () => {
+    await resetServer();
+
+    await Promise.all(
+      ["p1", "p2", "p3", "p4", "p5"].map((id) =>
+        api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ syncId: id, title: id })] }) }),
+      ),
+    );
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.deepEqual(
+      new Set(stored.items.map((entry) => entry.syncId)),
+      new Set(["p1", "p2", "p3", "p4", "p5"]),
+    );
+  });
+
+  it("설정은 최근에 손댄 쪽을 따른다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ settings: { intervalMinutes: 60 }, settingsUpdatedAt: 1000 }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ settings: { intervalMinutes: 240 }, settingsUpdatedAt: 9000 }),
+      })
+    ).json();
+
+    assert.equal(merged.settings.intervalMinutes, 240);
   });
 });
 
