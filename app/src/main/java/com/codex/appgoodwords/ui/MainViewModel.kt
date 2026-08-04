@@ -262,6 +262,25 @@ class MainViewModel(
         container.serverSyncClient.testConnection(container.settingsStore.getServerSyncSettings())
     }
 
+    /**
+     * 서버와 레코드 단위로 합칩니다.
+     *
+     * 업로드/가져오기와 달리 어느 쪽도 통째로 지우지 않으므로 두 기기에서 각각 편집해도 살아남습니다.
+     * 그래도 로컬 DB를 교체하는 동작이라 직전 상태는 백업해 둡니다.
+     */
+    suspend fun syncWithServer(): Result<ServerSyncResult> = runCatching {
+        val syncSettings = container.settingsStore.getServerSyncSettings()
+        val merged = container.serverSyncClient.mergeSnapshot(
+            settings = syncSettings,
+            snapshot = currentSnapshot()
+        )
+        val backup = container.syncBackupStore.save(SyncBackupKind.BEFORE_MERGE, currentSnapshot())
+        val result = container.appDataImporter.importSnapshot(merged)
+        _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+        reloadSyncBackups()
+        ServerSyncResult(counts = result, backup = backup)
+    }
+
     suspend fun uploadDataToServer(): Result<ServerSyncResult> = runCatching {
         val syncSettings = container.settingsStore.getServerSyncSettings()
         // 서버 데이터를 통째로 덮어쓰기 전에 현재 서버 상태를 백업한다.
@@ -478,6 +497,9 @@ class MainViewModel(
         routines = routines.value,
         routineChecks = routineChecks.value,
         routineMemos = routineMemos.value,
-        settings = container.settingsStore.getSettings()
+        settings = container.settingsStore.getSettings(),
+        settingsUpdatedAt = container.settingsStore.getSettingsUpdatedAt(),
+        // 삭제 표식을 함께 보내야 다른 기기에서 지운 항목이 되살아나지 않는다.
+        deletions = container.database.deletionDao().getAll()
     )
 }

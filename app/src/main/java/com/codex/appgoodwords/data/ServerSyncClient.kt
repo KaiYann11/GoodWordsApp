@@ -59,6 +59,24 @@ class ServerSyncClient {
         AppDataJson.fromJsonText(response)
     }
 
+    /**
+     * 스냅샷을 서버와 합치고 합쳐진 결과를 돌려받습니다.
+     * 서버가 쓰기를 직렬화하므로 여러 기기가 동시에 보내도 서로를 덮지 않습니다.
+     */
+    suspend fun mergeSnapshot(
+        settings: ServerSyncSettings,
+        snapshot: AppDataSnapshot
+    ): AppDataSnapshot = withContext(Dispatchers.IO) {
+        val response = request(
+            method = "POST",
+            serverUrl = settings.serverUrl,
+            apiKey = settings.apiKey,
+            path = MERGE_PATH,
+            body = AppDataJson.toJson(snapshot).toString()
+        )
+        AppDataJson.fromJsonText(response)
+    }
+
     suspend fun uploadSnapshot(
         settings: ServerSyncSettings,
         snapshot: AppDataSnapshot
@@ -135,5 +153,6 @@ class ServerSyncClient {
     private companion object {
         const val HEALTH_PATH = "/api/health"
         const val SNAPSHOT_PATH = "/api/snapshot"
+        const val MERGE_PATH = "/api/sync"
     }
 }

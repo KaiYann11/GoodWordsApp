@@ -47,6 +47,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private sealed interface PendingSyncAction {
+    object Merge : PendingSyncAction
     object Upload : PendingSyncAction
     object Download : PendingSyncAction
     data class Restore(val backup: SyncBackup) : PendingSyncAction
@@ -66,6 +67,7 @@ fun SettingsScreen(
     onExportRequested: (Uri) -> Unit,
     onImportRequested: (Uri) -> Unit,
     onTestServerConnection: () -> Unit,
+    onSyncWithServer: () -> Unit,
     onUploadToServer: () -> Unit,
     onDownloadFromServer: () -> Unit,
     onRestoreBackup: (SyncBackup) -> Unit,
@@ -120,6 +122,7 @@ fun SettingsScreen(
             onConfirm = {
                 pendingSyncAction = null
                 when (action) {
+                    PendingSyncAction.Merge -> onSyncWithServer()
                     PendingSyncAction.Upload -> onUploadToServer()
                     PendingSyncAction.Download -> onDownloadFromServer()
                     is PendingSyncAction.Restore -> onRestoreBackup(action.backup)
@@ -447,11 +450,23 @@ fun SettingsScreen(
                     ) {
                         Text("연결 테스트")
                     }
+                    Button(
+                        onClick = { pendingSyncAction = PendingSyncAction.Merge },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = serverUrlText.isNotBlank()
+                    ) {
+                        Text("서버와 병합")
+                    }
                     Text(
-                        text = "업로드와 가져오기는 양쪽 데이터를 통째로 교체합니다. 먼저 연결 테스트로 주소와 API 키를 확인해 주세요.",
+                        text = "병합은 양쪽 변경을 항목 단위로 합칩니다. 여러 기기를 쓴다면 이 방식을 쓰세요.",
                         style = MaterialTheme.typography.bodySmall
                     )
-                    Button(
+                    Text(
+                        text = "아래 두 가지는 한쪽 데이터를 통째로 교체합니다. 한 기기를 기준으로 맞출 때만 쓰세요.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
                         onClick = { pendingSyncAction = PendingSyncAction.Upload },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = serverUrlText.isNotBlank()
@@ -539,6 +554,13 @@ private fun SyncConfirmDialog(
     val message: String
     val confirmLabel: String
     when (action) {
+        PendingSyncAction.Merge -> {
+            title = "서버와 병합할까요?"
+            message = "양쪽 변경을 항목 단위로 합칩니다. 같은 항목은 나중에 고친 쪽이 남고, " +
+                "지운 항목은 지워진 상태를 유지합니다. 합치기 직전 기기 데이터는 백업으로 저장됩니다."
+            confirmLabel = "병합"
+        }
+
         PendingSyncAction.Upload -> {
             title = "서버로 업로드할까요?"
             message = "서버의 기존 데이터가 이 기기의 데이터로 완전히 교체됩니다. " +

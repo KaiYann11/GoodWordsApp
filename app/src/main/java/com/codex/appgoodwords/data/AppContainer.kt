@@ -50,7 +50,8 @@ class AppContainer(
             routineDao = database.routineDao(),
             routineCheckDao = database.routineCheckDao(),
             routineMemoDao = database.routineMemoDao(),
-            linkMetadataFetcher = LinkMetadataFetcher()
+            linkMetadataFetcher = LinkMetadataFetcher(),
+            deletionDao = database.deletionDao()
         )
     }
 

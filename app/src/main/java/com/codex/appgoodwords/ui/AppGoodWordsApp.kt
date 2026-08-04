@@ -604,6 +604,18 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             },
+                            onSyncWithServer = {
+                                coroutineScope.launch {
+                                    val result = viewModel.syncWithServer()
+                                    val message = if (result.isSuccess) {
+                                        val merged = result.getOrThrow().counts
+                                        "병합 완료: 항목 ${merged.itemCount}개, 이력 ${merged.eventCount}개, 루틴 ${merged.routineCount}개. 직전 기기 데이터는 백업에 저장했습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "서버와 병합하지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
                             onUploadToServer = {
                                 coroutineScope.launch {
                                     val result = viewModel.uploadDataToServer()

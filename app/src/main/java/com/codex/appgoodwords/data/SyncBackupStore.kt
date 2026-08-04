@@ -14,6 +14,7 @@ enum class SyncBackupKind(
 ) {
     BEFORE_UPLOAD("before-upload", "업로드 전 서버 데이터"),
     BEFORE_DOWNLOAD("before-download", "가져오기 전 기기 데이터"),
+    BEFORE_MERGE("before-merge", "병합 전 기기 데이터"),
     BEFORE_RESTORE("before-restore", "복원 전 기기 데이터");
 
     companion object {

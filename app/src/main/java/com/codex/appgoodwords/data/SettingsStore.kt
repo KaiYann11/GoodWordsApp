@@ -34,6 +34,7 @@ class SettingsStore(
         val serverUrl = stringPreferencesKey("server_url")
         val serverApiKey = stringPreferencesKey("server_api_key")
         val widgetContentId = longPreferencesKey("widget_content_id")
+        val settingsUpdatedAt = longPreferencesKey("settings_updated_at")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -68,8 +69,20 @@ class SettingsStore(
 
     suspend fun getServerSyncSettings(): ServerSyncSettings = serverSyncSettingsFlow.first()
 
+    /** 설정은 레코드가 아니라 한 덩어리여서, 병합에서 최근에 손댄 쪽을 고르려면 시각이 필요하다. */
+    suspend fun getSettingsUpdatedAt(): Long = context.dataStore.data.first()[Keys.settingsUpdatedAt] ?: 0L
+
+    /** 서버에서 받은 설정을 되쓸 때는 원래 시각을 유지해야 병합이 무한히 뒤집히지 않는다. */
+    suspend fun updateSettings(settings: ReminderSettings, updatedAt: Long) {
+        updateSettings(settings)
+        context.dataStore.edit { preferences ->
+            preferences[Keys.settingsUpdatedAt] = updatedAt
+        }
+    }
+
     suspend fun updateSettings(settings: ReminderSettings) {
         context.dataStore.edit { preferences ->
+            preferences[Keys.settingsUpdatedAt] = System.currentTimeMillis()
             preferences[Keys.remindersEnabled] = settings.remindersEnabled
             preferences[Keys.intervalMinutes] = settings.effectiveIntervalMinutes
             preferences[Keys.preferredHour] = settings.preferredHour

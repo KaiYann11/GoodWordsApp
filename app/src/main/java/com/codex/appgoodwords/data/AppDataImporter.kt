@@ -39,6 +39,11 @@ class AppDataImporter(
             database.routineDao().clearAll()
             database.exposureEventDao().clearAll()
             database.contentItemDao().clearAll()
+            database.deletionDao().clearAll()
+
+            if (snapshot.deletions.isNotEmpty()) {
+                database.deletionDao().insertAll(snapshot.deletions)
+            }
 
             if (snapshot.items.isNotEmpty()) {
                 database.contentItemDao().insertAll(snapshot.items)
@@ -61,7 +66,12 @@ class AppDataImporter(
             }
         }
 
-        settingsStore.updateSettings(settings)
+        // 병합 결과를 되쓸 때 설정 시각을 그대로 유지해야 다음 병합에서 뒤집히지 않는다.
+        if (snapshot.settingsUpdatedAt > 0L) {
+            settingsStore.updateSettings(settings, snapshot.settingsUpdatedAt)
+        } else {
+            settingsStore.updateSettings(settings)
+        }
         reminderScheduler.sync(settings)
 
         return AppImportResult(
