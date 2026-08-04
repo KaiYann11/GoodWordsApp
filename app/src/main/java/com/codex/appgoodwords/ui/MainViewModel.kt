@@ -14,9 +14,11 @@ import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncSettings
+import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.work.AppNotifications
+import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +51,24 @@ class MainViewModel(
 
     val routineMemos = container.repository.observeRoutineMemos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val stats = combine(historyEvents, allItems, routineChecks) { events, items, checks ->
+        StatsCalculator.build(
+            events = events,
+            items = items,
+            routineChecks = checks,
+            today = LocalDate.now()
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        StatsCalculator.build(
+            events = emptyList(),
+            items = emptyList(),
+            routineChecks = emptyList(),
+            today = LocalDate.now()
+        )
+    )
 
     val categories = allItems
         .map { items ->

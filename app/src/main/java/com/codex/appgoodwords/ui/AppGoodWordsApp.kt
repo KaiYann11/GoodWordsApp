@@ -105,6 +105,7 @@ fun AppGoodWordsApp(
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
     val routineTodayCounts by viewModel.routineTodayCounts.collectAsStateWithLifecycle()
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
 
@@ -453,6 +454,7 @@ fun AppGoodWordsApp(
                         AppTab.HISTORY -> HistoryScreen(
                             modifier = Modifier.padding(innerPadding),
                             events = historyEvents,
+                            stats = stats,
                             onOpenItem = { itemId ->
                                 openItemDetail(AppTab.HISTORY, itemId)
                             },
