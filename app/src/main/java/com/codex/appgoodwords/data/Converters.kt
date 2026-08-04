@@ -23,6 +23,12 @@ class Converters {
     fun toExposureTrigger(value: String): ExposureTrigger = ExposureTrigger.valueOf(value)
 
     @TypeConverter
+    fun fromSyncEntityType(value: SyncEntityType): String = value.name
+
+    @TypeConverter
+    fun toSyncEntityType(value: String): SyncEntityType = SyncEntityType.valueOf(value)
+
+    @TypeConverter
     fun fromTags(value: List<String>): String = JSONArray(value).toString()
 
     @TypeConverter

@@ -12,11 +12,14 @@ data class AppDataSnapshot(
     val routines: List<RoutineEntity>,
     val routineChecks: List<RoutineCheckEntity>,
     val routineMemos: List<RoutineMemoEntity>,
-    val settings: ReminderSettings
+    val settings: ReminderSettings,
+    /** 설정은 레코드가 아니라 한 덩어리여서 마지막으로 손댄 시각으로 승자를 정한다. */
+    val settingsUpdatedAt: Long = 0L,
+    val deletions: List<DeletionEntity> = emptyList()
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 7
+    const val schemaVersion: Int = 8
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -28,6 +31,13 @@ object AppDataJson {
         .put("routineCheckCount", snapshot.routineChecks.size)
         .put("routineMemoCount", snapshot.routineMemos.size)
         .put("settings", snapshot.settings.toJson())
+        .put("settingsUpdatedAt", snapshot.settingsUpdatedAt)
+        .put(
+            "deletions",
+            JSONArray().apply {
+                snapshot.deletions.forEach { deletion -> put(deletion.toJson()) }
+            }
+        )
         .put(
             "items",
             JSONArray().apply {
@@ -69,8 +79,36 @@ object AppDataJson {
             routines = payload.optJSONArray("routines").toRoutines(),
             routineChecks = payload.optJSONArray("routineChecks").toRoutineChecks(),
             routineMemos = payload.optJSONArray("routineMemos").toRoutineMemos(),
-            settings = settings
+            settings = settings,
+            settingsUpdatedAt = payload.optLong("settingsUpdatedAt", 0L),
+            deletions = payload.optJSONArray("deletions").toDeletions()
         )
+    }
+
+    private fun DeletionEntity.toJson(): JSONObject = JSONObject()
+        .put("syncId", syncId)
+        .put("entityType", entityType.name)
+        .put("deletedAt", deletedAt)
+        .put("deletedAtText", formatTimestamp(deletedAt))
+
+    private fun JSONArray?.toDeletions(): List<DeletionEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val deletion = optJSONObject(index) ?: continue
+                val syncId = deletion.optString("syncId").trim()
+                val entityType = SyncEntityType.fromNameOrNull(deletion.optString("entityType"))
+                if (syncId.isBlank() || entityType == null) continue
+
+                add(
+                    DeletionEntity(
+                        syncId = syncId,
+                        entityType = entityType,
+                        deletedAt = deletion.optLong("deletedAt", 0L)
+                    )
+                )
+            }
+        }
     }
 
     private fun ReminderSettings.toJson(): JSONObject = JSONObject()
@@ -90,6 +128,9 @@ object AppDataJson {
 
     private fun ContentItemEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("lastSurfacedAt", lastSurfacedAt ?: JSONObject.NULL)
         .put("type", type.name)
         .put("title", title)
         .put("body", body)
@@ -109,6 +150,7 @@ object AppDataJson {
 
     private fun ExposureEventEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
+        .put("syncId", syncId)
         .put("contentItemId", contentItemId)
         .put("contentTitle", contentTitle)
         .put("contentType", contentType.name)
@@ -119,6 +161,8 @@ object AppDataJson {
 
     private fun RoutineEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
         .put("title", title)
         .put("note", note)
         .put("category", category)
@@ -128,6 +172,7 @@ object AppDataJson {
 
     private fun RoutineCheckEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
+        .put("syncId", syncId)
         .put("routineId", routineId)
         .put("routineTitle", routineTitle)
         .put("checkedAt", checkedAt)
@@ -135,6 +180,8 @@ object AppDataJson {
 
     private fun RoutineMemoEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
         .put("routineId", routineId)
         .put("routineTitle", routineTitle)
         .put("body", body)
@@ -168,6 +215,12 @@ object AppDataJson {
                 add(
                     ContentItemEntity(
                         id = item.optLong("id", 0L),
+                        // 구버전 파일이나 구버전 서버가 준 레코드는 syncId가 없어 새로 부여한다.
+                        syncId = SyncIdentity.orNew(item.optString("syncId")),
+                        updatedAt = item.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: item.optLong("createdAt", 0L),
+                        lastSurfacedAt = item.optNullableLong("lastSurfacedAt"),
                         type = item.optString("type").toEnumOrDefault(ContentType.QUOTE),
                         title = item.optString("title"),
                         body = item.optString("body"),
@@ -196,6 +249,7 @@ object AppDataJson {
                 add(
                     ExposureEventEntity(
                         id = event.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(event.optString("syncId")),
                         contentItemId = event.optLong("contentItemId", 0L),
                         contentTitle = event.optString("contentTitle"),
                         contentType = event.optString("contentType").toEnumOrDefault(ContentType.QUOTE),
@@ -216,6 +270,10 @@ object AppDataJson {
                 add(
                     RoutineEntity(
                         id = routine.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(routine.optString("syncId")),
+                        updatedAt = routine.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: routine.optLong("createdAt", 0L),
                         title = routine.optString("title"),
                         note = routine.optString("note"),
                         category = routine.optString("category"),
@@ -235,6 +293,7 @@ object AppDataJson {
                 add(
                     RoutineCheckEntity(
                         id = check.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(check.optString("syncId")),
                         routineId = check.optLong("routineId", 0L),
                         routineTitle = check.optString("routineTitle"),
                         checkedAt = check.optLong("checkedAt", System.currentTimeMillis())
@@ -256,6 +315,10 @@ object AppDataJson {
                 add(
                     RoutineMemoEntity(
                         id = memo.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(memo.optString("syncId")),
+                        updatedAt = memo.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: memo.optLong("createdAt", 0L),
                         routineId = routineId,
                         routineTitle = memo.optString("routineTitle"),
                         body = body,

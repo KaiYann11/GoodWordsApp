@@ -8,11 +8,14 @@ import androidx.room.PrimaryKey
     tableName = "routine_memos",
     indices = [
         Index("createdAt"),
-        Index("routineId", "createdAt")
+        Index("routineId", "createdAt"),
+        Index(value = ["syncId"], unique = true)
     ]
 )
 data class RoutineMemoEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val syncId: String = SyncIdentity.newId(),
+    val updatedAt: Long = System.currentTimeMillis(),
     val routineId: Long,
     val routineTitle: String,
     val body: String,

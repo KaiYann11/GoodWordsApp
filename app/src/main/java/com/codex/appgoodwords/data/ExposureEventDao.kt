@@ -72,6 +72,12 @@ interface ExposureEventDao {
         end: Long
     ): Int
 
+    @Query("SELECT * FROM exposure_events WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): ExposureEventEntity?
+
+    @Query("SELECT * FROM exposure_events")
+    suspend fun getAll(): List<ExposureEventEntity>
+
     @Query("DELETE FROM exposure_events WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>): Int
 

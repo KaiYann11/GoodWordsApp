@@ -10,8 +10,21 @@ class AppRepository(
     private val routineDao: RoutineDao,
     private val routineCheckDao: RoutineCheckDao,
     private val routineMemoDao: RoutineMemoDao,
-    private val linkMetadataFetcher: LinkMetadataFetcher
+    private val linkMetadataFetcher: LinkMetadataFetcher,
+    private val deletionDao: DeletionDao? = null
 ) {
+    /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
+    private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
+        if (syncId.isBlank()) return
+        deletionDao?.insert(
+            DeletionEntity(
+                syncId = syncId,
+                entityType = entityType,
+                deletedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     fun observeAllContent(): Flow<List<ContentItemEntity>> = contentItemDao.observeAll()
 
     fun observeVideos(): Flow<List<ContentItemEntity>> = contentItemDao.observeByType(ContentType.VIDEO)
@@ -33,6 +46,9 @@ class AppRepository(
         contentItemDao.insert(
             ContentItemEntity(
                 id = if (draft.id == 0L) 0 else draft.id,
+                // 수정해도 syncId는 유지해야 다른 기기에서 같은 항목으로 인식된다.
+                syncId = existing?.syncId ?: SyncIdentity.newId(),
+                updatedAt = System.currentTimeMillis(),
                 type = draft.type,
                 title = draft.title.trim(),
                 body = draft.body.trim(),
@@ -45,6 +61,7 @@ class AppRepository(
                 videoUris = draft.videoUris.distinct(),
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 lastShownAt = existing?.lastShownAt,
+                lastSurfacedAt = existing?.lastSurfacedAt,
                 showCount = existing?.showCount ?: 0,
                 isFavorite = draft.isFavorite
             )
@@ -52,7 +69,9 @@ class AppRepository(
     }
 
     suspend fun deleteContent(id: Long) {
+        val existing = contentItemDao.getById(id)
         contentItemDao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.CONTENT_ITEM) }
     }
 
     suspend fun fetchLinkMetadata(url: String): LinkMetadata = linkMetadataFetcher.fetch(url)
@@ -75,8 +94,7 @@ class AppRepository(
     private suspend fun pickCandidate(category: String): ContentItemEntity? {
         return contentItemDao.pickLeastRecentlySurfaced(
             category = category,
-            poolSize = SURFACE_POOL_SIZE,
-            surfacedType = ExposureEventType.SURFACED
+            poolSize = SURFACE_POOL_SIZE
         )
     }
 
@@ -85,6 +103,8 @@ class AppRepository(
         trigger: ExposureTrigger
     ) {
         val surfacedAt = System.currentTimeMillis()
+        // 순환 기준을 항목에 직접 남긴다. 이력을 지워도 순환이 유지되어야 한다.
+        contentItemDao.markSurfaced(item.id, surfacedAt)
         exposureEventDao.insert(
             ExposureEventEntity(
                 contentItemId = item.id,
@@ -175,16 +195,23 @@ class AppRepository(
 
     suspend fun clearTodayConfirmed(): Int {
         val (start, end) = todayRange()
-        return exposureEventDao.deleteEventsByTypeForRange(
+        val doomed = exposureEventDao.getEventsBetween(start, end)
+            .filter { it.eventType == ExposureEventType.CONFIRMED }
+        val removed = exposureEventDao.deleteEventsByTypeForRange(
             eventType = ExposureEventType.CONFIRMED,
             start = start,
             end = end
         )
+        doomed.forEach { recordDeletion(it.syncId, SyncEntityType.EXPOSURE_EVENT) }
+        return removed
     }
 
     suspend fun deleteExposureEvents(ids: Collection<Long>): Int {
         if (ids.isEmpty()) return 0
-        return exposureEventDao.deleteByIds(ids.toList())
+        val doomed = ids.mapNotNull { exposureEventDao.getById(it) }
+        val removed = exposureEventDao.deleteByIds(ids.toList())
+        doomed.forEach { recordDeletion(it.syncId, SyncEntityType.EXPOSURE_EVENT) }
+        return removed
     }
 
     suspend fun getTodayConfirmedIds(): Set<Long> {
@@ -201,6 +228,8 @@ class AppRepository(
         routineDao.insert(
             RoutineEntity(
                 id = if (draft.id == 0L) 0 else draft.id,
+                syncId = existing?.syncId ?: SyncIdentity.newId(),
+                updatedAt = System.currentTimeMillis(),
                 title = draft.title.trim(),
                 note = draft.note.trim(),
                 category = draft.category.trim(),
@@ -211,7 +240,14 @@ class AppRepository(
     }
 
     suspend fun deleteRoutine(id: Long) {
+        val existing = routineDao.getById(id)
+        // 루틴을 지우면 딸린 체크와 메모도 함께 사라지므로 표식을 함께 남긴다.
+        val checks = routineCheckDao.getByRoutineId(id)
+        val memos = routineMemoDao.getByRoutineId(id)
         routineDao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.ROUTINE) }
+        checks.forEach { recordDeletion(it.syncId, SyncEntityType.ROUTINE_CHECK) }
+        memos.forEach { recordDeletion(it.syncId, SyncEntityType.ROUTINE_MEMO) }
     }
 
     suspend fun getRandomReminderRoutine(): RoutineEntity? {
@@ -246,7 +282,10 @@ class AppRepository(
     }
 
     suspend fun deleteRoutineMemo(id: Long): Int {
-        return routineMemoDao.deleteById(id)
+        val existing = routineMemoDao.getById(id)
+        val removed = routineMemoDao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.ROUTINE_MEMO) }
+        return removed
     }
 
     suspend fun getTodayRoutineCheckCount(routineId: Long): Int {
@@ -268,15 +307,15 @@ class AppRepository(
     }
 
     suspend fun setFavorite(id: Long, isFavorite: Boolean) {
-        contentItemDao.updateFavorite(id, isFavorite)
+        contentItemDao.updateFavorite(id, isFavorite, System.currentTimeMillis())
     }
 
     suspend fun resetViewCounts(): Int {
-        return contentItemDao.resetReadCounts()
+        return contentItemDao.resetReadCounts(System.currentTimeMillis())
     }
 
     suspend fun removeCategory(category: String): Int {
-        return contentItemDao.clearCategory(category.trim())
+        return contentItemDao.clearCategory(category.trim(), System.currentTimeMillis())
     }
 
     suspend fun seedDefaultsIfNeeded() {

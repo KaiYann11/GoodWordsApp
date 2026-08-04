@@ -30,6 +30,12 @@ interface RoutineCheckDao {
     )
     suspend fun countForRange(routineId: Long, start: Long, end: Long): Int
 
+    @Query("SELECT * FROM routine_checks")
+    suspend fun getAll(): List<RoutineCheckEntity>
+
+    @Query("SELECT * FROM routine_checks WHERE routineId = :routineId")
+    suspend fun getByRoutineId(routineId: Long): List<RoutineCheckEntity>
+
     @Query("DELETE FROM routine_checks")
     suspend fun clearAll()
 }

@@ -72,6 +72,59 @@ class AppDataJsonTest {
     }
 
     @Test
+    fun roundTrip_preservesSyncFieldsAndDeletions() {
+        val snapshot = fullSnapshot().copy(
+            settingsUpdatedAt = 1_700_001_000_000L,
+            deletions = listOf(
+                DeletionEntity("gone-1", SyncEntityType.CONTENT_ITEM, 1_700_001_100_000L),
+                DeletionEntity("gone-2", SyncEntityType.ROUTINE_MEMO, 1_700_001_200_000L)
+            )
+        )
+
+        val restored = AppDataJson.fromJsonText(AppDataJson.toJson(snapshot).toString())
+
+        assertEquals("item-sync-1", restored.items.single().syncId)
+        assertEquals(1_700_000_400_000L, restored.items.single().updatedAt)
+        assertEquals(1_700_000_450_000L, restored.items.single().lastSurfacedAt)
+        assertEquals("event-sync-1", restored.events.single().syncId)
+        assertEquals("routine-sync-1", restored.routines.single().syncId)
+        assertEquals("check-sync-1", restored.routineChecks.single().syncId)
+        assertEquals("memo-sync-1", restored.routineMemos.single().syncId)
+        assertEquals(snapshot.settingsUpdatedAt, restored.settingsUpdatedAt)
+        assertEquals(snapshot.deletions, restored.deletions)
+    }
+
+    @Test
+    fun fromJsonText_legacyRecordsGetSyncIdsAndFallBackToCreatedAt() {
+        // 구버전 내보내기 파일에는 syncId와 updatedAt이 없다.
+        val json = """
+            {"items": [{"id": 1, "type": "QUOTE", "title": "t", "body": "b", "createdAt": 1700000000000}]}
+        """.trimIndent()
+
+        val restored = AppDataJson.fromJsonText(json)
+
+        val item = restored.items.single()
+        assertTrue("syncId가 새로 부여되어야 합니다.", item.syncId.isNotBlank())
+        assertEquals(1_700_000_000_000L, item.updatedAt)
+        assertNull(item.lastSurfacedAt)
+    }
+
+    @Test
+    fun fromJsonText_skipsDeletionsMissingIdOrType() {
+        val json = """
+            {"deletions": [
+              {"syncId": "ok", "entityType": "CONTENT_ITEM", "deletedAt": 10},
+              {"syncId": "", "entityType": "CONTENT_ITEM", "deletedAt": 11},
+              {"syncId": "bad-type", "entityType": "WHAT_IS_THIS", "deletedAt": 12}
+            ]}
+        """.trimIndent()
+
+        val restored = AppDataJson.fromJsonText(json)
+
+        assertEquals(listOf("ok"), restored.deletions.map { it.syncId })
+    }
+
+    @Test
     fun toJson_writesSchemaVersionAndCounts() {
         val snapshot = fullSnapshot()
 
@@ -169,6 +222,10 @@ class AppDataJsonTest {
         items = listOf(
             ContentItemEntity(
                 id = 11L,
+                // syncId/updatedAt 기본값은 랜덤·현재시각이라 픽스처에서는 고정해야 비교가 성립한다.
+                syncId = "item-sync-1",
+                updatedAt = 1_700_000_400_000L,
+                lastSurfacedAt = 1_700_000_450_000L,
                 type = ContentType.LINK,
                 title = "기록하는 습관",
                 body = "매일 한 문장씩 남긴다.",
@@ -188,6 +245,7 @@ class AppDataJsonTest {
         events = listOf(
             ExposureEventEntity(
                 id = 21L,
+                syncId = "event-sync-1",
                 contentItemId = 11L,
                 contentTitle = "기록하는 습관",
                 contentType = ContentType.LINK,
@@ -199,6 +257,8 @@ class AppDataJsonTest {
         routines = listOf(
             RoutineEntity(
                 id = 31L,
+                syncId = "routine-sync-1",
+                updatedAt = 1_700_000_750_000L,
                 title = "아침 스트레칭",
                 note = "10분",
                 category = "건강",
@@ -209,6 +269,7 @@ class AppDataJsonTest {
         routineChecks = listOf(
             RoutineCheckEntity(
                 id = 41L,
+                syncId = "check-sync-1",
                 routineId = 31L,
                 routineTitle = "아침 스트레칭",
                 checkedAt = 1_700_000_800_000L
@@ -217,6 +278,8 @@ class AppDataJsonTest {
         routineMemos = listOf(
             RoutineMemoEntity(
                 id = 51L,
+                syncId = "memo-sync-1",
+                updatedAt = 1_700_000_950_000L,
                 routineId = 31L,
                 routineTitle = "아침 스트레칭",
                 body = "허리가 한결 편해졌다.",

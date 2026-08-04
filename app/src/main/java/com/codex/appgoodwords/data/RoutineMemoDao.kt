@@ -17,6 +17,15 @@ interface RoutineMemoDao {
     @Query("SELECT * FROM routine_memos ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<RoutineMemoEntity>>
 
+    @Query("SELECT * FROM routine_memos WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): RoutineMemoEntity?
+
+    @Query("SELECT * FROM routine_memos")
+    suspend fun getAll(): List<RoutineMemoEntity>
+
+    @Query("SELECT * FROM routine_memos WHERE routineId = :routineId")
+    suspend fun getByRoutineId(routineId: Long): List<RoutineMemoEntity>
+
     @Query("DELETE FROM routine_memos WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 

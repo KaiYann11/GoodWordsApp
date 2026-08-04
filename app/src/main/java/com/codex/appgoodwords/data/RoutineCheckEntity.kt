@@ -8,11 +8,14 @@ import androidx.room.PrimaryKey
     tableName = "routine_checks",
     indices = [
         Index("checkedAt"),
-        Index("routineId", "checkedAt")
+        Index("routineId", "checkedAt"),
+        Index(value = ["syncId"], unique = true)
     ]
 )
 data class RoutineCheckEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    // 체크는 한 번 기록되면 바뀌지 않으므로 updatedAt 없이 식별자만 둔다.
+    val syncId: String = SyncIdentity.newId(),
     val routineId: Long,
     val routineTitle: String,
     val checkedAt: Long = System.currentTimeMillis()
