@@ -7,7 +7,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -63,16 +67,19 @@ fun LibraryScreen(
     var selectedCategory by rememberSaveable { mutableStateOf("") }
     var selectedFilter by rememberSaveable { mutableStateOf(ContentFilter.ALL.name) }
     var sortMode by rememberSaveable { mutableStateOf(RankSort.NEWEST.name) }
+    // 즐겨찾기는 유형과 별개 축이라 "즐겨찾기 + 글귀"처럼 겹쳐 쓸 수 있게 별도 토글로 둔다.
+    var favoritesOnly by rememberSaveable { mutableStateOf(false) }
 
     val activeFilter = ContentFilter.valueOf(selectedFilter)
     val filteredItems = items.filter { item ->
         val matchesType = activeFilter.matches(item)
         val matchesCategory = selectedCategory.isBlank() || item.category == selectedCategory
+        val matchesFavorite = !favoritesOnly || item.isFavorite
         val haystack = listOf(item.title, item.body, item.author, item.category, item.tags.joinToString(" "))
             .joinToString(" ")
             .lowercase()
         val matchesQuery = query.isBlank() || haystack.contains(query.trim().lowercase())
-        matchesType && matchesCategory && matchesQuery
+        matchesType && matchesCategory && matchesFavorite && matchesQuery
     }
 
     val sortedItems = when (RankSort.valueOf(sortMode)) {
@@ -109,6 +116,20 @@ fun LibraryScreen(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("검색") },
                 supportingText = { Text("제목, 본문, 태그, 카테고리로 검색") }
+            )
+        }
+
+        item {
+            FilterChip(
+                selected = favoritesOnly,
+                onClick = { favoritesOnly = !favoritesOnly },
+                label = { Text("즐겨찾기만") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (favoritesOnly) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                        contentDescription = null
+                    )
+                }
             )
         }
 

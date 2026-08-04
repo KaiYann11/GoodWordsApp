@@ -58,16 +58,24 @@ class AppRepository(
     suspend fun fetchLinkMetadata(url: String): LinkMetadata = linkMetadataFetcher.fetch(url)
 
     suspend fun getRandomContent(category: String): ContentItemEntity? {
-        return contentItemDao.getRandomByCategory(category)
+        return pickCandidate(category)
     }
 
     suspend fun pickFeaturedContent(
         category: String,
         trigger: ExposureTrigger
     ): ContentItemEntity? {
-        val item = contentItemDao.getRandomByCategory(category) ?: return null
+        val item = pickCandidate(category) ?: return null
         recordContentSurfaced(item, trigger)
         return item
+    }
+
+    private suspend fun pickCandidate(category: String): ContentItemEntity? {
+        return contentItemDao.pickLeastRecentlySurfaced(
+            category = category,
+            poolSize = SURFACE_POOL_SIZE,
+            surfacedType = ExposureEventType.SURFACED
+        )
     }
 
     suspend fun recordContentSurfaced(
@@ -343,5 +351,10 @@ class AppRepository(
         val todayStart = LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
         val tomorrowStart = LocalDate.now(zoneId).plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
         return todayStart to (tomorrowStart - 1)
+    }
+
+    companion object {
+        /** 가장 오래 안 나온 항목만 뽑으면 순서가 뻔해지므로 상위 후보 몇 개 중에서 무작위로 고른다. */
+        const val SURFACE_POOL_SIZE = 5
     }
 }

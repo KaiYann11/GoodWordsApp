@@ -32,12 +32,33 @@ interface ContentItemDao {
     @Query("SELECT COUNT(*) FROM content_items")
     suspend fun count(): Int
 
+    /**
+     * 노출 순환용 선택.
+     *
+     * 마지막으로 노출(SURFACED)된 지 가장 오래된 후보 [poolSize]개를 추린 뒤 그 안에서 무작위로 하나를 고른다.
+     * 순수 RANDOM()과 달리 항목이 늘어도 특정 항목이 영영 안 나오는 일이 없고,
+     * 후보를 여러 개 두어 순서가 기계적으로 반복되지도 않는다.
+     *
+     * showCount는 "확인한 횟수"라 노출 이력을 대신할 수 없어 exposure_events를 기준으로 쓴다.
+     * 한 번도 노출되지 않은 항목은 COALESCE로 0이 되어 가장 먼저 뽑힌다.
+     */
     @Query(
-        "SELECT * FROM content_items " +
-            "WHERE (:category = '' OR category = :category) " +
-            "ORDER BY RANDOM() LIMIT 1"
+        "SELECT * FROM (" +
+            "SELECT items.* FROM content_items AS items " +
+            "LEFT JOIN (" +
+            "SELECT contentItemId, MAX(occurredAt) AS lastSurfacedAt FROM exposure_events " +
+            "WHERE eventType = :surfacedType GROUP BY contentItemId" +
+            ") AS surfaced ON surfaced.contentItemId = items.id " +
+            "WHERE (:category = '' OR items.category = :category) " +
+            "ORDER BY COALESCE(surfaced.lastSurfacedAt, 0) ASC, items.showCount ASC " +
+            "LIMIT :poolSize" +
+            ") ORDER BY RANDOM() LIMIT 1"
     )
-    suspend fun getRandomByCategory(category: String): ContentItemEntity?
+    suspend fun pickLeastRecentlySurfaced(
+        category: String,
+        poolSize: Int,
+        surfacedType: ExposureEventType
+    ): ContentItemEntity?
 
     @Query("UPDATE content_items SET lastShownAt = :readAt, showCount = showCount + 1 WHERE id = :id")
     suspend fun markRead(id: Long, readAt: Long)
