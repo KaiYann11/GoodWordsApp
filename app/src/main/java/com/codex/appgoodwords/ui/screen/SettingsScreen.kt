@@ -418,7 +418,9 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("서버 주소") },
-                        supportingText = { Text("예: http://10.0.2.2:8765 또는 http://192.168.0.10:8765") },
+                        supportingText = {
+                            Text("예: http://192.168.0.10:8765 (평문 http는 같은 네트워크 주소만, 외부는 https 필요)")
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true
                     )

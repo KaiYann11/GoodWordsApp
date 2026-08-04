@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  서버 동기화 대상이 LAN의 임의 사설 IP(http://192.168.x.x:8765 등)라
+  평문 http를 전면 차단하면 기능이 깨집니다. network security config는
+  CIDR 대역을 표현할 수 없어 "사설 대역만 허용"을 여기에 쓸 수 없으므로,
+  평문 허용은 유지하고 실제 제한은 ServerUrlPolicy가 담당합니다.
+
+  사용자가 설치한 CA는 신뢰하지 않습니다(시스템 CA만 사용).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

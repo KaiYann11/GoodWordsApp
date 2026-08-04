@@ -130,14 +130,7 @@ class ServerSyncClient {
         else -> "서버 요청 실패($responseCode): ${responseText.ifBlank { "응답 없음" }}"
     }
 
-    private fun normalizeServerUrl(serverUrl: String): String {
-        val normalized = serverUrl.trim().trimEnd('/')
-        require(normalized.isNotBlank()) { "서버 주소를 입력해 주세요." }
-        require(normalized.startsWith("http://") || normalized.startsWith("https://")) {
-            "서버 주소는 http:// 또는 https://로 시작해야 합니다."
-        }
-        return normalized
-    }
+    private fun normalizeServerUrl(serverUrl: String): String = ServerUrlPolicy.normalize(serverUrl)
 
     private companion object {
         const val HEALTH_PATH = "/api/health"

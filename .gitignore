@@ -5,6 +5,9 @@ app/build/
 .idea/
 local.properties
 *.iml
+keystore.properties
+*.jks
+*.keystore
 _tmp_*
 server/*.db
 server/*.db-*
