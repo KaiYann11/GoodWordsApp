@@ -28,10 +28,16 @@ class AppDataImporter(
         return importSnapshot(AppDataJson.fromJsonText(jsonText))
     }
 
-    suspend fun importSnapshot(snapshot: AppDataSnapshot): AppImportResult {
+    suspend fun importSnapshot(incoming: AppDataSnapshot): AppImportResult {
+        // 병합 결과에는 서로 다른 기기의 같은 숫자 id가 섞여 있어, 그대로 넣으면 서로를 덮어쓴다.
+        val snapshot = SnapshotReindexer.reindex(incoming)
         val settings = snapshot.settings.copy(
             intervalMinutes = snapshot.settings.effectiveIntervalMinutes
         )
+        // id를 다시 매기므로, 위젯이 보던 글귀는 번호가 아니라 syncId로 따라가야 그대로 남는다.
+        val widgetItemSyncId = settingsStore.getWidgetContentId()
+            .takeIf { it != 0L }
+            ?.let { database.contentItemDao().getById(it)?.syncId }
 
         database.withTransaction {
             database.routineMemoDao().clearAll()
@@ -65,6 +71,10 @@ class AppDataImporter(
                 database.routineMemoDao().insertAll(snapshot.routineMemos)
             }
         }
+
+        settingsStore.setWidgetContentId(
+            snapshot.items.firstOrNull { it.syncId == widgetItemSyncId }?.id ?: 0L
+        )
 
         // 병합 결과를 되쓸 때 설정 시각을 그대로 유지해야 다음 병합에서 뒤집히지 않는다.
         if (snapshot.settingsUpdatedAt > 0L) {

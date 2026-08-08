@@ -247,6 +247,7 @@ class AppDataJsonTest {
                 id = 21L,
                 syncId = "event-sync-1",
                 contentItemId = 11L,
+                contentItemSyncId = "item-sync-1",
                 contentTitle = "기록하는 습관",
                 contentType = ContentType.LINK,
                 eventType = ExposureEventType.CONFIRMED,
@@ -271,6 +272,7 @@ class AppDataJsonTest {
                 id = 41L,
                 syncId = "check-sync-1",
                 routineId = 31L,
+                routineSyncId = "routine-sync-1",
                 routineTitle = "아침 스트레칭",
                 checkedAt = 1_700_000_800_000L
             )
@@ -281,6 +283,7 @@ class AppDataJsonTest {
                 syncId = "memo-sync-1",
                 updatedAt = 1_700_000_950_000L,
                 routineId = 31L,
+                routineSyncId = "routine-sync-1",
                 routineTitle = "아침 스트레칭",
                 body = "허리가 한결 편해졌다.",
                 createdAt = 1_700_000_900_000L

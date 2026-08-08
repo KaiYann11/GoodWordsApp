@@ -108,6 +108,7 @@ class AppRepository(
         exposureEventDao.insert(
             ExposureEventEntity(
                 contentItemId = item.id,
+                contentItemSyncId = item.syncId,
                 contentTitle = item.title.ifBlank { item.body.take(24) },
                 contentType = item.type,
                 eventType = ExposureEventType.SURFACED,
@@ -127,6 +128,7 @@ class AppRepository(
         exposureEventDao.insert(
             ExposureEventEntity(
                 contentItemId = item.id,
+                contentItemSyncId = item.syncId,
                 contentTitle = item.title.ifBlank { item.body.take(24) },
                 contentType = item.type,
                 eventType = ExposureEventType.SHOWN,
@@ -158,6 +160,7 @@ class AppRepository(
         exposureEventDao.insert(
             ExposureEventEntity(
                 contentItemId = item.id,
+                contentItemSyncId = item.syncId,
                 contentTitle = item.title.ifBlank { item.body.take(24) },
                 contentType = item.type,
                 eventType = ExposureEventType.CONFIRMED,
@@ -260,6 +263,7 @@ class AppRepository(
         routineCheckDao.insert(
             RoutineCheckEntity(
                 routineId = routine.id,
+                routineSyncId = routine.syncId,
                 routineTitle = routine.title,
                 checkedAt = checkedAt
             )
@@ -275,6 +279,7 @@ class AppRepository(
         return routineMemoDao.insert(
             RoutineMemoEntity(
                 routineId = routine.id,
+                routineSyncId = routine.syncId,
                 routineTitle = routine.title,
                 body = normalized
             )

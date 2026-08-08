@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RoutineMemoEntity::class,
         DeletionEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -203,6 +203,40 @@ abstract class AppDatabase : RoomDatabase() {
                         ")"
                 )
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_deletions_deletedAt ON deletions(deletedAt)")
+            }
+        }
+
+        /**
+         * 자식 레코드가 부모를 기기와 무관하게 가리키도록 syncId 참조를 추가합니다.
+         *
+         * 8에서는 이벤트가 부모를 contentItemId(기기마다 따로 증가하는 값)로만 가리켰습니다.
+         * 그래서 두 기기를 병합하면 A기기 id=1과 B기기 id=1이 한 DB에 함께 들어와,
+         * 이벤트가 엉뚱한 항목에 붙고 같은 id끼리 서로를 덮어썼습니다.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE exposure_events ADD COLUMN contentItemSyncId TEXT NOT NULL DEFAULT ''"
+                )
+                database.execSQL("ALTER TABLE routine_checks ADD COLUMN routineSyncId TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE routine_memos ADD COLUMN routineSyncId TEXT NOT NULL DEFAULT ''")
+
+                // 한 기기 안에서는 숫자 id가 정확하므로, 지금 참조를 syncId로 옮겨 둔다.
+                database.execSQL(
+                    "UPDATE exposure_events SET contentItemSyncId = COALESCE((" +
+                        "SELECT syncId FROM content_items WHERE content_items.id = exposure_events.contentItemId" +
+                        "), '')"
+                )
+                database.execSQL(
+                    "UPDATE routine_checks SET routineSyncId = COALESCE((" +
+                        "SELECT syncId FROM routines WHERE routines.id = routine_checks.routineId" +
+                        "), '')"
+                )
+                database.execSQL(
+                    "UPDATE routine_memos SET routineSyncId = COALESCE((" +
+                        "SELECT syncId FROM routines WHERE routines.id = routine_memos.routineId" +
+                        "), '')"
+                )
             }
         }
     }

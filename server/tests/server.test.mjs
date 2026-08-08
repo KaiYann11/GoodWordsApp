@@ -190,6 +190,125 @@ describe("병합 동기화", () => {
     assert.deepEqual(new Set(merged.items.map((entry) => entry.syncId)), new Set(["a", "b"]));
   });
 
+  it("두 기기가 같은 숫자 id를 써도 서로 덮어쓰지 않는다", async () => {
+    // 숫자 id는 기기마다 따로 증가하므로 A기기 id=1과 B기기 id=1은 다른 항목이다.
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ id: 1, syncId: "a", title: "A기기" })] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ id: 1, syncId: "b", title: "B기기" })] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 2);
+    assert.equal(new Set(merged.items.map((entry) => entry.id)).size, 2, "id가 겹치면 안 된다");
+  });
+
+  it("id를 다시 매겨도 이벤트는 원래 항목을 가리킨다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        items: [item({ id: 1, syncId: "a", title: "A기기" })],
+        exposureEvents: [
+          {
+            id: 1,
+            syncId: "event-a",
+            contentItemId: 1,
+            contentItemSyncId: "a",
+            contentTitle: "A기기",
+            contentType: "QUOTE",
+            eventType: "SURFACED",
+            trigger: "MANUAL_REFRESH",
+            occurredAt: 1000,
+          },
+        ],
+      }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [item({ id: 1, syncId: "b", title: "B기기" })],
+          exposureEvents: [
+            {
+              id: 1,
+              syncId: "event-b",
+              contentItemId: 1,
+              contentItemSyncId: "b",
+              contentTitle: "B기기",
+              contentType: "QUOTE",
+              eventType: "SURFACED",
+              trigger: "MANUAL_REFRESH",
+              occurredAt: 2000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    const itemIdBySyncId = new Map(merged.items.map((entry) => [entry.syncId, entry.id]));
+    for (const event of merged.exposureEvents) {
+      assert.equal(event.contentItemId, itemIdBySyncId.get(event.contentItemSyncId), "이벤트가 다른 항목에 붙었다");
+    }
+  });
+
+  it("구버전 레코드의 항목 참조를 잃지 않는다", async () => {
+    // 9 이전 앱은 contentItemSyncId 없이 숫자 id로만 항목을 가리킨다.
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [item({ id: 5, syncId: "a", title: "구버전 항목" })],
+          exposureEvents: [
+            {
+              id: 1,
+              syncId: "event-old",
+              contentItemId: 5,
+              contentTitle: "구버전 항목",
+              contentType: "QUOTE",
+              eventType: "SURFACED",
+              trigger: "MANUAL_REFRESH",
+              occurredAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.exposureEvents[0].contentItemSyncId, "a", "참조를 syncId로 옮겨 둬야 한다");
+    assert.equal(merged.exposureEvents[0].contentItemId, merged.items[0].id);
+  });
+
+  it("루틴을 잃은 메모는 남기지 않는다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          routineMemos: [
+            {
+              id: 1,
+              syncId: "memo-1",
+              updatedAt: 1000,
+              routineId: 9,
+              routineSyncId: "사라진-루틴",
+              routineTitle: "루틴",
+              body: "메모",
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.routineMemos.length, 0);
+  });
+
   it("같은 레코드는 updatedAt이 최신인 쪽이 남는다", async () => {
     await resetServer();
     await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ title: "예전", updatedAt: 1000 })] }) });

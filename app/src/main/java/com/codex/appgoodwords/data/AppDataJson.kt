@@ -19,7 +19,7 @@ data class AppDataSnapshot(
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 8
+    const val schemaVersion: Int = 9
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -152,6 +152,7 @@ object AppDataJson {
         .put("id", id)
         .put("syncId", syncId)
         .put("contentItemId", contentItemId)
+        .put("contentItemSyncId", contentItemSyncId)
         .put("contentTitle", contentTitle)
         .put("contentType", contentType.name)
         .put("eventType", eventType.name)
@@ -174,6 +175,7 @@ object AppDataJson {
         .put("id", id)
         .put("syncId", syncId)
         .put("routineId", routineId)
+        .put("routineSyncId", routineSyncId)
         .put("routineTitle", routineTitle)
         .put("checkedAt", checkedAt)
         .put("checkedAtText", formatTimestamp(checkedAt))
@@ -183,6 +185,7 @@ object AppDataJson {
         .put("syncId", syncId)
         .put("updatedAt", updatedAt)
         .put("routineId", routineId)
+        .put("routineSyncId", routineSyncId)
         .put("routineTitle", routineTitle)
         .put("body", body)
         .put("createdAt", createdAt)
@@ -251,6 +254,7 @@ object AppDataJson {
                         id = event.optLong("id", 0L),
                         syncId = SyncIdentity.orNew(event.optString("syncId")),
                         contentItemId = event.optLong("contentItemId", 0L),
+                        contentItemSyncId = event.optString("contentItemSyncId").trim(),
                         contentTitle = event.optString("contentTitle"),
                         contentType = event.optString("contentType").toEnumOrDefault(ContentType.QUOTE),
                         eventType = event.optString("eventType").toEnumOrDefault(ExposureEventType.SHOWN),
@@ -295,6 +299,7 @@ object AppDataJson {
                         id = check.optLong("id", 0L),
                         syncId = SyncIdentity.orNew(check.optString("syncId")),
                         routineId = check.optLong("routineId", 0L),
+                        routineSyncId = check.optString("routineSyncId").trim(),
                         routineTitle = check.optString("routineTitle"),
                         checkedAt = check.optLong("checkedAt", System.currentTimeMillis())
                     )
@@ -309,8 +314,10 @@ object AppDataJson {
             for (index in 0 until length()) {
                 val memo = optJSONObject(index) ?: continue
                 val routineId = memo.optLong("routineId", 0L)
+                val routineSyncId = memo.optString("routineSyncId").trim()
                 val body = memo.optString("body").trim()
-                if (routineId <= 0L || body.isBlank()) continue
+                // 어느 쪽으로도 루틴을 가리키지 못하는 메모는 화면에 붙을 곳이 없다.
+                if ((routineId <= 0L && routineSyncId.isBlank()) || body.isBlank()) continue
 
                 add(
                     RoutineMemoEntity(
@@ -320,6 +327,7 @@ object AppDataJson {
                             .takeIf { it > 0L }
                             ?: memo.optLong("createdAt", 0L),
                         routineId = routineId,
+                        routineSyncId = routineSyncId,
                         routineTitle = memo.optString("routineTitle"),
                         body = body,
                         createdAt = memo.optLong("createdAt", System.currentTimeMillis())

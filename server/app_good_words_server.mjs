@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 8;
+const schemaVersion = 9;
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
@@ -455,7 +455,73 @@ function mergeSnapshot(db, payload) {
     db.settingsUpdatedAt = current.settingsUpdatedAt;
   }
 
+  reindex(db);
   return db;
+}
+
+/**
+ * 숫자 id를 서버 안에서 다시 매깁니다.
+ *
+ * 병합 결과에는 서로 다른 기기에서 온 같은 숫자 id가 함께 들어옵니다.
+ * 그대로 두면 /api/content/{id} 같은 경로가 둘 중 아무거나 집게 되고,
+ * 이벤트도 엉뚱한 항목에 붙습니다. 그래서 저장 직전에 1부터 다시 부여하고
+ * 자식 레코드의 참조는 syncId로 다시 잇습니다.
+ */
+function reindex(db) {
+  // 9 이전 레코드는 부모를 숫자 id로만 가리킨다. 번호를 바꾸기 전에 syncId로 옮겨 둔다.
+  const itemSyncIdByOldId = oldIdToSyncId(db.items);
+  const routineSyncIdByOldId = oldIdToSyncId(db.routines);
+  const parentOf = (child, ownField, oldIdField, byOldId) =>
+    text(child[ownField]) || byOldId.get(child[oldIdField]) || "";
+
+  const events = db.exposureEvents.map((event) => ({
+    ...event,
+    contentItemSyncId: parentOf(event, "contentItemSyncId", "contentItemId", itemSyncIdByOldId),
+  }));
+  const checks = db.routineChecks.map((check) => ({
+    ...check,
+    routineSyncId: parentOf(check, "routineSyncId", "routineId", routineSyncIdByOldId),
+  }));
+  const memos = db.routineMemos.map((memo) => ({
+    ...memo,
+    routineSyncId: parentOf(memo, "routineSyncId", "routineId", routineSyncIdByOldId),
+  }));
+
+  db.items = db.items.map((item, index) => ({ ...item, id: index + 1 }));
+  db.routines = db.routines.map((routine, index) => ({ ...routine, id: index + 1 }));
+
+  const itemIds = new Map(db.items.map((item) => [item.syncId, item.id]));
+  const routineIds = new Map(db.routines.map((routine) => [routine.syncId, routine.id]));
+
+  // 이력은 항목이 지워진 뒤에도 남으므로, 부모를 못 찾아도 버리지 않고 0으로 끊는다.
+  db.exposureEvents = events.map((event, index) => ({
+    ...event,
+    id: index + 1,
+    contentItemId: itemIds.get(event.contentItemSyncId) || 0,
+  }));
+  db.routineChecks = checks.map((check, index) => ({
+    ...check,
+    id: index + 1,
+    routineId: routineIds.get(check.routineSyncId) || 0,
+  }));
+  // 메모는 루틴 안에서만 보이므로, 붙을 루틴이 없으면 남겨도 볼 방법이 없다.
+  db.routineMemos = memos
+    .filter((memo) => routineIds.has(memo.routineSyncId))
+    .map((memo, index) => ({ ...memo, id: index + 1, routineId: routineIds.get(memo.routineSyncId) }));
+
+  return db;
+}
+
+/** 같은 숫자 id가 여러 번 나오면 어느 쪽인지 알 수 없으므로 아예 잇지 않는다. */
+function oldIdToSyncId(records) {
+  const seen = new Map();
+  const ambiguous = new Set();
+  for (const record of records) {
+    if (seen.has(record.id)) ambiguous.add(record.id);
+    seen.set(record.id, record.syncId);
+  }
+  for (const id of ambiguous) seen.delete(id);
+  return seen;
 }
 
 function mergeMutable(current, incoming, deletedAt) {
@@ -546,9 +612,11 @@ function saveRoutine(db, payload, routineId = null) {
 }
 
 function saveRoutineCheck(db, payload) {
+  const routine = db.routines.find((entry) => entry.id === positiveInt(payload.routineId));
   const normalized = normalizeRoutineCheck({
     ...payload,
     id: payload.id || nextId(db.routineChecks),
+    routineSyncId: payload.routineSyncId || routine?.syncId,
     checkedAt: payload.checkedAt || nowMs(),
   });
   upsert(db.routineChecks, normalized);
@@ -556,9 +624,11 @@ function saveRoutineCheck(db, payload) {
 }
 
 function saveRoutineMemo(db, payload) {
+  const routine = db.routines.find((entry) => entry.id === positiveInt(payload.routineId));
   const normalized = normalizeRoutineMemo({
     ...payload,
     id: payload.id || nextId(db.routineMemos),
+    routineSyncId: payload.routineSyncId || routine?.syncId,
     createdAt: payload.createdAt || nowMs(),
   });
   if (normalized.routineId <= 0 || !normalized.body) {
@@ -578,6 +648,7 @@ function recordContentEvent(db, itemId, eventType, trigger, incrementRead) {
   const event = normalizeEvent({
     id: nextId(db.exposureEvents),
     contentItemId: item.id,
+    contentItemSyncId: item.syncId,
     contentTitle: item.title || item.body.slice(0, 24),
     contentType: item.type,
     eventType,
@@ -685,6 +756,8 @@ function normalizeEvent(event) {
     id: positiveInt(event.id),
     syncId: syncId(event.syncId),
     contentItemId: positiveInt(event.contentItemId),
+    // 숫자 id는 기기마다 따로 증가하므로, 기기 간에는 이 값으로 항목을 가리킨다.
+    contentItemSyncId: text(event.contentItemSyncId),
     contentTitle: text(event.contentTitle),
     contentType: normalizeEnum(event.contentType, contentTypes, "QUOTE"),
     eventType: normalizeEnum(event.eventType, eventTypes, "SHOWN"),
@@ -713,6 +786,7 @@ function normalizeRoutineCheck(check) {
     id: positiveInt(check.id),
     syncId: syncId(check.syncId),
     routineId: positiveInt(check.routineId),
+    routineSyncId: text(check.routineSyncId),
     routineTitle: text(check.routineTitle),
     checkedAt: integer(check.checkedAt, nowMs()),
   };
@@ -725,6 +799,7 @@ function normalizeRoutineMemo(memo) {
     syncId: syncId(memo.syncId),
     updatedAt: integer(memo.updatedAt, integer(memo.createdAt, nowMs())),
     routineId: positiveInt(memo.routineId),
+    routineSyncId: text(memo.routineSyncId),
     routineTitle: text(memo.routineTitle),
     body: text(memo.body),
     createdAt: integer(memo.createdAt, nowMs()),

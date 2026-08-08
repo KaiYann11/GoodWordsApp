@@ -17,6 +17,9 @@ interface RoutineDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(routines: List<RoutineEntity>)
 
+    @Query("SELECT * FROM routines ORDER BY createdAt DESC")
+    suspend fun getAll(): List<RoutineEntity>
+
     @Query("SELECT * FROM routines WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): RoutineEntity?
 
