@@ -117,6 +117,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     // Glance 테스트 하네스는 실제 android.os.Bundle이 필요해 JVM 스텁에서는 못 돌린다.
     androidTestImplementation("androidx.glance:glance-appwidget-testing:1.1.0")
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

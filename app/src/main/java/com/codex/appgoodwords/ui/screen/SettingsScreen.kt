@@ -35,16 +35,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.SyncBackup
+import com.codex.appgoodwords.data.SyncStatus
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+/** 설정 화면에는 스위치가 여럿이라 테스트에서 자동 동기화 스위치만 집으려면 표식이 필요하다. */
+internal const val autoSyncSwitchTag = "auto_sync_switch"
 
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
@@ -57,6 +62,7 @@ private sealed interface PendingSyncAction {
 fun SettingsScreen(
     settings: ReminderSettings,
     serverSyncSettings: ServerSyncSettings,
+    syncStatus: SyncStatus,
     categories: List<String>,
     syncBackups: List<SyncBackup>,
     syncBackupDirectory: String,
@@ -412,12 +418,7 @@ fun SettingsScreen(
                         value = serverUrlText,
                         onValueChange = { value ->
                             serverUrlText = value
-                            onServerSyncSettingsChanged(
-                                ServerSyncSettings(
-                                    serverUrl = value,
-                                    apiKey = serverApiKeyText
-                                )
-                            )
+                            onServerSyncSettingsChanged(serverSyncSettings.copy(serverUrl = value))
                         },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("서버 주소") },
@@ -431,12 +432,7 @@ fun SettingsScreen(
                         value = serverApiKeyText,
                         onValueChange = { value ->
                             serverApiKeyText = value
-                            onServerSyncSettingsChanged(
-                                ServerSyncSettings(
-                                    serverUrl = serverUrlText,
-                                    apiKey = value
-                                )
-                            )
+                            onServerSyncSettingsChanged(serverSyncSettings.copy(apiKey = value))
                         },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("API 키") },
@@ -490,9 +486,91 @@ fun SettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    Text("자동 동기화", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("배경에서 주기적으로 병합", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "병합만 실행합니다. 업로드·가져오기처럼 한쪽을 통째로 지우지 않습니다.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            modifier = Modifier.testTag(autoSyncSwitchTag),
+                            checked = serverSyncSettings.autoSyncEnabled,
+                            onCheckedChange = { enabled ->
+                                onServerSyncSettingsChanged(
+                                    serverSyncSettings.copy(autoSyncEnabled = enabled)
+                                )
+                            },
+                            enabled = serverUrlText.isNotBlank()
+                        )
+                    }
+
+                    if (serverUrlText.isBlank()) {
+                        Text(
+                            text = "서버 주소를 먼저 넣어야 켤 수 있습니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (serverSyncSettings.autoSyncEnabled) {
+                        Text("주기", style = MaterialTheme.typography.bodyMedium)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ServerSyncSettings.INTERVAL_CHOICES) { hours ->
+                                FilterChip(
+                                    selected = serverSyncSettings.effectiveIntervalHours == hours,
+                                    onClick = {
+                                        onServerSyncSettingsChanged(
+                                            serverSyncSettings.copy(autoSyncIntervalHours = hours)
+                                        )
+                                    },
+                                    label = { Text("${hours}시간") }
+                                )
+                            }
+                        }
+                        Text(
+                            text = "네트워크가 연결된 동안에만 돕니다. 안드로이드가 배터리 상태에 따라 조금 늦출 수 있습니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // 배경 동기화는 실패해도 화면에 뜨지 않으므로 여기서 확인할 수 있어야 한다.
+                    Text(
+                        text = when {
+                            !syncStatus.hasSynced -> "마지막 동기화: 없음"
+                            syncStatus.failed ->
+                                "마지막 시도: ${formatDateTime(syncStatus.lastSyncAt)} · 실패 (${syncStatus.lastError})"
+
+                            else -> "마지막 동기화: ${formatDateTime(syncStatus.lastSyncAt)} · 성공"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (syncStatus.failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Text("동기화 백업", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "업로드·가져오기·복원 직전 상태를 자동으로 저장합니다. 최근 10개까지 보관합니다.",
+                        text = "병합·업로드·가져오기·복원 직전 상태를 자동으로 저장합니다. 종류별로 최근 5개까지 보관합니다.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     if (syncBackups.isEmpty()) {
@@ -513,7 +591,7 @@ fun SettingsScreen(
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(
-                                        text = "${formatBackupTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
+                                        text = "${formatDateTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
@@ -577,7 +655,7 @@ private fun SyncConfirmDialog(
 
         is PendingSyncAction.Restore -> {
             title = "백업을 복원할까요?"
-            message = "이 기기의 기존 데이터가 ${formatBackupTime(action.backup.createdAt)}에 저장한 " +
+            message = "이 기기의 기존 데이터가 ${formatDateTime(action.backup.createdAt)}에 저장한 " +
                 "'${action.backup.kind.label}' 백업으로 완전히 교체됩니다. " +
                 "교체 직전 기기 데이터는 백업으로 저장됩니다."
             confirmLabel = "복원"
@@ -629,7 +707,7 @@ private fun formatInterval(intervalMinutes: Int): String {
     }
 }
 
-private fun formatBackupTime(millis: Long): String = LocalDateTime
+private fun formatDateTime(millis: Long): String = LocalDateTime
     .ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
     .format(DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm"))
 

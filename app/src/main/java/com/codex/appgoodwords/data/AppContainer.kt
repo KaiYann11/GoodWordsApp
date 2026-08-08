@@ -68,4 +68,14 @@ class AppContainer(
             reminderScheduler = reminderScheduler
         )
     }
+
+    val syncCoordinator: SyncCoordinator by lazy {
+        SyncCoordinator(
+            settingsStore = settingsStore,
+            serverSyncClient = serverSyncClient,
+            syncBackupStore = syncBackupStore,
+            appDataImporter = appDataImporter,
+            database = database
+        )
+    }
 }

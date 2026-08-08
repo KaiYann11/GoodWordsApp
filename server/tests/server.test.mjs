@@ -309,6 +309,45 @@ describe("병합 동기화", () => {
     assert.equal(merged.routineMemos.length, 0);
   });
 
+  it("오래된 삭제 표식은 정리하고 최근 것은 남긴다", async () => {
+    // 표식을 그냥 두면 끝없이 쌓이고, 너무 일찍 지우면 지운 항목이 되살아난다.
+    await resetServer();
+    const day = 24 * 60 * 60 * 1000;
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          deletions: [
+            { syncId: "오래됨", entityType: "CONTENT_ITEM", deletedAt: Date.now() - 91 * day },
+            { syncId: "최근", entityType: "CONTENT_ITEM", deletedAt: Date.now() - day },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.deepEqual(merged.deletions.map((entry) => entry.syncId), ["최근"]);
+  });
+
+  it("정리된 표식은 항목을 더 이상 막지 않는다", async () => {
+    await resetServer();
+    const day = 24 * 60 * 60 * 1000;
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: Date.now() - 91 * day }],
+      }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [item({ syncId: "a", title: "다시 만든 항목", updatedAt: 1000 })] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+  });
+
   it("같은 레코드는 updatedAt이 최신인 쪽이 남는다", async () => {
     await resetServer();
     await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [item({ title: "예전", updatedAt: 1000 })] }) });
@@ -346,7 +385,8 @@ describe("병합 동기화", () => {
       await api("/api/sync", {
         method: "POST",
         body: emptySnapshot({
-          deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: 4000 }],
+          // 정리 기간 안이어야 표식이 남는다. 1970년대 값을 쓰면 오래된 표식으로 걸러진다.
+          deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: Date.now() }],
         }),
       })
     ).json();
@@ -357,15 +397,17 @@ describe("병합 동기화", () => {
 
   it("지운 뒤의 수정은 삭제를 이긴다", async () => {
     await resetServer();
+    // 표식이 정리 기간 안에 살아 있어야 "수정이 이긴다"를 실제로 확인할 수 있다.
+    const deletedAt = Date.now() - 60_000;
     await api("/api/sync", {
       method: "POST",
-      body: emptySnapshot({ deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt: 1000 }] }),
+      body: emptySnapshot({ deletions: [{ syncId: "a", entityType: "CONTENT_ITEM", deletedAt }] }),
     });
 
     const merged = await (
       await api("/api/sync", {
         method: "POST",
-        body: emptySnapshot({ items: [item({ syncId: "a", title: "되살림", updatedAt: 9000 })] }),
+        body: emptySnapshot({ items: [item({ syncId: "a", title: "되살림", updatedAt: deletedAt + 1000 })] }),
       })
     ).json();
 

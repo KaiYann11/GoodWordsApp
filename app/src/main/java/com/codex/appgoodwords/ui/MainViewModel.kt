@@ -13,10 +13,12 @@ import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.ServerConnectionInfo
+import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
+import com.codex.appgoodwords.data.SyncStatus
 import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,11 +30,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
-
-data class ServerSyncResult(
-    val counts: AppImportResult,
-    val backup: SyncBackup?
-)
 
 class MainViewModel(
     private val container: AppContainer
@@ -85,6 +82,9 @@ class MainViewModel(
     val serverSyncSettings = container.settingsStore.serverSyncSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerSyncSettings())
 
+    val syncStatus = container.settingsStore.syncStatusFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncStatus())
+
     private val _sharedText = MutableStateFlow<String?>(null)
     val sharedText: StateFlow<String?> = _sharedText.asStateFlow()
 
@@ -115,6 +115,8 @@ class MainViewModel(
             _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
             _syncBackupDirectory.value = container.syncBackupStore.directoryPath()
             reloadSyncBackups()
+            // 앱을 다시 깔거나 기기를 껐다 켜면 예약이 사라질 수 있어 시작할 때 맞춰 둔다.
+            container.reminderScheduler.syncAutoSync(container.settingsStore.getServerSyncSettings())
 
             val currentSettings = container.settingsStore.getSettings()
             if (currentSettings.showOnLaunch) {
@@ -212,6 +214,7 @@ class MainViewModel(
     fun updateServerSyncSettings(updated: ServerSyncSettings) {
         viewModelScope.launch {
             container.settingsStore.updateServerSyncSettings(updated)
+            container.reminderScheduler.syncAutoSync(updated)
         }
     }
 
@@ -262,23 +265,12 @@ class MainViewModel(
         container.serverSyncClient.testConnection(container.settingsStore.getServerSyncSettings())
     }
 
-    /**
-     * 서버와 레코드 단위로 합칩니다.
-     *
-     * 업로드/가져오기와 달리 어느 쪽도 통째로 지우지 않으므로 두 기기에서 각각 편집해도 살아남습니다.
-     * 그래도 로컬 DB를 교체하는 동작이라 직전 상태는 백업해 둡니다.
-     */
     suspend fun syncWithServer(): Result<ServerSyncResult> = runCatching {
-        val syncSettings = container.settingsStore.getServerSyncSettings()
-        val merged = container.serverSyncClient.mergeSnapshot(
-            settings = syncSettings,
-            snapshot = currentSnapshot()
-        )
-        val backup = container.syncBackupStore.save(SyncBackupKind.BEFORE_MERGE, currentSnapshot())
-        val result = container.appDataImporter.importSnapshot(merged)
+        // 배경 동기화와 같은 절차를 쓴다.
+        val result = container.syncCoordinator.merge(SyncBackupKind.BEFORE_MERGE)
         _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
         reloadSyncBackups()
-        ServerSyncResult(counts = result, backup = backup)
+        result
     }
 
     suspend fun uploadDataToServer(): Result<ServerSyncResult> = runCatching {
@@ -491,15 +483,5 @@ class MainViewModel(
         }
     }
 
-    private suspend fun currentSnapshot(): AppDataSnapshot = AppDataSnapshot(
-        items = allItems.value,
-        events = historyEvents.value,
-        routines = routines.value,
-        routineChecks = routineChecks.value,
-        routineMemos = routineMemos.value,
-        settings = container.settingsStore.getSettings(),
-        settingsUpdatedAt = container.settingsStore.getSettingsUpdatedAt(),
-        // 삭제 표식을 함께 보내야 다른 기기에서 지운 항목이 되살아나지 않는다.
-        deletions = container.database.deletionDao().getAll()
-    )
+    private suspend fun currentSnapshot(): AppDataSnapshot = container.syncCoordinator.currentSnapshot()
 }

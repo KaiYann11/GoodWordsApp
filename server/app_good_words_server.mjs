@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
 const schemaVersion = 9;
+/** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
+const deletionRetentionDays = 90;
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
@@ -437,6 +439,7 @@ function mergeSnapshot(db, payload) {
   });
   const current = normalizeDb(db);
 
+  // 먼저 적용하고 나서 정리한다. 반대로 하면 늦게 도착한 표식이 한 번도 쓰이지 못하고 사라진다.
   const deletions = mergeDeletions(current.deletions, incoming.deletions);
   const deletedAt = new Map(deletions.map((entry) => [entry.syncId, entry.deletedAt]));
 
@@ -445,7 +448,7 @@ function mergeSnapshot(db, payload) {
   db.routineMemos = mergeMutable(current.routineMemos, incoming.routineMemos, deletedAt);
   db.exposureEvents = mergeAppendOnly(current.exposureEvents, incoming.exposureEvents, deletedAt);
   db.routineChecks = mergeAppendOnly(current.routineChecks, incoming.routineChecks, deletedAt);
-  db.deletions = deletions;
+  db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
     db.settings = { ...defaultSettings, ...incoming.settings };
@@ -548,6 +551,16 @@ function mergeAppendOnly(current, incoming, deletedAt) {
     if (!merged.has(record.syncId)) merged.set(record.syncId, record);
   }
   return [...merged.values()].filter((record) => !deletedAt.has(record.syncId));
+}
+
+/**
+ * 삭제 표식은 지운 항목이 되살아나지 않게 하려고 남기는 것이라 계속 쌓입니다.
+ * 앱과 같은 기간을 써야 합니다. 한쪽만 지우면 다른 쪽이 매번 되돌려 줍니다.
+ * (앱: SyncCoordinator.DELETION_RETENTION_DAYS)
+ */
+function pruneDeletions(deletions) {
+  const before = nowMs() - deletionRetentionDays * 24 * 60 * 60 * 1000;
+  return deletions.filter((entry) => entry.deletedAt >= before);
 }
 
 function mergeDeletions(current, incoming) {

@@ -1,10 +1,13 @@
 package com.codex.appgoodwords.work
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.codex.appgoodwords.data.ReminderSettings
+import com.codex.appgoodwords.data.ServerSyncSettings
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -60,6 +63,34 @@ class ReminderScheduler(
         } else {
             workManager.cancelUniqueWork(summaryWorkName)
         }
+    }
+
+    /** 자동 동기화 예약. 주소가 없거나 꺼져 있으면 예약을 지운다. */
+    fun syncAutoSync(settings: ServerSyncSettings) {
+        val workManager = WorkManager.getInstance(context)
+
+        if (!settings.canAutoSync) {
+            workManager.cancelUniqueWork(autoSyncWorkName)
+            return
+        }
+
+        val request = PeriodicWorkRequestBuilder<SyncWorker>(
+            settings.effectiveIntervalHours.toLong(),
+            TimeUnit.HOURS
+        )
+            // 서버가 같은 LAN에 있어도 네트워크가 끊긴 상태로 깨우면 그냥 실패한다.
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            autoSyncWorkName,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request
+        )
     }
 
     private fun calculateRepeatingDelay(settings: ReminderSettings): Duration {
@@ -124,5 +155,6 @@ class ReminderScheduler(
     private companion object {
         const val reminderWorkName = "good_words_reminder"
         const val summaryWorkName = "good_words_daily_summary"
+        const val autoSyncWorkName = "good_words_auto_sync"
     }
 }

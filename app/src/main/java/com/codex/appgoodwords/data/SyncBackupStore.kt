@@ -15,6 +15,7 @@ enum class SyncBackupKind(
     BEFORE_UPLOAD("before-upload", "업로드 전 서버 데이터"),
     BEFORE_DOWNLOAD("before-download", "가져오기 전 기기 데이터"),
     BEFORE_MERGE("before-merge", "병합 전 기기 데이터"),
+    BEFORE_AUTO_MERGE("before-auto-merge", "자동 동기화 전 기기 데이터"),
     BEFORE_RESTORE("before-restore", "복원 전 기기 데이터");
 
     companion object {
@@ -92,11 +93,18 @@ class SyncBackupStore(
         .orEmpty()
         .toList()
 
+    /**
+     * 종류별로 따로 셉니다.
+     * 한 묶음으로 세면 자동 동기화가 자주 돌 때 사용자가 직접 만든 백업을 밀어냅니다.
+     */
     private fun pruneOldBackups(directory: File) {
         backupFiles(directory)
-            .sortedByDescending { it.lastModified() }
-            .drop(MAX_BACKUPS)
-            .forEach { file -> file.delete() }
+            .groupBy { file -> SyncBackupKind.fromFileName(file.name) }
+            .forEach { (_, files) ->
+                files.sortedByDescending { it.lastModified() }
+                    .drop(MAX_BACKUPS_PER_KIND)
+                    .forEach { file -> file.delete() }
+            }
     }
 
     private fun fileTimestamp(millis: Long): String = FILE_TIMESTAMP_FORMATTER
@@ -104,7 +112,7 @@ class SyncBackupStore(
 
     companion object {
         private const val DIRECTORY_NAME = "sync-backups"
-        private const val MAX_BACKUPS = 10
+        private const val MAX_BACKUPS_PER_KIND = 5
         private val FILE_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
     }
 }

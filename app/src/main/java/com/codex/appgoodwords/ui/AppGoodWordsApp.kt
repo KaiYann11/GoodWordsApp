@@ -107,6 +107,7 @@ fun AppGoodWordsApp(
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
 
     val existingTags = remember(allItems) {
@@ -537,6 +538,7 @@ fun AppGoodWordsApp(
                             modifier = Modifier.padding(innerPadding),
                             settings = settings,
                             serverSyncSettings = serverSyncSettings,
+                            syncStatus = syncStatus,
                             categories = categories,
                             syncBackups = syncBackups,
                             syncBackupDirectory = syncBackupDirectory,

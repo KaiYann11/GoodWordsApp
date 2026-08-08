@@ -35,6 +35,10 @@ class SettingsStore(
         val serverApiKey = stringPreferencesKey("server_api_key")
         val widgetContentId = longPreferencesKey("widget_content_id")
         val settingsUpdatedAt = longPreferencesKey("settings_updated_at")
+        val autoSyncEnabled = booleanPreferencesKey("auto_sync_enabled")
+        val autoSyncIntervalHours = intPreferencesKey("auto_sync_interval_hours")
+        val lastSyncAt = longPreferencesKey("last_sync_at")
+        val lastSyncError = stringPreferencesKey("last_sync_error")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -61,7 +65,17 @@ class SettingsStore(
     val serverSyncSettingsFlow: Flow<ServerSyncSettings> = context.dataStore.data.map { preferences ->
         ServerSyncSettings(
             serverUrl = preferences[Keys.serverUrl].orEmpty(),
-            apiKey = preferences[Keys.serverApiKey].orEmpty()
+            apiKey = preferences[Keys.serverApiKey].orEmpty(),
+            autoSyncEnabled = preferences[Keys.autoSyncEnabled] ?: false,
+            autoSyncIntervalHours = preferences[Keys.autoSyncIntervalHours]
+                ?: ServerSyncSettings.DEFAULT_INTERVAL_HOURS
+        )
+    }
+
+    val syncStatusFlow: Flow<SyncStatus> = context.dataStore.data.map { preferences ->
+        SyncStatus(
+            lastSyncAt = preferences[Keys.lastSyncAt] ?: 0L,
+            lastError = preferences[Keys.lastSyncError].orEmpty()
         )
     }
 
@@ -112,6 +126,15 @@ class SettingsStore(
         context.dataStore.edit { preferences ->
             preferences[Keys.serverUrl] = settings.serverUrl.trim()
             preferences[Keys.serverApiKey] = settings.apiKey.trim()
+            preferences[Keys.autoSyncEnabled] = settings.autoSyncEnabled
+            preferences[Keys.autoSyncIntervalHours] = settings.effectiveIntervalHours
+        }
+    }
+
+    suspend fun recordSyncResult(syncedAt: Long, error: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.lastSyncAt] = syncedAt
+            preferences[Keys.lastSyncError] = error
         }
     }
 }
