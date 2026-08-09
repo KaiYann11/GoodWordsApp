@@ -122,6 +122,25 @@ Android 앱 설정 탭에 네 개의 버튼이 있습니다.
 - 네트워크가 연결된 동안에만 돕니다. 안드로이드가 배터리 상태에 따라 늦출 수 있어 정확히 그 시각에 돌지는 않습니다.
 - 배경 동기화는 실패해도 화면에 뜨지 않으므로, 마지막 결과를 설정 탭에 남깁니다. 실패하면 사유가 함께 보입니다.
 
+기기에서 확인하려면 예약이 실제로 걸렸는지부터 봅니다.
+
+```sh
+adb shell am broadcast -a "androidx.work.diagnostics.REQUEST_DIAGNOSTICS" -p com.codex.appgoodwords
+adb logcat -d -s WM-DiagnosticsWrkr:*     # SyncWorker의 job id 확인
+adb shell dumpsys jobscheduler | grep -A 14 "JOB #u0aNNN/<job id>:"
+```
+
+`Minimum latency`가 주기와 같고 `Required constraints`에 `CONNECTIVITY`가 있어야 합니다.
+
+`cmd jobscheduler run -f`로는 앞당겨 돌릴 수 없습니다. WorkManager가 예정 시각 전에 깨어난 주기 작업을
+실행하지 않고 다시 예약만 합니다(job id가 바뀌고 아무 일도 일어나지 않습니다). 실제로 돌려 보려면
+기기 시계를 주기만큼 앞으로 돌려야 합니다.
+
+```sh
+adb root && adb shell settings put global auto_time 0
+adb shell date -u -s "YYYY-MM-DD HH:MM:SS"   # 주기보다 뒤로
+```
+
 업로드와 가져오기는 실행 전에 확인 대화상자를 띄우고, 교체 직전 상태를 기기에 자동으로 백업합니다.
 
 - 업로드 직전에는 서버 데이터를, 가져오기 직전에는 기기 데이터를 백업합니다.
@@ -144,6 +163,8 @@ Android 앱 설정 탭에 네 개의 버튼이 있습니다.
 
 - 90일보다 오래 꺼져 있던 기기를 다시 붙이면 그 사이 지운 항목이 되살아날 수 있습니다.
 - 자동 동기화는 안드로이드가 배터리 상태에 따라 늦출 수 있어 정확한 주기를 보장하지 않습니다.
+  에뮬레이터에서 6시간 주기가 예정대로 도는 것까지는 확인했지만, 도즈 모드에 오래 들어간 실제 기기에서
+  얼마나 밀리는지는 재 보지 않았습니다.
 - 서버는 삭제 표식을 병합할 때만 정리합니다. 아무도 동기화하지 않으면 정리되지 않습니다.
 
 서버 DB 파일 기본 위치:

@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -125,6 +127,20 @@ class MainViewModel(
                     trigger = ExposureTrigger.APP_LAUNCH
                 )
             }
+        }
+
+        // 배경 동기화는 화면 밖에서 데이터를 바꿉니다.
+        // 목록은 Room이 흘려 주지만 백업 파일과 오늘 읽음 표시는 여기서 직접 읽으므로,
+        // 동기화 결과가 기록될 때 함께 다시 읽지 않으면 앱을 껐다 켤 때까지 옛 값이 남습니다.
+        viewModelScope.launch {
+            container.settingsStore.syncStatusFlow
+                .distinctUntilChanged()
+                // 첫 값은 시작할 때 이미 읽었습니다.
+                .drop(1)
+                .collect {
+                    reloadSyncBackups()
+                    _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+                }
         }
     }
 
