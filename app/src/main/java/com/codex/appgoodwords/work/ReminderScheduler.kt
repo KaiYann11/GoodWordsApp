@@ -9,10 +9,8 @@ import androidx.work.WorkManager
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ServerSyncSettings
 import java.time.Duration
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.concurrent.TimeUnit
-import kotlin.math.max
 
 class ReminderScheduler(
     private val context: Context
@@ -93,64 +91,14 @@ class ReminderScheduler(
         )
     }
 
-    private fun calculateRepeatingDelay(settings: ReminderSettings): Duration {
-        val now = LocalDateTime.now()
-        val intervalMinutes = settings.effectiveIntervalMinutes.toLong()
-
-        for (dayOffset in -1L..2L) {
-            val window = buildWindow(settings, now.toLocalDate().plusDays(dayOffset))
-            var next = window.start
-
-            if (!next.isAfter(now)) {
-                val elapsedMinutes = Duration.between(window.start, now).toMinutes()
-                val steps = max(0, elapsedMinutes / intervalMinutes + 1)
-                next = window.start.plusMinutes(steps * intervalMinutes)
-            }
-
-            if (!next.isAfter(window.end)) {
-                return Duration.between(now, next)
-            }
-        }
-
-        return Duration.ofMinutes(intervalMinutes)
-    }
-
-    private fun buildWindow(
-        settings: ReminderSettings,
-        date: LocalDate
-    ): ReminderWindow {
-        val start = date.atTime(settings.preferredHour, settings.preferredMinute)
-        var end = date.atTime(settings.repeatEndHour, settings.repeatEndMinute)
-
-        if (!end.isAfter(start)) {
-            end = end.plusDays(1)
-        }
-
-        return ReminderWindow(start = start, end = end)
-    }
+    // 계산은 ReminderSchedule에 있습니다. 시각을 인자로 받아야 테스트할 수 있어서입니다.
+    private fun calculateRepeatingDelay(settings: ReminderSettings): Duration =
+        ReminderSchedule.nextReminderDelay(settings, LocalDateTime.now())
 
     private fun calculateDailyDelay(
         hour: Int,
         minute: Int
-    ): Duration {
-        val now = LocalDateTime.now()
-        var next = now
-            .withHour(hour)
-            .withMinute(minute)
-            .withSecond(0)
-            .withNano(0)
-
-        if (!next.isAfter(now)) {
-            next = next.plusDays(1)
-        }
-
-        return Duration.between(now, next)
-    }
-
-    private data class ReminderWindow(
-        val start: LocalDateTime,
-        val end: LocalDateTime
-    )
+    ): Duration = ReminderSchedule.nextDailyDelay(hour, minute, LocalDateTime.now())
 
     private companion object {
         const val reminderWorkName = "good_words_reminder"
