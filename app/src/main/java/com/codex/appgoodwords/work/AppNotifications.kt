@@ -23,6 +23,7 @@ object AppNotifications {
     const val contentSilentChannelId = "daily_good_words_silent"
     const val summaryChannelId = "daily_good_words_summary_sound"
     const val summarySilentChannelId = "daily_good_words_summary_silent"
+    const val todoChannelId = "good_words_todo_alarm"
     const val actionMarkRead = "com.codex.appgoodwords.action.MARK_READ"
     const val actionCheckRoutine = "com.codex.appgoodwords.action.CHECK_ROUTINE"
     const val extraContentId = "extra_content_id"
@@ -30,6 +31,7 @@ object AppNotifications {
     const val extraMarkConfirmed = "extra_mark_confirmed"
     const val extraRecordView = "extra_record_view"
     const val extraNotificationId = "extra_notification_id"
+    const val extraTodoId = "extra_todo_id"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -74,11 +76,58 @@ object AppNotifications {
             enableVibration(false)
         }
 
+        // 할 일 알람은 사용자가 시각을 직접 정한 것이라 소리 설정과 무관하게 높게 둡니다.
+        val todoChannel = NotificationChannel(
+            todoChannelId,
+            "${context.getString(R.string.app_name)} 할 일 알람",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "정한 시각에 할 일을 알려주는 알람"
+            lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+        }
+
         manager.createNotificationChannel(contentChannel)
         manager.createNotificationChannel(contentSilentChannel)
         manager.createNotificationChannel(summaryChannel)
         manager.createNotificationChannel(summarySilentChannel)
+        manager.createNotificationChannel(todoChannel)
     }
+
+    fun showTodoNotification(
+        context: Context,
+        todoId: Long,
+        title: String,
+        note: String
+    ) {
+        if (!canPostNotifications(context)) return
+
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            putExtra(extraTodoId, todoId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            todoNotificationId(todoId),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, todoChannelId)
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setContentTitle("할 일: $title")
+            .setContentText(note.ifBlank { "정한 시각이 되었습니다." })
+            .setStyle(NotificationCompat.BigTextStyle().bigText(note.ifBlank { title }))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(todoNotificationId(todoId), notification)
+    }
+
+    /** 글귀 알림은 항목 id를 그대로 쓰므로, 할 일과 겹치지 않게 따로 떨어뜨립니다. */
+    private fun todoNotificationId(todoId: Long): Int = (todoId % 10_000L).toInt() + 20_000
 
     fun showContentNotification(
         context: Context,

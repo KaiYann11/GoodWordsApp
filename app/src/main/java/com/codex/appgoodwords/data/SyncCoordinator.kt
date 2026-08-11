@@ -29,7 +29,9 @@ class SyncCoordinator(
         settings = settingsStore.getSettings(),
         settingsUpdatedAt = settingsStore.getSettingsUpdatedAt(),
         // 삭제 표식을 함께 보내야 다른 기기에서 지운 항목이 되살아나지 않는다.
-        deletions = database.deletionDao().getAll()
+        deletions = database.deletionDao().getAll(),
+        diaries = database.diaryDao().getAll(),
+        todos = database.todoDao().getAll()
     )
 
     /**

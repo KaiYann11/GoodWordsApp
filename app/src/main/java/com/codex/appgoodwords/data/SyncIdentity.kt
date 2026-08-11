@@ -21,7 +21,9 @@ enum class SyncEntityType {
     EXPOSURE_EVENT,
     ROUTINE,
     ROUTINE_CHECK,
-    ROUTINE_MEMO;
+    ROUTINE_MEMO,
+    DIARY,
+    TODO;
 
     companion object {
         fun fromNameOrNull(value: String?): SyncEntityType? =

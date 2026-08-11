@@ -13,9 +13,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RoutineEntity::class,
         RoutineCheckEntity::class,
         RoutineMemoEntity::class,
-        DeletionEntity::class
+        DeletionEntity::class,
+        DiaryEntity::class,
+        TodoEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -26,6 +28,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun routineCheckDao(): RoutineCheckDao
     abstract fun routineMemoDao(): RoutineMemoDao
     abstract fun deletionDao(): DeletionDao
+    abstract fun diaryDao(): DiaryDao
+    abstract fun todoDao(): TodoDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -237,6 +241,50 @@ abstract class AppDatabase : RoomDatabase() {
                         "SELECT syncId FROM routines WHERE routines.id = routine_memos.routineId" +
                         "), '')"
                 )
+            }
+        }
+
+        /**
+         * 일기와 할 일을 추가합니다.
+         *
+         * 둘 다 기존 표에 손대지 않고 새 표만 만듭니다. 기존 데이터는 그대로 남습니다.
+         * 날짜는 기기 시간대가 달라도 같은 날로 읽히도록 ISO 문자열(`yyyy-MM-dd`)로 둡니다.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS diaries (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "entryDate TEXT NOT NULL, " +
+                        "title TEXT NOT NULL, " +
+                        "body TEXT NOT NULL, " +
+                        "imageUris TEXT NOT NULL, " +
+                        "videoUris TEXT NOT NULL, " +
+                        "audioUris TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_diaries_syncId ON diaries(syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_diaries_entryDate ON diaries(entryDate)")
+
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS todos (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "title TEXT NOT NULL, " +
+                        "note TEXT NOT NULL, " +
+                        "dueDate TEXT NOT NULL, " +
+                        // 알람과 완료 시각은 없을 수 있어 NULL을 허용한다.
+                        "remindAt INTEGER, " +
+                        "doneAt INTEGER, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_todos_syncId ON todos(syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_todos_dueDate ON todos(dueDate)")
             }
         }
     }

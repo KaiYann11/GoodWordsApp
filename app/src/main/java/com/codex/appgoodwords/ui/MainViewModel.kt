@@ -8,6 +8,8 @@ import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
+import com.codex.appgoodwords.data.DiaryDraft
+import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.ReminderSettings
@@ -19,6 +21,8 @@ import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.data.SyncStatus
+import com.codex.appgoodwords.data.TodoDraft
+import com.codex.appgoodwords.data.TodoEntity
 import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +47,12 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val routines = container.repository.observeRoutines()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val diaries = container.repository.observeDiaries()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val todos = container.repository.observeTodos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val routineChecks = container.repository.observeRoutineChecks()
@@ -330,6 +340,45 @@ class MainViewModel(
         reloadSyncBackups()
         result
     }
+
+    // ---- 일기 ----
+
+    suspend fun getDiary(id: Long): DiaryEntity? = container.repository.getDiaryById(id)
+
+    suspend fun saveDiary(draft: DiaryDraft): Result<Unit> = runCatching {
+        container.repository.saveDiary(draft)
+        Unit
+    }
+
+    suspend fun deleteDiary(id: Long): Result<Unit> = runCatching {
+        container.repository.deleteDiary(id)
+    }
+
+    // ---- 할 일 ----
+
+    suspend fun getTodo(id: Long): TodoEntity? = container.repository.getTodoById(id)
+
+    /** 저장한 뒤 알람을 다시 겁니다. 시각을 바꿨는데 예약이 그대로면 옛 시각에 울립니다. */
+    suspend fun saveTodo(draft: TodoDraft): Result<Unit> = runCatching {
+        val saved = container.repository.saveTodo(draft)
+        container.todoAlarmScheduler.sync(saved)
+    }
+
+    suspend fun toggleTodoDone(id: Long): Result<Unit> = runCatching {
+        // 끝낸 일의 알람이 그대로 울리면 이미 한 일을 다시 하라고 하는 셈이다.
+        container.repository.toggleTodoDone(id)?.let(container.todoAlarmScheduler::sync)
+        Unit
+    }
+
+    suspend fun deleteTodo(id: Long): Result<Unit> = runCatching {
+        container.repository.getTodoById(id)?.let(container.todoAlarmScheduler::cancel)
+        container.repository.deleteTodo(id)
+    }
+
+    /** 정확한 알람 권한이 없으면 알람이 늦게 울릴 수 있어 화면에서 알려 줘야 합니다. */
+    fun canScheduleExactAlarms(): Boolean = container.todoAlarmScheduler.canScheduleExact()
+
+    fun exactAlarmSettingsIntent() = container.todoAlarmScheduler.exactAlarmSettingsIntent()
 
     private suspend fun reloadSyncBackups() {
         _syncBackups.value = container.syncBackupStore.list()

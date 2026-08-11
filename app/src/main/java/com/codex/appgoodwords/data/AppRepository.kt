@@ -11,7 +11,9 @@ class AppRepository(
     private val routineCheckDao: RoutineCheckDao,
     private val routineMemoDao: RoutineMemoDao,
     private val linkMetadataFetcher: LinkMetadataFetcher,
-    private val deletionDao: DeletionDao? = null
+    private val deletionDao: DeletionDao? = null,
+    private val diaryDao: DiaryDao? = null,
+    private val todoDao: TodoDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -291,6 +293,91 @@ class AppRepository(
         val removed = routineMemoDao.deleteById(id)
         existing?.let { recordDeletion(it.syncId, SyncEntityType.ROUTINE_MEMO) }
         return removed
+    }
+
+    // ---- 일기 ----
+
+    fun observeDiaries(): Flow<List<DiaryEntity>> =
+        diaryDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun getDiaryById(id: Long): DiaryEntity? = diaryDao?.getById(id)
+
+    suspend fun saveDiary(draft: DiaryDraft): Long {
+        val dao = diaryDao ?: error("일기를 저장할 수 없습니다.")
+        require(draft.hasSomethingToSave) { "내용이나 첨부를 하나는 넣어 주세요." }
+        val existing = if (draft.id != 0L) dao.getById(draft.id) else null
+        return dao.insert(
+            DiaryEntity(
+                id = if (draft.id == 0L) 0 else draft.id,
+                // 고쳐도 syncId는 지켜야 다른 기기에서 같은 일기로 인식된다.
+                syncId = existing?.syncId ?: SyncIdentity.newId(),
+                updatedAt = System.currentTimeMillis(),
+                entryDate = draft.entryDate.toString(),
+                title = draft.title.trim(),
+                body = draft.body.trim(),
+                imageUris = draft.imageUris.distinct(),
+                videoUris = draft.videoUris.distinct(),
+                audioUris = draft.audioUris.distinct(),
+                createdAt = existing?.createdAt ?: System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun deleteDiary(id: Long) {
+        val dao = diaryDao ?: return
+        val existing = dao.getById(id)
+        dao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.DIARY) }
+    }
+
+    // ---- 할 일 ----
+
+    fun observeTodos(): Flow<List<TodoEntity>> =
+        todoDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun getTodoById(id: Long): TodoEntity? = todoDao?.getById(id)
+
+    suspend fun getPendingTodoReminders(): List<TodoEntity> = todoDao?.getPendingReminders().orEmpty()
+
+    /** 저장한 할 일을 그대로 돌려줍니다. 부르는 쪽이 알람을 다시 걸어야 하기 때문입니다. */
+    suspend fun saveTodo(draft: TodoDraft): TodoEntity {
+        val dao = todoDao ?: error("할 일을 저장할 수 없습니다.")
+        val title = draft.title.trim()
+        require(title.isNotBlank()) { "할 일 내용을 입력해 주세요." }
+        val existing = if (draft.id != 0L) dao.getById(draft.id) else null
+        val todo = TodoEntity(
+            id = if (draft.id == 0L) 0 else draft.id,
+            syncId = existing?.syncId ?: SyncIdentity.newId(),
+            updatedAt = System.currentTimeMillis(),
+            title = title,
+            note = draft.note.trim(),
+            dueDate = draft.dueDate.toString(),
+            remindAt = draft.remindAt,
+            // 고칠 때 완료 상태를 잃으면 끝낸 일이 되살아난다.
+            doneAt = existing?.doneAt,
+            createdAt = existing?.createdAt ?: System.currentTimeMillis()
+        )
+        val id = dao.insert(todo)
+        return todo.copy(id = if (todo.id == 0L) id else todo.id)
+    }
+
+    /** 완료 표시를 뒤집고 결과를 돌려줍니다. 끝낸 일의 알람은 부르는 쪽이 지웁니다. */
+    suspend fun toggleTodoDone(id: Long): TodoEntity? {
+        val dao = todoDao ?: return null
+        val existing = dao.getById(id) ?: return null
+        val updated = existing.copy(
+            doneAt = if (existing.isDone) null else System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        dao.insert(updated)
+        return updated
+    }
+
+    suspend fun deleteTodo(id: Long) {
+        val dao = todoDao ?: return
+        val existing = dao.getById(id)
+        dao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.TODO) }
     }
 
     suspend fun getTodayRoutineCheckCount(routineId: Long): Int {

@@ -51,7 +51,23 @@ object SyncMerger {
             // 설정은 레코드가 아니라 화면 전체가 하나라 최근에 손댄 쪽을 통째로 쓴다.
             settings = if (remote.settingsUpdatedAt > local.settingsUpdatedAt) remote.settings else local.settings,
             settingsUpdatedAt = maxOf(local.settingsUpdatedAt, remote.settingsUpdatedAt),
-            deletions = deletions
+            deletions = deletions,
+            // 일기와 할 일은 고칠 수 있으므로 최신 수정이 이긴다.
+            // 특히 할 일의 완료 표시는 한쪽에서만 눌러도 양쪽에 반영되어야 한다.
+            diaries = mergeMutable(
+                local = local.diaries,
+                remote = remote.diaries,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
+            ),
+            todos = mergeMutable(
+                local = local.todos,
+                remote = remote.todos,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
+            )
         )
     }
 

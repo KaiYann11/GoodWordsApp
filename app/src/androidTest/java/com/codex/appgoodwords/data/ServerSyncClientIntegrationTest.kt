@@ -89,9 +89,55 @@ class ServerSyncClientIntegrationTest {
         )
     }
 
+    @Test
+    fun mergeSnapshot_carriesDiariesAndTodos() = runBlocking {
+        val diarySyncId = "e2e-diary-${SyncIdentity.newId()}"
+        val todoSyncId = "e2e-todo-${SyncIdentity.newId()}"
+
+        val merged = client.mergeSnapshot(
+            settings,
+            snapshotWith(
+                diaries = listOf(
+                    DiaryEntity(
+                        syncId = diarySyncId,
+                        updatedAt = 2_000L,
+                        entryDate = "2026-08-12",
+                        title = "기기에서 쓴 일기",
+                        body = "본문",
+                        imageUris = listOf("content://photo/1"),
+                        audioUris = listOf("content://audio/1"),
+                        createdAt = 2_000L
+                    )
+                ),
+                todos = listOf(
+                    TodoEntity(
+                        syncId = todoSyncId,
+                        updatedAt = 2_000L,
+                        title = "기기에서 만든 할 일",
+                        dueDate = "2026-08-12",
+                        remindAt = 3_000L,
+                        createdAt = 2_000L
+                    )
+                )
+            )
+        )
+
+        val diary = merged.diaries.firstOrNull { it.syncId == diarySyncId }
+        assertEquals("2026-08-12", diary?.entryDate)
+        assertEquals(listOf("content://photo/1"), diary?.imageUris)
+        assertEquals("첨부 종류가 섞이면 안 됩니다.", listOf("content://audio/1"), diary?.audioUris)
+
+        val todo = merged.todos.firstOrNull { it.syncId == todoSyncId }
+        assertEquals("기기에서 만든 할 일", todo?.title)
+        assertEquals(3_000L, todo?.remindAt)
+        assertEquals("누르지 않은 완료 표시가 생겼습니다.", null, todo?.doneAt)
+    }
+
     private fun snapshotWith(
         items: List<ContentItemEntity> = emptyList(),
-        deletions: List<DeletionEntity> = emptyList()
+        deletions: List<DeletionEntity> = emptyList(),
+        diaries: List<DiaryEntity> = emptyList(),
+        todos: List<TodoEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = emptyList(),
@@ -100,7 +146,9 @@ class ServerSyncClientIntegrationTest {
         routineMemos = emptyList(),
         settings = ReminderSettings(),
         settingsUpdatedAt = 0L,
-        deletions = deletions
+        deletions = deletions,
+        diaries = diaries,
+        todos = todos
     )
 
     @Test

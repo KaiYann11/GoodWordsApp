@@ -51,6 +51,9 @@ import java.time.format.DateTimeFormatter
 /** 설정 화면에는 스위치가 여럿이라 테스트에서 자동 동기화 스위치만 집으려면 표식이 필요하다. */
 internal const val autoSyncSwitchTag = "auto_sync_switch"
 
+/** 이력은 하단 바에서 빠졌으므로 여기로 들어가는 길이 있는지 확인해야 한다. */
+internal const val historyButtonTag = "history_button"
+
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
     object Upload : PendingSyncAction
@@ -80,6 +83,7 @@ fun SettingsScreen(
     onDownloadFromServer: () -> Unit,
     onRestoreBackup: (SyncBackup) -> Unit,
     onDeleteCategory: (String) -> Unit,
+    onOpenHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -627,6 +631,18 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("테스트 알림 보내기")
+            }
+        }
+
+        // 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기로 옮겼습니다.
+        item {
+            OutlinedButton(
+                onClick = onOpenHistory,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(historyButtonTag)
+            ) {
+                Text("노출 이력 보기")
             }
         }
     }

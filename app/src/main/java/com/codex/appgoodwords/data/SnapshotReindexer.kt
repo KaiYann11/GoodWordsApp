@@ -52,7 +52,10 @@ object SnapshotReindexer {
                     val routineId = routineIdBySyncId[parentSyncId] ?: return@mapNotNull null
                     memo.copy(routineSyncId = parentSyncId, routineId = routineId)
                 }
-                .mapIndexed { index, memo -> memo.copy(id = index + 1L) }
+                .mapIndexed { index, memo -> memo.copy(id = index + 1L) },
+            // 일기와 할 일은 딸린 자식이 없어 번호만 다시 매기면 된다.
+            diaries = snapshot.diaries.mapIndexed { index, diary -> diary.copy(id = index + 1L) },
+            todos = snapshot.todos.mapIndexed { index, todo -> todo.copy(id = index + 1L) }
         )
     }
 

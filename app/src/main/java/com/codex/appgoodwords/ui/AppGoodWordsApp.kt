@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
@@ -64,11 +65,14 @@ import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.DetailScreen
+import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
 import com.codex.appgoodwords.ui.screen.LibraryScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
+import com.codex.appgoodwords.ui.screen.TodayScreen
+import com.codex.appgoodwords.ui.screen.TodoScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
 import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
@@ -81,8 +85,11 @@ private enum class AppTab(
 ) {
     HOME("홈"),
     LIBRARY("보관함"),
-    ROUTINES("루틴"),
+    /** 루틴과 할 일을 함께 봅니다. 하단 바에 자리가 없어 안에서 나눴습니다. */
+    TODAY("오늘"),
+    DIARY("일기"),
     ADD("추가"),
+    /** 이력은 매일 볼 화면이 아니라 설정 안으로 옮겼습니다. 하단 바에는 없습니다. */
     HISTORY("이력"),
     SETTINGS("설정")
 }
@@ -115,15 +122,20 @@ fun AppGoodWordsApp(
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
+    val diaries by viewModel.diaries.collectAsStateWithLifecycle()
+    val todos by viewModel.todos.collectAsStateWithLifecycle()
 
     // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var notificationsBlocked by remember { mutableStateOf(!AppNotifications.canPostNotifications(context)) }
+    // 정확한 알람 권한도 시스템 설정에서 켜고 돌아오는 값이라 함께 다시 봅니다.
+    var canScheduleExactAlarms by remember { mutableStateOf(viewModel.canScheduleExactAlarms()) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationsBlocked = !AppNotifications.canPostNotifications(context)
+                canScheduleExactAlarms = viewModel.canScheduleExactAlarms()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -285,7 +297,7 @@ fun AppGoodWordsApp(
             bottomBar = {
                 if (selectedItem == null) {
                     NavigationBar {
-                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.ROUTINES, AppTab.ADD, AppTab.HISTORY, AppTab.SETTINGS)
+                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.TODAY, AppTab.DIARY, AppTab.ADD, AppTab.SETTINGS)
                             .forEach { tab ->
                                 val selected = currentTab == tab
                                 NavigationBarItem(
@@ -302,7 +314,8 @@ fun AppGoodWordsApp(
                                             imageVector = when (tab) {
                                                 AppTab.HOME -> Icons.Outlined.Home
                                                 AppTab.LIBRARY -> Icons.AutoMirrored.Outlined.LibraryBooks
-                                                AppTab.ROUTINES -> Icons.Outlined.CheckCircle
+                                                AppTab.TODAY -> Icons.Outlined.CheckCircle
+                                                AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
@@ -409,8 +422,10 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.ROUTINES -> RoutineScreen(
+                        AppTab.TODAY -> TodayScreen(
                             modifier = Modifier.padding(innerPadding),
+                            routineContent = {
+                                RoutineScreen(
                             routines = routines,
                             todayCounts = routineTodayCounts,
                             checks = routineChecks,
@@ -466,6 +481,70 @@ fun AppGoodWordsApp(
                                         "${routine.title}: 오늘 ${result.getOrDefault(0)}회"
                                     } else {
                                         result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            }
+                                )
+                            },
+                            todoContent = {
+                                TodoScreen(
+                                    todos = todos,
+                                    today = LocalDate.now(),
+                                    canScheduleExactAlarms = canScheduleExactAlarms,
+                                    onSaveTodo = { draft ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.saveTodo(draft)
+                                            result.exceptionOrNull()?.let { failure ->
+                                                snackbarHostState.showSnackbar(
+                                                    failure.message ?: "할 일을 저장하지 못했습니다."
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onToggleDone = { id ->
+                                        coroutineScope.launch { viewModel.toggleTodoDone(id) }
+                                    },
+                                    onDeleteTodo = { id ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.deleteTodo(id)
+                                            val message = if (result.isSuccess) {
+                                                "할 일을 지웠습니다."
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "할 일을 지우지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onOpenExactAlarmSettings = {
+                                        viewModel.exactAlarmSettingsIntent()?.let(context::startActivity)
+                                    }
+                                )
+                            }
+                        )
+
+                        AppTab.DIARY -> DiaryScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            diaries = diaries,
+                            today = LocalDate.now(),
+                            onSaveDiary = { draft ->
+                                coroutineScope.launch {
+                                    val result = viewModel.saveDiary(draft)
+                                    val message = if (result.isSuccess) {
+                                        "일기를 저장했습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "일기를 저장하지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
+                            onDeleteDiary = { id ->
+                                coroutineScope.launch {
+                                    val result = viewModel.deleteDiary(id)
+                                    val message = if (result.isSuccess) {
+                                        "일기를 지웠습니다."
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "일기를 지우지 못했습니다."
                                     }
                                     snackbarHostState.showSnackbar(message)
                                 }
@@ -564,6 +643,7 @@ fun AppGoodWordsApp(
                             syncBackupDirectory = syncBackupDirectory,
                             notificationsBlocked = notificationsBlocked,
                             onSettingsChanged = viewModel::updateSettings,
+                            onOpenHistory = { pushRoute(tabRoute(AppTab.HISTORY)) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
                                 viewModel.sendTestNotification()

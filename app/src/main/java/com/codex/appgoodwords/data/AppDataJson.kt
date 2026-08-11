@@ -15,11 +15,13 @@ data class AppDataSnapshot(
     val settings: ReminderSettings,
     /** 설정은 레코드가 아니라 한 덩어리여서 마지막으로 손댄 시각으로 승자를 정한다. */
     val settingsUpdatedAt: Long = 0L,
-    val deletions: List<DeletionEntity> = emptyList()
+    val deletions: List<DeletionEntity> = emptyList(),
+    val diaries: List<DiaryEntity> = emptyList(),
+    val todos: List<TodoEntity> = emptyList()
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 9
+    const val schemaVersion: Int = 10
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -68,6 +70,20 @@ object AppDataJson {
                 snapshot.routineMemos.forEach { memo -> put(memo.toJson()) }
             }
         )
+        .put("diaryCount", snapshot.diaries.size)
+        .put("todoCount", snapshot.todos.size)
+        .put(
+            "diaries",
+            JSONArray().apply {
+                snapshot.diaries.forEach { diary -> put(diary.toJson()) }
+            }
+        )
+        .put(
+            "todos",
+            JSONArray().apply {
+                snapshot.todos.forEach { todo -> put(todo.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -81,8 +97,90 @@ object AppDataJson {
             routineMemos = payload.optJSONArray("routineMemos").toRoutineMemos(),
             settings = settings,
             settingsUpdatedAt = payload.optLong("settingsUpdatedAt", 0L),
-            deletions = payload.optJSONArray("deletions").toDeletions()
+            deletions = payload.optJSONArray("deletions").toDeletions(),
+            diaries = payload.optJSONArray("diaries").toDiaries(),
+            todos = payload.optJSONArray("todos").toTodos()
         )
+    }
+
+    private fun DiaryEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("entryDate", entryDate)
+        .put("title", title)
+        .put("body", body)
+        .put("imageUris", JSONArray(imageUris))
+        .put("videoUris", JSONArray(videoUris))
+        .put("audioUris", JSONArray(audioUris))
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toDiaries(): List<DiaryEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val diary = optJSONObject(index) ?: continue
+                val entryDate = diary.optString("entryDate").trim()
+                // 날짜가 없으면 어느 날 일기인지 알 수 없어 화면에 놓을 자리가 없다.
+                if (entryDate.isBlank()) continue
+
+                add(
+                    DiaryEntity(
+                        id = diary.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(diary.optString("syncId")),
+                        updatedAt = diary.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: diary.optLong("createdAt", 0L),
+                        entryDate = entryDate,
+                        title = diary.optString("title"),
+                        body = diary.optString("body"),
+                        imageUris = diary.optJSONArray("imageUris").toStringList(),
+                        videoUris = diary.optJSONArray("videoUris").toStringList(),
+                        audioUris = diary.optJSONArray("audioUris").toStringList(),
+                        createdAt = diary.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
+
+    private fun TodoEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("title", title)
+        .put("note", note)
+        .put("dueDate", dueDate)
+        .put("remindAt", remindAt)
+        .put("doneAt", doneAt)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toTodos(): List<TodoEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val todo = optJSONObject(index) ?: continue
+                val title = todo.optString("title").trim()
+                val dueDate = todo.optString("dueDate").trim()
+                if (title.isBlank() || dueDate.isBlank()) continue
+
+                add(
+                    TodoEntity(
+                        id = todo.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(todo.optString("syncId")),
+                        updatedAt = todo.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: todo.optLong("createdAt", 0L),
+                        title = title,
+                        note = todo.optString("note"),
+                        dueDate = dueDate,
+                        remindAt = todo.optNullableLong("remindAt"),
+                        doneAt = todo.optNullableLong("doneAt"),
+                        createdAt = todo.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
     }
 
     private fun DeletionEntity.toJson(): JSONObject = JSONObject()

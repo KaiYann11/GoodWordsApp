@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 9;
+const schemaVersion = 10;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,8 @@ const deletionEntityTypes = new Set([
   "ROUTINE",
   "ROUTINE_CHECK",
   "ROUTINE_MEMO",
+  "DIARY",
+  "TODO",
 ]);
 
 const defaultSettings = {
@@ -379,6 +381,8 @@ function emptyDb() {
     routineChecks: [],
     routineMemos: [],
     deletions: [],
+    diaries: [],
+    todos: [],
   };
 }
 
@@ -394,6 +398,8 @@ function normalizeDb(db) {
     routineChecks: Array.isArray(db?.routineChecks) ? db.routineChecks.map(normalizeRoutineCheck).filter(Boolean) : [],
     routineMemos: Array.isArray(db?.routineMemos) ? db.routineMemos.map(normalizeRoutineMemo).filter(Boolean) : [],
     deletions: Array.isArray(db?.deletions) ? db.deletions.map(normalizeDeletion).filter(Boolean) : [],
+    diaries: Array.isArray(db?.diaries) ? db.diaries.map(normalizeDiary).filter(Boolean) : [],
+    todos: Array.isArray(db?.todos) ? db.todos.map(normalizeTodo).filter(Boolean) : [],
   };
 }
 
@@ -408,6 +414,8 @@ function snapshot(db) {
     routineCount: normalized.routines.length,
     routineCheckCount: normalized.routineChecks.length,
     routineMemoCount: normalized.routineMemos.length,
+    diaryCount: normalized.diaries.length,
+    todoCount: normalized.todos.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: sortDesc(normalized.items, "createdAt"),
@@ -416,6 +424,8 @@ function snapshot(db) {
     routineChecks: sortDesc(normalized.routineChecks, "checkedAt"),
     routineMemos: sortDesc(normalized.routineMemos, "createdAt"),
     deletions: sortDesc(normalized.deletions, "deletedAt"),
+    diaries: sortDesc(normalized.diaries, "createdAt"),
+    todos: sortDesc(normalized.todos, "createdAt"),
   };
 }
 
@@ -436,6 +446,8 @@ function mergeSnapshot(db, payload) {
     routineChecks: payload?.routineChecks,
     routineMemos: payload?.routineMemos,
     deletions: payload?.deletions,
+    diaries: payload?.diaries,
+    todos: payload?.todos,
   });
   const current = normalizeDb(db);
 
@@ -448,6 +460,9 @@ function mergeSnapshot(db, payload) {
   db.routineMemos = mergeMutable(current.routineMemos, incoming.routineMemos, deletedAt);
   db.exposureEvents = mergeAppendOnly(current.exposureEvents, incoming.exposureEvents, deletedAt);
   db.routineChecks = mergeAppendOnly(current.routineChecks, incoming.routineChecks, deletedAt);
+  // 일기와 할 일은 고칠 수 있다. 특히 할 일의 완료 표시는 한쪽에서 눌러도 양쪽에 반영되어야 한다.
+  db.diaries = mergeMutable(current.diaries, incoming.diaries, deletedAt);
+  db.todos = mergeMutable(current.todos, incoming.todos, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -511,6 +526,9 @@ function reindex(db) {
   db.routineMemos = memos
     .filter((memo) => routineIds.has(memo.routineSyncId))
     .map((memo, index) => ({ ...memo, id: index + 1, routineId: routineIds.get(memo.routineSyncId) }));
+  // 일기와 할 일은 딸린 자식이 없어 번호만 다시 매기면 된다.
+  db.diaries = db.diaries.map((diary, index) => ({ ...diary, id: index + 1 }));
+  db.todos = db.todos.map((todo, index) => ({ ...todo, id: index + 1 }));
 
   return db;
 }
@@ -587,6 +605,10 @@ function replaceSnapshot(db, payload) {
   db.routineMemos = Array.isArray(payload.routineMemos)
     ? payload.routineMemos.map(normalizeRoutineMemo).filter(Boolean)
     : [];
+  // 업로드는 서버를 기기 데이터로 통째로 바꾸는 동작이다.
+  // 여기서 빠뜨리면 그 종류만 서버에 남아, 사용자가 지운 일기가 다음 병합에 되살아난다.
+  db.diaries = Array.isArray(payload.diaries) ? payload.diaries.map(normalizeDiary).filter(Boolean) : [];
+  db.todos = Array.isArray(payload.todos) ? payload.todos.map(normalizeTodo).filter(Boolean) : [];
   return db;
 }
 
@@ -816,6 +838,45 @@ function normalizeRoutineMemo(memo) {
     routineTitle: text(memo.routineTitle),
     body: text(memo.body),
     createdAt: integer(memo.createdAt, nowMs()),
+  };
+}
+
+function normalizeDiary(diary) {
+  if (!diary) return null;
+  const entryDate = text(diary.entryDate);
+  // 날짜가 없으면 어느 날 일기인지 알 수 없어 화면에 놓을 자리가 없다.
+  if (!entryDate) return null;
+  return {
+    id: positiveInt(diary.id),
+    syncId: syncId(diary.syncId),
+    updatedAt: integer(diary.updatedAt, integer(diary.createdAt, nowMs())),
+    entryDate,
+    title: text(diary.title),
+    body: text(diary.body),
+    // 첨부는 URI 문자열만 오간다. 파일 자체는 기기에 있고 서버로 올라오지 않는다.
+    imageUris: stringList(diary.imageUris),
+    videoUris: stringList(diary.videoUris),
+    audioUris: stringList(diary.audioUris),
+    createdAt: integer(diary.createdAt, nowMs()),
+  };
+}
+
+function normalizeTodo(todo) {
+  if (!todo) return null;
+  const title = text(todo.title);
+  const dueDate = text(todo.dueDate);
+  if (!title || !dueDate) return null;
+  return {
+    id: positiveInt(todo.id),
+    syncId: syncId(todo.syncId),
+    updatedAt: integer(todo.updatedAt, integer(todo.createdAt, nowMs())),
+    title,
+    note: text(todo.note),
+    dueDate,
+    // 알람과 완료 시각은 없을 수 있다. 0으로 바꾸면 1970년에 끝낸 일처럼 보인다.
+    remindAt: nullableInteger(todo.remindAt),
+    doneAt: nullableInteger(todo.doneAt),
+    createdAt: integer(todo.createdAt, nowMs()),
   };
 }
 

@@ -51,6 +51,8 @@ function emptySnapshot(overrides = {}) {
     routineChecks: [],
     routineMemos: [],
     deletions: [],
+    diaries: [],
+    todos: [],
     ...overrides,
   };
 }
@@ -513,5 +515,183 @@ describe("라우팅", () => {
     const response = await api("/api/nope");
 
     assert.equal(response.status, 404);
+  });
+});
+
+describe("일기와 할 일 병합", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  it("일기를 보내면 서버에 남고 첨부 목록도 함께 온다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-1",
+              updatedAt: 1000,
+              entryDate: "2026-08-12",
+              title: "오늘",
+              body: "적어 둔 내용",
+              imageUris: ["content://photo/1"],
+              audioUris: ["content://audio/1"],
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 1);
+    assert.equal(merged.diaries[0].entryDate, "2026-08-12");
+    assert.deepEqual(merged.diaries[0].imageUris, ["content://photo/1"]);
+    assert.deepEqual(merged.diaries[0].audioUris, ["content://audio/1"]);
+    assert.deepEqual(merged.diaries[0].videoUris, []);
+  });
+
+  it("날짜가 없는 일기는 놓을 자리가 없어 버린다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [{ syncId: "diary-bad", updatedAt: 1000, body: "날짜 없음", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 0);
+  });
+
+  it("할 일의 완료 표시는 최근에 누른 쪽을 따른다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        todos: [
+          {
+            syncId: "todo-1",
+            updatedAt: 1000,
+            title: "우체국 가기",
+            dueDate: "2026-08-12",
+            doneAt: null,
+            createdAt: 1000,
+          },
+        ],
+      }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [
+            {
+              syncId: "todo-1",
+              updatedAt: 5000,
+              title: "우체국 가기",
+              dueDate: "2026-08-12",
+              doneAt: 4900,
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.todos.length, 1);
+    assert.equal(merged.todos[0].doneAt, 4900);
+  });
+
+  it("알람과 완료 시각이 없으면 0이 아니라 null로 남는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [{ syncId: "todo-2", updatedAt: 1000, title: "물 사기", dueDate: "2026-08-12", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    // 0으로 바뀌면 1970년에 울린 알람, 1970년에 끝낸 일이 된다.
+    assert.equal(merged.todos[0].remindAt, null);
+    assert.equal(merged.todos[0].doneAt, null);
+  });
+
+  it("삭제 표식을 보내면 일기와 할 일도 지워진다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        diaries: [{ syncId: "diary-del", updatedAt: 1000, entryDate: "2026-08-12", body: "지울 일기", createdAt: 1000 }],
+        todos: [{ syncId: "todo-del", updatedAt: 1000, title: "지울 할 일", dueDate: "2026-08-12", createdAt: 1000 }],
+      }),
+    });
+
+    const now = Date.now();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          deletions: [
+            { syncId: "diary-del", entityType: "DIARY", deletedAt: now },
+            { syncId: "todo-del", entityType: "TODO", deletedAt: now },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 0);
+    assert.equal(merged.todos.length, 0);
+  });
+
+  it("업로드는 일기와 할 일도 통째로 교체한다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        diaries: [{ syncId: "diary-old", updatedAt: 1000, entryDate: "2026-08-01", body: "예전 일기", createdAt: 1000 }],
+        todos: [{ syncId: "todo-old", updatedAt: 1000, title: "예전 할 일", dueDate: "2026-08-01", createdAt: 1000 }],
+      }),
+    });
+
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+
+    // 여기서 남으면 사용자가 지운 일기가 다음 병합에 서버에서 되살아난다.
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.diaries.length, 0);
+    assert.equal(stored.todos.length, 0);
+  });
+
+  it("여러 기기에서 온 같은 숫자 id를 서로 덮어쓰지 않는다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        todos: [{ id: 1, syncId: "todo-a", updatedAt: 1000, title: "A기기 할 일", dueDate: "2026-08-12", createdAt: 1000 }],
+      }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [{ id: 1, syncId: "todo-b", updatedAt: 1000, title: "B기기 할 일", dueDate: "2026-08-12", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.todos.length, 2);
+    assert.deepEqual(
+      merged.todos.map((todo) => todo.id).sort(),
+      [1, 2],
+      "번호를 다시 매기지 않으면 둘 다 id=1이라 하나가 사라진다"
+    );
   });
 });

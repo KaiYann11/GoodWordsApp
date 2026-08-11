@@ -22,7 +22,8 @@ class AppContainer(
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
-                AppDatabase.MIGRATION_8_9
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -52,8 +53,14 @@ class AppContainer(
             routineCheckDao = database.routineCheckDao(),
             routineMemoDao = database.routineMemoDao(),
             linkMetadataFetcher = LinkMetadataFetcher(),
-            deletionDao = database.deletionDao()
+            deletionDao = database.deletionDao(),
+            diaryDao = database.diaryDao(),
+            todoDao = database.todoDao()
         )
+    }
+
+    val todoAlarmScheduler: TodoAlarmScheduler by lazy {
+        TodoAlarmScheduler(appContext)
     }
 
     val appDataExporter: AppDataExporter by lazy {
@@ -65,7 +72,8 @@ class AppContainer(
             context = appContext,
             database = database,
             settingsStore = settingsStore,
-            reminderScheduler = reminderScheduler
+            reminderScheduler = reminderScheduler,
+            todoAlarmScheduler = todoAlarmScheduler
         )
     }
 

@@ -10,14 +10,17 @@ data class AppImportResult(
     val eventCount: Int,
     val routineCount: Int,
     val routineCheckCount: Int,
-    val routineMemoCount: Int
+    val routineMemoCount: Int,
+    val diaryCount: Int = 0,
+    val todoCount: Int = 0
 )
 
 class AppDataImporter(
     private val context: Context,
     private val database: AppDatabase,
     private val settingsStore: SettingsStore,
-    private val reminderScheduler: ReminderScheduler
+    private val reminderScheduler: ReminderScheduler,
+    private val todoAlarmScheduler: TodoAlarmScheduler? = null
 ) {
     suspend fun import(uri: Uri): AppImportResult {
         val jsonText = context.contentResolver.openInputStream(uri)
@@ -39,7 +42,12 @@ class AppDataImporter(
             .takeIf { it != 0L }
             ?.let { database.contentItemDao().getById(it)?.syncId }
 
+        // 들어온 할 일에는 예약이 없다. 예전 할 일의 예약은 id가 다시 매겨지면 가리킬 곳을 잃는다.
+        val previousReminders = database.todoDao().getPendingReminders()
+
         database.withTransaction {
+            database.todoDao().clearAll()
+            database.diaryDao().clearAll()
             database.routineMemoDao().clearAll()
             database.routineCheckDao().clearAll()
             database.routineDao().clearAll()
@@ -70,6 +78,21 @@ class AppDataImporter(
             if (snapshot.routineMemos.isNotEmpty()) {
                 database.routineMemoDao().insertAll(snapshot.routineMemos)
             }
+
+            if (snapshot.diaries.isNotEmpty()) {
+                database.diaryDao().insertAll(snapshot.diaries)
+            }
+
+            if (snapshot.todos.isNotEmpty()) {
+                database.todoDao().insertAll(snapshot.todos)
+            }
+        }
+
+        // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
+        // 옛 예약을 지우고 새 목록으로 다시 걸지 않으면, 지운 할 일의 알람이 그대로 울린다.
+        todoAlarmScheduler?.let { scheduler ->
+            previousReminders.forEach(scheduler::cancel)
+            scheduler.syncAll(database.todoDao().getPendingReminders())
         }
 
         settingsStore.setWidgetContentId(
@@ -89,7 +112,9 @@ class AppDataImporter(
             eventCount = snapshot.events.size,
             routineCount = snapshot.routines.size,
             routineCheckCount = snapshot.routineChecks.size,
-            routineMemoCount = snapshot.routineMemos.size
+            routineMemoCount = snapshot.routineMemos.size,
+            diaryCount = snapshot.diaries.size,
+            todoCount = snapshot.todos.size
         )
     }
 }
