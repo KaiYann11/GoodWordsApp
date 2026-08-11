@@ -50,6 +50,7 @@ class ServerSyncClient {
     }
 
     suspend fun downloadSnapshot(settings: ServerSyncSettings): AppDataSnapshot = withContext(Dispatchers.IO) {
+        requireCompatibleSchema(settings)
         val response = request(
             method = "GET",
             serverUrl = settings.serverUrl,
@@ -67,6 +68,7 @@ class ServerSyncClient {
         settings: ServerSyncSettings,
         snapshot: AppDataSnapshot
     ): AppDataSnapshot = withContext(Dispatchers.IO) {
+        requireCompatibleSchema(settings)
         val response = request(
             method = "POST",
             serverUrl = settings.serverUrl,
@@ -81,6 +83,7 @@ class ServerSyncClient {
         settings: ServerSyncSettings,
         snapshot: AppDataSnapshot
     ): AppDataSnapshot = withContext(Dispatchers.IO) {
+        requireCompatibleSchema(settings)
         val response = request(
             method = "PUT",
             serverUrl = settings.serverUrl,
@@ -89,6 +92,26 @@ class ServerSyncClient {
             body = AppDataJson.toJson(snapshot).toString()
         )
         AppDataJson.fromJsonText(response)
+    }
+
+    /**
+     * 데이터를 주고받기 전에 형식이 같은지 먼저 묻습니다.
+     *
+     * 병합 응답을 받고 나서 확인해도 늦습니다. 그때는 서버 쪽 데이터가 이미 상한 뒤입니다.
+     * 요청이 한 번 늘지만 자동 동기화는 몇 시간에 한 번이라 부담이 없습니다.
+     */
+    private fun requireCompatibleSchema(settings: ServerSyncSettings) {
+        val health = JSONObject(
+            request(
+                method = "GET",
+                serverUrl = settings.serverUrl,
+                apiKey = settings.apiKey,
+                path = HEALTH_PATH
+            )
+        )
+        SyncSchema.mismatchMessage(health.optInt("schemaVersion", 0))?.let { message ->
+            error(message)
+        }
     }
 
     private fun request(
