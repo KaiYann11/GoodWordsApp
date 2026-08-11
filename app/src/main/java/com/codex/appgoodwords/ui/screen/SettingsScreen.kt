@@ -66,6 +66,8 @@ fun SettingsScreen(
     categories: List<String>,
     syncBackups: List<SyncBackup>,
     syncBackupDirectory: String,
+    /** 알림 권한이 없으면 예약은 걸려도 알림이 오지 않으므로 화면에서 알려 줘야 한다. */
+    notificationsBlocked: Boolean = false,
     onSettingsChanged: (ReminderSettings) -> Unit,
     onServerSyncSettingsChanged: (ServerSyncSettings) -> Unit,
     onSendTestNotification: () -> Unit,
@@ -156,6 +158,14 @@ fun SettingsScreen(
                             onSettingsChanged(settings.copy(remindersEnabled = it))
                         }
                     )
+                    if (settings.remindersEnabled && notificationsBlocked) {
+                        Text(
+                            text = "알림 권한이 없어 알림이 오지 않습니다. " +
+                                "휴대폰 설정 > 앱 > 오늘의 글귀 > 알림에서 켜 주세요.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     SettingSwitchRow(
                         title = "앱 실행 시 오늘의 글귀 표시",
                         checked = settings.showOnLaunch,

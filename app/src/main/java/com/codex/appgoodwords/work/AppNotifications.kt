@@ -296,13 +296,21 @@ object AppNotifications {
         return if (soundEnabled) summaryChannelId else summarySilentChannelId
     }
 
-    private fun hasNotificationPermission(context: Context): Boolean {
+    /**
+     * 알림을 보낼 수 있는지 확인합니다.
+     *
+     * 권한이 없으면 알림 함수들은 조용히 돌아가므로, 부르는 쪽이 먼저 물어야
+     * 보내지도 못한 알림을 보낸 것처럼 기록하지 않습니다.
+     */
+    fun canPostNotifications(context: Context): Boolean {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ActivityCompat.checkSelfPermission(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
     }
+
+    private fun hasNotificationPermission(context: Context): Boolean = canPostNotifications(context)
 
     private fun formatCount(count: Int): String = if (count > 1) " (${count}회)" else ""
 }

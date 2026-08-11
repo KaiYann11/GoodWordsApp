@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,8 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
@@ -65,6 +70,7 @@ import com.codex.appgoodwords.ui.screen.LibraryScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
+import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.delay
@@ -109,6 +115,20 @@ fun AppGoodWordsApp(
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
+
+    // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var notificationsBlocked by remember { mutableStateOf(!AppNotifications.canPostNotifications(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsBlocked = !AppNotifications.canPostNotifications(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val existingTags = remember(allItems) {
         allItems
@@ -542,6 +562,7 @@ fun AppGoodWordsApp(
                             categories = categories,
                             syncBackups = syncBackups,
                             syncBackupDirectory = syncBackupDirectory,
+                            notificationsBlocked = notificationsBlocked,
                             onSettingsChanged = viewModel::updateSettings,
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {

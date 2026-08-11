@@ -15,7 +15,11 @@ class QuoteReminderWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result =
+        run(canPostNotifications = AppNotifications.canPostNotifications(applicationContext))
+
+    /** 권한 확인만 밖에서 받습니다. 테스트에서 실제 권한을 뺏으면 앱 프로세스가 죽습니다. */
+    internal suspend fun run(canPostNotifications: Boolean): Result {
         val application = applicationContext as AppGoodWordsApplication
         val settings = application.container.settingsStore.getSettings()
 
@@ -24,6 +28,15 @@ class QuoteReminderWorker(
         }
 
         if (!settings.isWithinReminderWindow()) {
+            return Result.success()
+        }
+
+        // 알림 권한이 없으면 알림 함수가 조용히 돌아갑니다.
+        // 그런데도 노출·읽음을 기록하면 보지도 않은 글귀가 읽음으로 쌓이고, 순환까지 앞서 나갑니다.
+        // 위젯은 계속 돌려야 하므로 위젯 노출로만 남깁니다.
+        if (!canPostNotifications) {
+            QuoteWidget.pickNextItem(application.container)
+            QuoteWidget().updateAll(applicationContext)
             return Result.success()
         }
 
