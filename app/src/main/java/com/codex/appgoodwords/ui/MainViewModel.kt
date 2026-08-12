@@ -287,6 +287,16 @@ class MainViewModel(
         result
     }
 
+    /** 서버 없이 다른 기기의 내보내기 파일과 합칩니다. 교체가 아니라 병합입니다. */
+    suspend fun mergeFromFile(uri: Uri): Result<ServerSyncResult> = runCatching {
+        // 되돌릴 수 있도록 합치기 전 상태를 남긴다.
+        val backup = container.syncBackupStore.save(SyncBackupKind.BEFORE_MERGE, currentSnapshot())
+        val result = container.appDataImporter.mergeFromFile(uri, currentSnapshot())
+        _confirmedTodayIds.value = container.repository.getTodayConfirmedIds()
+        reloadSyncBackups()
+        ServerSyncResult(counts = result, backup = backup)
+    }
+
     suspend fun testServerConnection(): Result<ServerConnectionInfo> = runCatching {
         container.serverSyncClient.testConnection(container.settingsStore.getServerSyncSettings())
     }

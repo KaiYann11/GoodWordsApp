@@ -22,13 +22,26 @@ class AppDataImporter(
     private val reminderScheduler: ReminderScheduler,
     private val todoAlarmScheduler: TodoAlarmScheduler? = null
 ) {
-    suspend fun import(uri: Uri): AppImportResult {
+    /** 파일 내용으로 기기 데이터를 통째로 바꿉니다. */
+    suspend fun import(uri: Uri): AppImportResult = importSnapshot(readSnapshot(uri))
+
+    /**
+     * 파일과 기기 데이터를 레코드 단위로 합칩니다. 서버 없이 두 기기를 맞출 때 씁니다.
+     *
+     * 서버의 `/api/sync`와 같은 규칙입니다. 다만 서버는 쓰기를 직렬화해 주는데
+     * 파일에는 그런 게 없으므로, 두 기기가 서로의 파일을 동시에 넣으면
+     * 각자 자기 쪽이 최신인 결과를 갖게 됩니다.
+     */
+    suspend fun mergeFromFile(uri: Uri, local: AppDataSnapshot): AppImportResult =
+        importSnapshot(SyncMerger.merge(local = local, remote = readSnapshot(uri)))
+
+    private fun readSnapshot(uri: Uri): AppDataSnapshot {
         val jsonText = context.contentResolver.openInputStream(uri)
             ?.bufferedReader(Charsets.UTF_8)
             ?.use { it.readText() }
             ?: error("가져올 파일을 열 수 없습니다.")
 
-        return importSnapshot(AppDataJson.fromJsonText(jsonText))
+        return AppDataJson.fromJsonText(jsonText)
     }
 
     suspend fun importSnapshot(incoming: AppDataSnapshot): AppImportResult {

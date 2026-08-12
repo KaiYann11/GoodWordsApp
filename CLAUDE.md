@@ -38,10 +38,15 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
 사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 10입니다.
 
-**새 레코드 종류를 추가하면 다섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
-`AppDataJson`(직렬화) · `SyncMerger`(병합) · `SnapshotReindexer`(id 재부여) · `AppDataImporter`(저장) ·
-서버의 `normalizeDb`/`mergeSnapshot`/`replaceSnapshot`/`reindex`. 특히 서버 `replaceSnapshot`을 빠뜨리면
-업로드가 그 종류만 남겨 두어, 사용자가 지운 레코드가 다음 병합에 되살아납니다.
+**새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
+`AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
+`SnapshotReindexer`(id 재부여) · `AppDataImporter`(저장) ·
+서버의 `normalizeDb`/`mergeSnapshot`/`replaceSnapshot`/`reindex`/`deduplicate`.
+특히 서버 `replaceSnapshot`을 빠뜨리면 업로드가 그 종류만 남겨 두어, 사용자가 지운 레코드가
+다음 병합에 되살아납니다.
+
+**`SyncDeduplicator`(앱)와 서버 `deduplicate()`는 규칙이 같아야 합니다.** 판정 기준과 승자 선택
+(최신 `updatedAt`, 같으면 큰 `syncId`)이 어긋나면 두 기기가 병합할 때마다 서로를 고쳐 끝나지 않습니다.
 
 **기기 간 식별자는 `syncId`뿐입니다.** Room의 숫자 id는 기기마다 따로 증가해서 A기기 id=5와 B기기 id=5가
 서로 다른 레코드입니다. 자식은 부모를 `contentItemSyncId`(이벤트) 또는 `routineSyncId`(체크·메모)로

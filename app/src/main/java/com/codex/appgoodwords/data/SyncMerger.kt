@@ -10,7 +10,15 @@ package com.codex.appgoodwords.data
  * 순수 함수라 기기 없이 검증할 수 있습니다.
  */
 object SyncMerger {
-    fun merge(local: AppDataSnapshot, remote: AppDataSnapshot): AppDataSnapshot {
+    /**
+     * 서버 없이 파일로 합칠 때 이 경로를 씁니다.
+     * 서버가 있을 때는 서버의 `mergeSnapshot`이 같은 규칙으로 처리합니다.
+     */
+    fun merge(local: AppDataSnapshot, remote: AppDataSnapshot): AppDataSnapshot =
+        // 짝지은 뒤에 합칩니다. 먼저 합치면 아직 짝을 못 찾은 레코드가 남습니다.
+        SyncDeduplicator.deduplicate(mergeBySyncId(local, remote))
+
+    private fun mergeBySyncId(local: AppDataSnapshot, remote: AppDataSnapshot): AppDataSnapshot {
         val deletions = mergeDeletions(local.deletions, remote.deletions)
         val deletedAtBySyncId = deletions.associate { it.syncId to it.deletedAt }
 

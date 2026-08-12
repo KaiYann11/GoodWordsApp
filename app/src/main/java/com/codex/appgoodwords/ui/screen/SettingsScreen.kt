@@ -54,6 +54,9 @@ internal const val autoSyncSwitchTag = "auto_sync_switch"
 /** 이력은 하단 바에서 빠졌으므로 여기로 들어가는 길이 있는지 확인해야 한다. */
 internal const val historyButtonTag = "history_button"
 
+/** 교체와 병합은 결과가 정반대라 버튼을 헷갈리면 안 된다. */
+internal const val fileMergeButtonTag = "file_merge_button"
+
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
     object Upload : PendingSyncAction
@@ -77,6 +80,7 @@ fun SettingsScreen(
     onResetViewCounts: () -> Unit,
     onExportRequested: (Uri) -> Unit,
     onImportRequested: (Uri) -> Unit,
+    onMergeFileRequested: (Uri) -> Unit = {},
     onTestServerConnection: () -> Unit,
     onSyncWithServer: () -> Unit,
     onUploadToServer: () -> Unit,
@@ -99,6 +103,13 @@ fun SettingsScreen(
     ) { uri ->
         if (uri != null) {
             onImportRequested(uri)
+        }
+    }
+    val fileMergeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            onMergeFileRequested(uri)
         }
     }
 
@@ -415,8 +426,22 @@ fun SettingsScreen(
                         onClick = { importLauncher.launch(arrayOf("application/json")) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("데이터 가져오기")
+                        Text("데이터 가져오기 (교체)")
                     }
+                    OutlinedButton(
+                        onClick = { fileMergeLauncher.launch(arrayOf("application/json")) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(fileMergeButtonTag)
+                    ) {
+                        Text("파일과 병합")
+                    }
+                    Text(
+                        text = "가져오기는 기기 데이터를 파일로 통째로 바꿉니다. " +
+                            "병합은 양쪽을 항목 단위로 합칩니다. 서버 없이 두 기기를 맞출 때 쓰세요.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

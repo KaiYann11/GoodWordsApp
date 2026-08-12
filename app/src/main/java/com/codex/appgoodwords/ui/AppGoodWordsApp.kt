@@ -690,6 +690,19 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             },
+                            onMergeFileRequested = { uri ->
+                                coroutineScope.launch {
+                                    val result = viewModel.mergeFromFile(uri)
+                                    val message = if (result.isSuccess) {
+                                        val counts = result.getOrThrow().counts
+                                        "합친 결과: 항목 ${counts.itemCount}개, 루틴 ${counts.routineCount}개, " +
+                                            "일기 ${counts.diaryCount}개, 할 일 ${counts.todoCount}개"
+                                    } else {
+                                        result.exceptionOrNull()?.message ?: "파일과 합치지 못했습니다."
+                                    }
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            },
                             onTestServerConnection = {
                                 coroutineScope.launch {
                                     val result = viewModel.testServerConnection()

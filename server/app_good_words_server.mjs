@@ -473,8 +473,115 @@ function mergeSnapshot(db, payload) {
     db.settingsUpdatedAt = current.settingsUpdatedAt;
   }
 
+  // 짝지은 뒤에 합친다. 먼저 합치면 아직 짝을 못 찾은 레코드가 남는다.
+  deduplicate(db);
   reindex(db);
   return db;
+}
+
+/**
+ * 같은 내용인데 syncId만 다른 레코드를 하나로 합칩니다.
+ *
+ * 앱과 서버는 각자 기본 글귀를 심습니다. 그 둘은 내용이 같아도 syncId가 달라서,
+ * 처음 서버를 붙이면 같은 글귀가 두 벌이 됩니다.
+ *
+ * 사라진 쪽을 가리키던 이력·체크·메모는 남은 쪽으로 옮겨 붙입니다. 옮기지 않으면 부모를 잃습니다.
+ * 이력과 체크 자체는 합치지 않습니다. 같은 글귀를 두 번 본 것은 진짜로 두 번 본 것입니다.
+ *
+ * 앱의 SyncDeduplicator와 규칙이 같아야 합니다. 한쪽만 바꾸면 병합할 때마다 결과가 달라집니다.
+ */
+function deduplicate(db) {
+  const items = resolveDuplicates(db.items, itemFingerprint);
+  const routines = resolveDuplicates(db.routines, routineFingerprint);
+  const diaries = resolveDuplicates(db.diaries, diaryFingerprint);
+  const todos = resolveDuplicates(db.todos, todoFingerprint);
+
+  db.items = items.kept;
+  db.routines = routines.kept;
+  db.diaries = diaries.kept;
+  db.todos = todos.kept;
+
+  db.exposureEvents = db.exposureEvents.map((event) => ({
+    ...event,
+    contentItemSyncId: items.movedTo.get(event.contentItemSyncId) || event.contentItemSyncId,
+  }));
+  db.routineChecks = db.routineChecks.map((check) => ({
+    ...check,
+    routineSyncId: routines.movedTo.get(check.routineSyncId) || check.routineSyncId,
+  }));
+  db.routineMemos = db.routineMemos.map((memo) => ({
+    ...memo,
+    routineSyncId: routines.movedTo.get(memo.routineSyncId) || memo.routineSyncId,
+  }));
+
+  return db;
+}
+
+/**
+ * 내용이 같은 것끼리 묶어 최근에 손댄 쪽을 남깁니다.
+ * 같은 시각이면 syncId 순으로 정해, 앱에서 돌려도 서버에서 돌려도 결과가 같게 합니다.
+ */
+function resolveDuplicates(records, fingerprint) {
+  const winners = new Map();
+  for (const record of records) {
+    // 내용이 비어 있으면 무엇과도 같아 보이므로 묶지 않는다.
+    const key = fingerprint(record);
+    if (!key) continue;
+    const current = winners.get(key);
+    if (!current || record.updatedAt > current.updatedAt) {
+      winners.set(key, record);
+    } else if (record.updatedAt === current.updatedAt && record.syncId > current.syncId) {
+      winners.set(key, record);
+    }
+  }
+
+  const movedTo = new Map();
+  const kept = records.filter((record) => {
+    const winner = winners.get(fingerprint(record));
+    if (!winner || winner.syncId === record.syncId) return true;
+    movedTo.set(record.syncId, winner.syncId);
+    return false;
+  });
+
+  return { kept, movedTo };
+}
+
+// 글만 같고 첨부가 다르면 다른 기록이다. 첨부까지 넣지 않으면
+// 글 없이 사진만 올린 두 기록이 하나로 합쳐지면서 한쪽 사진이 사라진다.
+function itemFingerprint(item) {
+  return [
+    item.type,
+    norm(item.title),
+    norm(item.body),
+    norm(item.author),
+    norm(item.sourceUrl),
+    item.imageUris.join(","),
+    item.videoUris.join(","),
+  ].join("|");
+}
+
+function routineFingerprint(routine) {
+  return norm(routine.title);
+}
+
+function diaryFingerprint(diary) {
+  return [
+    text(diary.entryDate),
+    norm(diary.title),
+    norm(diary.body),
+    diary.imageUris.join(","),
+    diary.videoUris.join(","),
+    diary.audioUris.join(","),
+  ].join("|");
+}
+
+function todoFingerprint(todo) {
+  return [text(todo.dueDate), norm(todo.title), norm(todo.note)].join("|");
+}
+
+/** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 본다. */
+function norm(value) {
+  return text(value).toLowerCase().replace(/\s+/g, " ");
 }
 
 /**

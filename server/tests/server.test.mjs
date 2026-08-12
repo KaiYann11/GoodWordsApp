@@ -695,3 +695,172 @@ describe("일기와 할 일 병합", () => {
     );
   });
 });
+
+describe("같은 내용 합치기", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  function quote(syncId, title, body, updatedAt = 1000) {
+    return { syncId, updatedAt, type: "QUOTE", title, body, createdAt: updatedAt };
+  }
+
+  it("처음 붙일 때 앱과 서버의 같은 기본 글귀가 두 벌이 되지 않는다", async () => {
+    await resetServer();
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ items: [quote("server-1", "오늘의 기준", "행동은 감정이 따라올 때까지 기다리면 늘 늦다.")] }),
+    });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [quote("app-1", "오늘의 기준", "행동은 감정이 따라올 때까지 기다리면 늘 늦다.")] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+  });
+
+  it("사라진 쪽을 가리키던 이력은 남은 쪽으로 옮겨 붙는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("server-1", "제목", "본문", 2000)] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("app-1", "제목", "본문", 1000)],
+          exposureEvents: [
+            {
+              syncId: "event-1",
+              contentItemId: 1,
+              contentItemSyncId: "app-1",
+              contentTitle: "제목",
+              contentType: "QUOTE",
+              eventType: "SURFACED",
+              trigger: "MANUAL_REFRESH",
+              occurredAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    const survivor = merged.items.find((entry) => entry.syncId === "server-1");
+    assert.ok(survivor, "최근에 손댄 쪽이 남아야 합니다.");
+    // 부모를 잃으면 이력이 어느 글귀 것인지 알 수 없게 된다.
+    assert.equal(merged.exposureEvents[0].contentItemSyncId, "server-1");
+    assert.equal(merged.exposureEvents[0].contentItemId, survivor.id);
+  });
+
+  it("이력 자체는 합치지 않는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("item-1", "제목", "본문")],
+          exposureEvents: ["e1", "e2"].map((syncId) => ({
+            syncId,
+            contentItemId: 1,
+            contentItemSyncId: "item-1",
+            contentTitle: "제목",
+            contentType: "QUOTE",
+            eventType: "SURFACED",
+            trigger: "MANUAL_REFRESH",
+            occurredAt: 1000,
+          })),
+        }),
+      })
+    ).json();
+
+    // 같은 글귀를 두 번 본 것은 진짜로 두 번 본 것이다.
+    assert.equal(merged.exposureEvents.length, 2);
+  });
+
+  it("내용이 다르면 합치지 않는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("a", "오늘의 기준", "본문 하나"), quote("b", "오늘의 기준", "본문 둘")],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 2);
+  });
+
+  it("서버가 고른 승자는 앱이 고른 승자와 같다", async () => {
+    // 시각이 같으면 순서만 뒤집혀도 승자가 달라질 수 있다.
+    // 그러면 두 기기가 병합할 때마다 서로를 고쳐 영원히 끝나지 않는다.
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [quote("aaa", "제목", "본문", 1000), quote("bbb", "제목", "본문", 1000)] }),
+      })
+    ).json();
+
+    assert.equal(merged.items.length, 1);
+    // 앱의 SyncDeduplicator도 같은 시각이면 syncId가 큰 쪽을 남긴다.
+    assert.equal(merged.items[0].syncId, "bbb");
+  });
+
+  it("같은 날 글 없이 사진만 올린 일기는 각각 남는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            { syncId: "d1", updatedAt: 1000, entryDate: "2026-08-12", imageUris: ["content://a"], createdAt: 1000 },
+            { syncId: "d2", updatedAt: 2000, entryDate: "2026-08-12", imageUris: ["content://b"], createdAt: 2000 },
+          ],
+        }),
+      })
+    ).json();
+
+    // 합치면 한쪽 사진이 사라진다.
+    assert.equal(merged.diaries.length, 2);
+  });
+
+  it("두 기기가 같은 할 일을 만들면 하나로 합친다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [
+            { syncId: "t1", updatedAt: 1000, title: "우체국 가기", dueDate: "2026-08-12", createdAt: 1000 },
+            { syncId: "t2", updatedAt: 2000, title: "우체국 가기", dueDate: "2026-08-12", createdAt: 2000 },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.todos.length, 1);
+  });
+
+  it("합친 뒤 다시 보내도 결과가 흔들리지 않는다", async () => {
+    await resetServer();
+    const body = emptySnapshot({
+      items: [quote("server-1", "제목", "본문", 2000), quote("app-1", "제목", "본문", 1000)],
+    });
+
+    const first = await (await api("/api/sync", { method: "POST", body })).json();
+    const second = await (await api("/api/sync", { method: "POST", body })).json();
+
+    // 매번 결과가 달라지면 두 기기가 영원히 서로를 고친다.
+    assert.equal(first.items.length, 1);
+    assert.equal(second.items.length, 1);
+    assert.equal(first.items[0].syncId, second.items[0].syncId);
+  });
+});
