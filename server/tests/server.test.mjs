@@ -649,6 +649,128 @@ describe("일기와 할 일 API", () => {
   });
 });
 
+describe("첨부 파일", () => {
+  // 1x1 PNG. 내용이 무엇이든 상관없지만 진짜 바이트여야 해시가 의미 있다.
+  const onePixelPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  function upload(body, mime) {
+    const headers = { "Content-Type": mime };
+    if (apiKey) headers["X-API-Key"] = apiKey;
+    return fetch(`${baseUrl}/api/attachments`, { method: "POST", headers, body });
+  }
+
+  it("올린 사진을 그대로 다시 받는다", async () => {
+    const created = await (await upload(onePixelPng, "image/png")).json();
+
+    assert.match(created.id, /^[a-f0-9]{64}\.png$/);
+    assert.equal(created.uri, `appgoodwords://attachment/${created.id}`);
+    assert.equal(created.size, onePixelPng.length);
+
+    const fetched = await api(`/api/attachments/${created.id}`);
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.headers.get("content-type"), "image/png");
+    // 형식을 브라우저가 다시 추측하면 막아 둔 보람이 없다.
+    assert.equal(fetched.headers.get("x-content-type-options"), "nosniff");
+    assert.deepEqual(Buffer.from(await fetched.arrayBuffer()), onePixelPng);
+  });
+
+  it("같은 파일을 다시 올려도 한 벌만 쌓인다", async () => {
+    const first = await (await upload(onePixelPng, "image/png")).json();
+    const second = await (await upload(onePixelPng, "image/png")).json();
+
+    assert.equal(first.id, second.id);
+    assert.equal(second.reused, true);
+  });
+
+  it("사진·동영상·소리가 아니면 받지 않는다", async () => {
+    // 아무 파일이나 받으면 서버가 파일 창고가 된다.
+    const response = await upload(Buffer.from("#!/bin/sh\necho hi\n"), "application/x-sh");
+
+    assert.equal(response.status, 415);
+  });
+
+  it("브라우저에서 스크립트가 도는 형식은 막는다", async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+    const response = await upload(svg, "image/svg+xml");
+
+    assert.equal(response.status, 415);
+  });
+
+  it("빈 파일은 받지 않는다", async () => {
+    const response = await upload(Buffer.alloc(0), "image/png");
+
+    assert.equal(response.status, 400);
+  });
+
+  it("이상한 주소로 다른 파일을 꺼내갈 수 없다", async () => {
+    for (const id of ["..%2F..%2Fapp-good-words.db.json", "not-a-hash.png", "a".repeat(64)]) {
+      const response = await api(`/api/attachments/${id}`);
+      assert.equal(response.status, 400, `${id}가 통과했습니다.`);
+    }
+  });
+
+  it("키 없이는 첨부를 꺼내갈 수 없다", async () => {
+    const created = await (await upload(onePixelPng, "image/png")).json();
+
+    // 주소만 알면 누구나 사진을 볼 수 있으면 안 된다.
+    const response = await api(`/api/attachments/${created.id}`, { key: "" });
+
+    assert.equal(response.status, 401);
+  });
+
+  it("없는 첨부는 404를 준다", async () => {
+    const response = await api(`/api/attachments/${"0".repeat(64)}.png`);
+
+    assert.equal(response.status, 404);
+  });
+
+  it("어느 기록도 안 가리키는 첨부를 세어 준다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const created = await (await upload(onePixelPng, "image/png")).json();
+
+    const before = await (await api("/api/attachments")).json();
+    assert.ok(before.unusedCount >= 1, "안 쓰는 첨부를 세지 못했습니다.");
+
+    await api("/api/diaries", {
+      method: "POST",
+      body: { entryDate: "2026-08-17", body: "사진 붙인 일기", imageUris: [created.uri] },
+    });
+
+    const after = await (await api("/api/attachments")).json();
+    assert.equal(after.unusedCount, before.unusedCount - 1);
+  });
+
+  it("첨부 주소는 병합을 그대로 통과한다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const created = await (await upload(onePixelPng, "image/png")).json();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-attach",
+              updatedAt: 1000,
+              entryDate: "2026-08-17",
+              body: "기기에서 올린 사진",
+              imageUris: [created.uri],
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    // 주소가 바뀌면 다른 기기에서 첨부를 못 찾는다.
+    assert.deepEqual(merged.diaries[0].imageUris, [created.uri]);
+  });
+});
+
 describe("라우팅", () => {
   it("없는 엔드포인트는 404를 준다", async () => {
     const response = await api("/api/nope");

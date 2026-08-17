@@ -11,10 +11,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
@@ -36,9 +41,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.codex.appgoodwords.data.AttachmentUris
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.DiaryMood
@@ -66,7 +76,10 @@ fun DiaryScreen(
     today: LocalDate,
     onSaveDiary: (DiaryDraft) -> Unit,
     onDeleteDiary: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 서버가 보관하는 첨부를 받아올 주소. 서버를 안 쓰면 비어 있고, 그 첨부는 자리만 보입니다. */
+    serverUrl: String = "",
+    apiKey: String = ""
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
@@ -145,6 +158,11 @@ fun DiaryScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        AttachmentThumbnails(
+                            uris = diary.imageUris + diary.videoUris,
+                            serverUrl = serverUrl,
+                            apiKey = apiKey
+                        )
                     }
                 }
             }
@@ -177,6 +195,59 @@ fun DiaryScreen(
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("취소") } }
         )
+    }
+}
+
+/**
+ * 붙여 둔 사진과 영상을 줄지어 보여 줍니다.
+ *
+ * 기기 안 파일은 그 주소로 바로 읽고, 서버가 보관하는 파일은 http 주소로 바꿔 받습니다.
+ * 서버 첨부는 API 키가 필요해서 헤더를 실어 보냅니다. 주소에 키를 붙이면 기록에 남습니다.
+ */
+@Composable
+private fun AttachmentThumbnails(uris: List<String>, serverUrl: String, apiKey: String) {
+    if (uris.isEmpty()) return
+    val context = LocalContext.current
+
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(uris) { uri ->
+            val model = remember(uri, serverUrl, apiKey) {
+                val target = AttachmentUris.toHttpUrl(serverUrl, uri) ?: uri.takeIf { AttachmentUris.isLocal(it) }
+                target?.let { data ->
+                    ImageRequest.Builder(context)
+                        .data(data)
+                        .apply { if (apiKey.isNotBlank()) addHeader("X-API-Key", apiKey.trim()) }
+                        .crossfade(true)
+                        .build()
+                }
+            }
+            if (model == null) {
+                // 서버 주소를 안 넣은 채 다른 기기에서 붙인 첨부를 받으면 여기로 옵니다.
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "서버 연결 필요",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = model,
+                    contentDescription = "붙여 둔 첨부",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+            }
+        }
     }
 }
 

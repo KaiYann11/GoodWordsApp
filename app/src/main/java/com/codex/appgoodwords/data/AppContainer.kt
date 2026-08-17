@@ -78,13 +78,20 @@ class AppContainer(
         )
     }
 
+    val attachmentClient: AttachmentClient by lazy { AttachmentClient(appContext) }
+
+    val attachmentUploader: AttachmentUploader by lazy {
+        AttachmentUploader(client = attachmentClient, database = database)
+    }
+
     val syncCoordinator: SyncCoordinator by lazy {
         SyncCoordinator(
             settingsStore = settingsStore,
             serverSyncClient = serverSyncClient,
             syncBackupStore = syncBackupStore,
             appDataImporter = appDataImporter,
-            database = database
+            database = database,
+            attachmentUploader = attachmentUploader
         )
     }
 }

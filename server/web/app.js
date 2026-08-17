@@ -5,6 +5,8 @@ const state = {
   editingRoutineId: null,
   editingDiaryId: null,
   editingTodoId: null,
+  /** 편집 중인 일기의 첨부. 저장 전까지는 화면에만 있습니다. */
+  diaryUris: { imageUris: [], videoUris: [], audioUris: [] },
   query: "",
   typeFilter: "ALL",
   categoryFilter: "",
@@ -25,6 +27,17 @@ const weatherOptions = [
   { code: "WIND", emoji: "💨", label: "바람" },
   { code: "FOG", emoji: "🌫️", label: "안개" },
 ];
+
+/** 서버가 보관하는 첨부의 주소. 앱과 같은 값을 씁니다. */
+const attachmentScheme = "appgoodwords://attachment/";
+
+/**
+ * 받아 둔 첨부의 blob 주소.
+ *
+ * `<img src>`에는 API 키 헤더를 실을 수 없어서, fetch로 받아 blob 주소로 바꿔 끼웁니다.
+ * 키를 주소에 붙이면 브라우저 기록과 서버 로그에 키가 남습니다.
+ */
+const attachmentBlobs = new Map();
 
 const moodOptions = [
   { code: "GREAT", emoji: "😄", label: "아주 좋음" },
@@ -48,6 +61,7 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
     state.editingRoutineId = null;
     state.editingDiaryId = null;
     state.editingTodoId = null;
+    state.diaryUris = emptyDiaryUris();
     syncTabs();
     render();
   });
@@ -138,10 +152,23 @@ app.addEventListener("click", async (event) => {
       await loadSnapshot(false);
     } else if (action === "edit-diary") {
       state.editingDiaryId = id;
+      const diary = findById(state.snapshot.diaries, id);
+      state.diaryUris = {
+        imageUris: [...(diary?.imageUris || [])],
+        videoUris: [...(diary?.videoUris || [])],
+        audioUris: [...(diary?.audioUris || [])],
+      };
       render();
     } else if (action === "cancel-diary") {
       state.editingDiaryId = null;
+      state.diaryUris = emptyDiaryUris();
       render();
+    } else if (action === "drop-attachment") {
+      const kind = button.dataset.kind;
+      const uri = button.dataset.uri;
+      state.diaryUris[kind] = state.diaryUris[kind].filter((candidate) => candidate !== uri);
+      // 폼 전체를 다시 그리면 쓰던 글이 날아갑니다.
+      renderDiaryAttachmentsOnly();
     } else if (action === "delete-diary") {
       await api(`/api/diaries/${id}`, { method: "DELETE" });
       showToast("일기를 삭제했습니다.");
@@ -173,6 +200,25 @@ app.addEventListener("click", async (event) => {
     }
   } catch (error) {
     showToast(error.message || "요청에 실패했습니다.");
+  }
+});
+
+// 고르는 즉시 올립니다. 저장 버튼을 누를 때 한꺼번에 올리면 큰 파일에서 화면이 멈춘 것처럼 보입니다.
+app.addEventListener("change", async (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.id !== "diaryFiles") return;
+  const files = [...(input.files || [])];
+  input.value = "";
+  if (!files.length) return;
+
+  for (const file of files) {
+    try {
+      const uploaded = await uploadAttachment(file);
+      state.diaryUris[attachmentField(uploaded.mime)].push(uploaded.uri);
+      renderDiaryAttachmentsOnly();
+    } catch (error) {
+      showToast(`${file.name}: ${error.message || "올리지 못했습니다."}`);
+    }
   }
 });
 
@@ -224,6 +270,58 @@ async function api(path, options = {}) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+function emptyDiaryUris() {
+  return { imageUris: [], videoUris: [], audioUris: [] };
+}
+
+/** 서버가 형식을 보고 정한 것과 같은 자리에 넣습니다. */
+function attachmentField(mime) {
+  if (String(mime).startsWith("video/")) return "videoUris";
+  if (String(mime).startsWith("audio/")) return "audioUris";
+  return "imageUris";
+}
+
+/** 파일 본문을 그대로 보냅니다. 서버가 내용 해시로 이름을 지어 주소를 돌려줍니다. */
+async function uploadAttachment(file) {
+  const headers = { "Content-Type": file.type || "application/octet-stream" };
+  const apiKey = localStorage.getItem("appGoodWordsApiKey") || "";
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
+  const response = await fetch("/api/attachments", { method: "POST", headers, body: file });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+/**
+ * 첨부를 받아 blob 주소로 바꿔 둡니다.
+ *
+ * 한 번 받은 것은 다시 받지 않습니다. 내용 해시가 주소라서 같은 id면 내용도 같습니다.
+ */
+async function attachmentBlobUrl(id) {
+  if (attachmentBlobs.has(id)) return attachmentBlobs.get(id);
+  try {
+    const headers = {};
+    const apiKey = localStorage.getItem("appGoodWordsApiKey") || "";
+    if (apiKey) headers["X-API-Key"] = apiKey;
+    const response = await fetch(`/api/attachments/${id}`, { headers });
+    if (!response.ok) return null;
+    const url = URL.createObjectURL(await response.blob());
+    attachmentBlobs.set(id, url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/** HTML을 넣은 뒤에 부릅니다. 자리만 잡아 둔 태그에 실제 주소를 끼웁니다. */
+async function hydrateAttachments(root = app) {
+  for (const element of root.querySelectorAll("[data-attachment]")) {
+    const url = await attachmentBlobUrl(element.dataset.attachment);
+    if (url) element.src = url;
+  }
 }
 
 async function loadSnapshot(showMessage = true) {
@@ -542,8 +640,13 @@ function renderDiaries() {
             <label for="diaryBody">오늘 있었던 일</label>
             <textarea id="diaryBody" name="body">${escapeHtml(editing.body)}</textarea>
           </div>
+          <div class="field full">
+            <label for="diaryFiles">첨부</label>
+            <input id="diaryFiles" type="file" multiple accept="image/*,video/*,audio/*">
+          </div>
         </div>
-        <p class="hint">사진·동영상·음성 첨부는 기기 안에 있는 파일이라 웹에서는 붙일 수 없습니다. 개수만 보여 줍니다.</p>
+        <div id="diaryAttachments" class="attachmentGrid"></div>
+        <p class="hint">고르는 즉시 서버에 올라갑니다. 기기에서 붙인 첨부는 그 기기 안에 있어 여기서는 열리지 않습니다.</p>
         <div class="actions" style="margin-top:14px">
           <button class="primary" type="submit">${editing.id ? "수정 완료" : "저장"}</button>
           ${editing.id ? `<button type="button" data-action="cancel-diary">취소</button>` : ""}
@@ -557,6 +660,54 @@ function renderDiaries() {
       </section>
     </section>
   `;
+  renderDiaryAttachmentsOnly();
+  hydrateAttachments();
+}
+
+function renderDiaryAttachmentsOnly() {
+  const box = document.querySelector("#diaryAttachments");
+  if (!box) return;
+  const entries = [
+    ...state.diaryUris.imageUris.map((uri) => ["imageUris", uri]),
+    ...state.diaryUris.videoUris.map((uri) => ["videoUris", uri]),
+    ...state.diaryUris.audioUris.map((uri) => ["audioUris", uri]),
+  ];
+  box.innerHTML = entries.map(([kind, uri]) => attachmentEditorCell(kind, uri)).join("");
+  hydrateAttachments(box);
+}
+
+function attachmentEditorCell(kind, uri) {
+  return `
+    <figure class="attachment">
+      ${attachmentMedia(uri)}
+      <figcaption>
+        <button class="danger" type="button" data-action="drop-attachment" data-kind="${attr(kind)}" data-uri="${attr(uri)}">
+          빼기
+        </button>
+      </figcaption>
+    </figure>
+  `;
+}
+
+/**
+ * 첨부 하나를 보여 주는 태그.
+ *
+ * 주소는 비워 두고 data-attachment만 답니다. 실제 주소는 hydrateAttachments가 끼웁니다.
+ * 기기 안에 있는 첨부는 서버에 없으므로 열 수 없다고만 적습니다.
+ */
+function attachmentMedia(uri) {
+  if (!String(uri).startsWith(attachmentScheme)) {
+    return `<div class="attachmentMissing">기기 안 파일</div>`;
+  }
+  const id = String(uri).slice(attachmentScheme.length);
+  const extension = id.split(".").pop();
+  if (["mp4", "webm", "mov", "3gp"].includes(extension)) {
+    return `<video data-attachment="${attr(id)}" controls preload="metadata"></video>`;
+  }
+  if (["mp3", "m4a", "aac", "ogg", "wav", "weba", "amr"].includes(extension)) {
+    return `<audio data-attachment="${attr(id)}" controls preload="metadata"></audio>`;
+  }
+  return `<img data-attachment="${attr(id)}" alt="첨부한 사진" loading="lazy">`;
 }
 
 function diaryCard(diary) {
@@ -577,12 +728,21 @@ function diaryCard(diary) {
         </div>
       </div>
       ${diary.body ? `<p>${escapeHtml(diary.body)}</p>` : ""}
+      ${attachmentGallery(diary)}
       <div class="actions">
         <button type="button" data-action="edit-diary" data-id="${diary.id}">수정</button>
         <button class="danger" type="button" data-action="delete-diary" data-id="${diary.id}">삭제</button>
       </div>
     </article>
   `;
+}
+
+function attachmentGallery(diary) {
+  const uris = [...(diary.imageUris || []), ...(diary.videoUris || []), ...(diary.audioUris || [])];
+  if (!uris.length) return "";
+  return `<div class="attachmentGrid">${uris
+    .map((uri) => `<figure class="attachment">${attachmentMedia(uri)}</figure>`)
+    .join("")}</div>`;
 }
 
 function attachmentSummary(diary) {
@@ -637,9 +797,42 @@ function renderSettings() {
           ${stat("일기", state.snapshot.diaries.length)}
           ${stat("할 일", state.snapshot.todos.length)}
         </div>
+        <div id="attachmentUsage"></div>
       </div>
     </section>
   `;
+  renderAttachmentUsage();
+}
+
+/**
+ * 첨부가 디스크를 얼마나 쓰는지 보여 줍니다.
+ *
+ * 서버는 안 쓰는 첨부를 스스로 지우지 않습니다. 아직 서버에 안 올라온 기기가 그 파일을 가리키는
+ * 기록을 들고 있을 수 있어서입니다. 그래서 숫자만 내고 판단은 사용자에게 맡깁니다.
+ */
+async function renderAttachmentUsage() {
+  const box = document.querySelector("#attachmentUsage");
+  if (!box) return;
+  try {
+    const usage = await api("/api/attachments");
+    box.innerHTML = `
+      <p class="hint">
+        첨부 ${usage.count}개 · ${formatBytes(usage.bytes)}<br>
+        어느 기록도 안 가리키는 것 ${usage.unusedCount}개 · ${formatBytes(usage.unusedBytes)}
+        (아직 붙이지 않은 기기가 있을 수 있어 서버가 스스로 지우지는 않습니다)
+      </p>
+    `;
+  } catch (error) {
+    box.innerHTML = `<p class="hint">${escapeHtml(error.message || "첨부 사용량을 읽지 못했습니다.")}</p>`;
+  }
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value}B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)}MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)}GB`;
 }
 
 async function submitContent(form) {
@@ -700,6 +893,7 @@ async function submitDiary(form) {
     body: data.get("body"),
     weather: data.get("weather"),
     mood: data.get("mood"),
+    ...state.diaryUris,
   };
   const id = state.editingDiaryId;
   await api(id ? `/api/diaries/${id}` : "/api/diaries", {
@@ -707,6 +901,7 @@ async function submitDiary(form) {
     body: payload,
   });
   state.editingDiaryId = null;
+  state.diaryUris = emptyDiaryUris();
   showToast(id ? "일기를 수정했습니다." : "일기를 저장했습니다.");
   await loadSnapshot(false);
 }

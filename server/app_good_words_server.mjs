@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,45 @@ const deletionRetentionDays = 90;
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
+
+/**
+ * 첨부 파일 규칙.
+ *
+ * 파일은 내용 해시로 이름 짓습니다. 같은 사진을 여러 번 올려도 한 벌만 남고, 한 번 올라간 파일은
+ * 내용이 바뀌지 않아 캐시가 안전합니다. 기기와 웹이 가리키는 주소는
+ * `appgoodwords://attachment/{sha256}.{확장자}`이고, 실제 파일은 DB 옆 `attachments/`에 있습니다.
+ *
+ * 사진·동영상·소리만 받습니다. 아무 파일이나 받으면 서버가 파일 창고가 되고,
+ * 브라우저에서 열리는 형식(SVG·HTML)은 스크립트를 품을 수 있어 막습니다.
+ */
+const attachmentScheme = "appgoodwords://attachment/";
+const attachmentIdPattern = /^[a-f0-9]{64}\.[a-z0-9]{1,5}$/;
+const attachmentMaxBytes = Number(process.env.APP_GOOD_WORDS_MAX_UPLOAD || 100 * 1024 * 1024);
+const attachmentExtensions = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/gif", "gif"],
+  ["image/webp", "webp"],
+  ["image/heic", "heic"],
+  ["image/heif", "heif"],
+  ["video/mp4", "mp4"],
+  ["video/webm", "webm"],
+  ["video/quicktime", "mov"],
+  ["video/3gpp", "3gp"],
+  ["audio/mpeg", "mp3"],
+  ["audio/mp4", "m4a"],
+  ["audio/aac", "aac"],
+  ["audio/ogg", "ogg"],
+  ["audio/wav", "wav"],
+  ["audio/x-wav", "wav"],
+  ["audio/webm", "weba"],
+  ["audio/amr", "amr"],
+]);
+// 확장자 하나에 형식이 여럿인 경우(wav)에는 먼저 적은 것을 씁니다.
+const attachmentMimes = new Map();
+for (const [mime, ext] of attachmentExtensions) {
+  if (!attachmentMimes.has(ext)) attachmentMimes.set(ext, mime);
+}
 
 const contentTypes = new Set(["QUOTE", "LINK", "VIDEO"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
@@ -94,6 +133,7 @@ createServer((request, response) => {
   }
   console.log(`AppGoodWords server running at http://${config.host}:${config.port}`);
   console.log(`DB file: ${config.dbPath}`);
+  console.log(`Attachments: ${config.attachmentsDir}`);
   if (config.apiKey) console.log("API key protection is enabled.");
 });
 
@@ -186,6 +226,14 @@ async function route(request, response) {
     sendJson(response, 201, todo);
     return;
   }
+  if (method === "POST" && url.pathname === "/api/attachments") {
+    sendJson(response, 201, await saveAttachment(request));
+    return;
+  }
+  if (method === "GET" && url.pathname === "/api/attachments") {
+    sendJson(response, 200, await attachmentUsage(await loadDb()));
+    return;
+  }
   if (method === "GET" && url.pathname === "/api/summary/today") {
     sendJson(response, 200, todaySummary(await loadDb()));
     return;
@@ -214,6 +262,10 @@ async function route(request, response) {
   }
   if (parts[0] === "api" && parts[1] === "todos" && parts[2]) {
     await routeTodoMember(method, parts, request, response);
+    return;
+  }
+  if (parts[0] === "api" && parts[1] === "attachments" && parts[2]) {
+    await sendAttachment(method, parts[2], response);
     return;
   }
 
@@ -434,6 +486,127 @@ async function routeTodoMember(method, parts, request, response) {
     return;
   }
   sendJson(response, 404, { error: "엔드포인트를 찾을 수 없습니다." });
+}
+
+/**
+ * 올라온 파일을 내용 해시 이름으로 저장하고 주소를 돌려줍니다.
+ *
+ * 본문은 파일 그대로입니다. multipart를 쓰지 않는 이유는 표준 라이브러리만으로 파싱하려면
+ * 경계 처리를 직접 짜야 하고, 어차피 한 번에 한 파일만 올리기 때문입니다.
+ */
+async function saveAttachment(request) {
+  const mime = String(request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const extension = attachmentExtensions.get(mime);
+  if (!extension) {
+    throw new HttpError(415, `보낼 수 없는 형식입니다(${mime || "형식 없음"}). 사진·동영상·소리만 됩니다.`);
+  }
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    // 다 받고 나서 재면 그때는 이미 메모리를 다 쓴 뒤입니다.
+    if (size > attachmentMaxBytes) {
+      throw new HttpError(413, `파일이 너무 큽니다. ${Math.floor(attachmentMaxBytes / 1024 / 1024)}MB까지 됩니다.`);
+    }
+    chunks.push(chunk);
+  }
+  if (size === 0) throw new HttpError(400, "빈 파일입니다.");
+
+  const body = Buffer.concat(chunks);
+  const hash = createHash("sha256").update(body).digest("hex");
+  const id = `${hash}.${extension}`;
+  const filePath = join(config.attachmentsDir, id);
+
+  await mkdir(config.attachmentsDir, { recursive: true });
+  // 같은 파일이 이미 있으면 다시 쓰지 않습니다. 내용이 같으면 해시도 같기 때문입니다.
+  const exists = await stat(filePath).then(() => true).catch(() => false);
+  if (!exists) {
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+    await writeFile(tmpPath, body);
+    await rename(tmpPath, filePath);
+  }
+
+  return { id, uri: `${attachmentScheme}${id}`, mime, size, reused: exists };
+}
+
+/**
+ * 첨부가 디스크를 얼마나 쓰는지 알려 줍니다.
+ *
+ * **지우지는 않습니다.** 아직 서버에 올라오지 않은 기기가 그 파일을 가리키는 기록을 들고 있을 수
+ * 있어서, 어디서도 안 쓰는 것처럼 보여도 실제로는 쓰이는 중일 수 있습니다.
+ * 사용자가 보고 직접 판단하도록 숫자만 냅니다.
+ */
+async function attachmentUsage(db) {
+  const files = await readdir(config.attachmentsDir).catch(() => []);
+  const used = referencedAttachmentIds(db);
+  let bytes = 0;
+  let unusedCount = 0;
+  let unusedBytes = 0;
+  for (const name of files) {
+    if (!attachmentIdPattern.test(name)) continue;
+    const fileStat = await stat(join(config.attachmentsDir, name)).catch(() => null);
+    if (!fileStat) continue;
+    bytes += fileStat.size;
+    if (!used.has(name)) {
+      unusedCount += 1;
+      unusedBytes += fileStat.size;
+    }
+  }
+  return { count: files.filter((name) => attachmentIdPattern.test(name)).length, bytes, unusedCount, unusedBytes };
+}
+
+/** 어떤 기록이든 가리키고 있는 첨부 id를 모읍니다. */
+function referencedAttachmentIds(db) {
+  const ids = new Set();
+  const collect = (uris) => {
+    for (const uri of uris || []) {
+      if (String(uri).startsWith(attachmentScheme)) ids.add(String(uri).slice(attachmentScheme.length));
+    }
+  };
+  for (const item of db.items) {
+    collect(item.imageUris);
+    collect(item.videoUris);
+  }
+  for (const diary of db.diaries) {
+    collect(diary.imageUris);
+    collect(diary.videoUris);
+    collect(diary.audioUris);
+  }
+  return ids;
+}
+
+async function sendAttachment(method, id, response) {
+  if (method !== "GET" && method !== "HEAD") {
+    sendJson(response, 405, { error: "지원하지 않는 메서드입니다." });
+    return;
+  }
+  // 이름이 곧 경로라서, 형식을 먼저 확인하지 않으면 상위 디렉터리로 빠져나갈 수 있습니다.
+  if (!attachmentIdPattern.test(id)) {
+    sendJson(response, 400, { error: "첨부 주소가 올바르지 않습니다." });
+    return;
+  }
+  const filePath = join(config.attachmentsDir, id);
+  const fileStat = await stat(filePath).catch(() => null);
+  if (!fileStat) {
+    sendJson(response, 404, { error: "첨부를 찾을 수 없습니다." });
+    return;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": attachmentMimes.get(extname(id).slice(1)) || "application/octet-stream",
+    "Content-Length": fileStat.size,
+    // 내용이 바뀌지 않는 주소라 오래 캐시해도 됩니다.
+    "Cache-Control": "public, max-age=31536000, immutable",
+    // 서버가 정한 형식으로만 열리게 합니다. 브라우저가 다시 추측하면 막은 보람이 없습니다.
+    "X-Content-Type-Options": "nosniff",
+    "Access-Control-Allow-Origin": "*",
+  });
+  if (method === "HEAD") {
+    response.end();
+    return;
+  }
+  createReadStream(filePath).pipe(response);
 }
 
 async function loadDb() {
@@ -1365,9 +1538,12 @@ function parseArgs(args) {
     else if (arg === "--port") parsed.port = Number(args[++index]);
     else if (arg === "--db") parsed.dbPath = args[++index];
     else if (arg === "--api-key") parsed.apiKey = args[++index];
+    else if (arg === "--attachments") parsed.attachmentsDir = args[++index];
     else if (arg === "--seed") parsed.seed = true;
   }
   parsed.dbPath = resolve(parsed.dbPath);
+  // 첨부는 DB JSON 밖에 둡니다. 안에 넣으면 스냅샷을 주고받을 때마다 사진과 영상이 통째로 오갑니다.
+  parsed.attachmentsDir = resolve(parsed.attachmentsDir || join(dirname(parsed.dbPath), "attachments"));
   return parsed;
 }
 

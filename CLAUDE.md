@@ -46,6 +46,10 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 특히 서버 `replaceSnapshot`을 빠뜨리면 업로드가 그 종류만 남겨 두어, 사용자가 지운 레코드가
 다음 병합에 되살아납니다.
 
+**첨부 주소 형식은 앱·서버·웹 세 곳이 같아야 합니다.** `appgoodwords://attachment/{sha256}.{확장자}`이고,
+앱 `AttachmentUris.SCHEME` · 서버 `attachmentScheme` · 웹 `app.js`의 `attachmentScheme`에 각각 있습니다.
+파일은 DB JSON 밖 `attachments/` 폴더에 둡니다. DB에 넣으면 스냅샷마다 사진이 통째로 오갑니다.
+
 **날씨·기분 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의 `DiaryWeather`·`DiaryMood`와
 웹 `server/web/app.js`의 `weatherOptions`·`moodOptions`가 같은 코드 값을 씁니다. 한쪽만 늘리면
 다른 쪽에서는 고르지 않은 것처럼 보입니다. 서버는 값을 검사하지 않으므로 서버는 고칠 필요가 없습니다.

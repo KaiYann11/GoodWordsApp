@@ -527,6 +527,9 @@ fun AppGoodWordsApp(
                             modifier = Modifier.padding(innerPadding),
                             diaries = diaries,
                             today = LocalDate.now(),
+                            // 서버가 보관하는 첨부를 받아오려면 주소와 키가 필요합니다.
+                            serverUrl = serverSyncSettings.serverUrl,
+                            apiKey = serverSyncSettings.apiKey,
                             onSaveDiary = { draft ->
                                 coroutineScope.launch {
                                     val result = viewModel.saveDiary(draft)

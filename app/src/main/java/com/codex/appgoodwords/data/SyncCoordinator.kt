@@ -18,7 +18,8 @@ class SyncCoordinator(
     private val serverSyncClient: ServerSyncClient,
     private val syncBackupStore: SyncBackupStore,
     private val appDataImporter: AppDataImporter,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val attachmentUploader: AttachmentUploader
 ) {
     suspend fun currentSnapshot(): AppDataSnapshot = AppDataSnapshot(
         items = database.contentItemDao().getAll(),
@@ -43,6 +44,9 @@ class SyncCoordinator(
     suspend fun merge(backupKind: SyncBackupKind): ServerSyncResult {
         try {
             val syncSettings = settingsStore.getServerSyncSettings()
+            // 첨부를 먼저 올립니다. 스냅샷에 기기 주소가 그대로 담기면
+            // 다른 기기와 웹에서는 그 사진을 열 방법이 없습니다.
+            attachmentUploader.uploadPending(syncSettings)
             val merged = serverSyncClient.mergeSnapshot(
                 settings = syncSettings,
                 snapshot = currentSnapshot()
