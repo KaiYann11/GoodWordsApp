@@ -29,6 +29,9 @@ interface DiaryDao {
     @Query("DELETE FROM diaries WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM diaries WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM diaries")
     suspend fun clearAll()
 }

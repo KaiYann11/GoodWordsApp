@@ -26,6 +26,9 @@ interface ContentItemDao {
     @Query("DELETE FROM content_items WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM content_items WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM content_items")
     suspend fun clearAll()
 

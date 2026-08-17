@@ -18,7 +18,21 @@ data class AppDataSnapshot(
     val deletions: List<DeletionEntity> = emptyList(),
     val diaries: List<DiaryEntity> = emptyList(),
     val todos: List<TodoEntity> = emptyList(),
-    val books: List<BookEntity> = emptyList()
+    val books: List<BookEntity> = emptyList(),
+    /**
+     * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
+     * 파일로 주고받을 때는 0입니다.
+     */
+    val serverRev: Long = 0L,
+    /** 서버가 통째로 교체될 때마다 오르는 세대 번호. 세대가 바뀌면 리비전 번호는 뜻을 잃습니다. */
+    val serverEpoch: Long = 0L,
+    /**
+     * 서버가 일부만 담아 보냈는지.
+     *
+     * true면 여기 없는 레코드는 "지워진 것"이 아니라 "안 바뀐 것"입니다.
+     * 이때 DB를 통째로 갈아엎으면 담기지 않은 기록이 전부 사라집니다.
+     */
+    val partial: Boolean = false
 )
 
 object AppDataJson {
@@ -108,7 +122,10 @@ object AppDataJson {
             deletions = payload.optJSONArray("deletions").toDeletions(),
             diaries = payload.optJSONArray("diaries").toDiaries(),
             todos = payload.optJSONArray("todos").toTodos(),
-            books = payload.optJSONArray("books").toBooks()
+            books = payload.optJSONArray("books").toBooks(),
+            serverRev = payload.optLong("rev", 0L),
+            serverEpoch = payload.optLong("epoch", 0L),
+            partial = payload.optBoolean("partial", false)
         )
     }
 

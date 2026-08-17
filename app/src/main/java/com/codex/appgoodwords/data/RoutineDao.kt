@@ -29,6 +29,9 @@ interface RoutineDao {
     @Query("DELETE FROM routines WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM routines WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM routines")
     suspend fun clearAll()
 }

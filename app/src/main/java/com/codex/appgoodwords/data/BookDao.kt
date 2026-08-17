@@ -30,6 +30,9 @@ interface BookDao {
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM books WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM books")
     suspend fun clearAll()
 }

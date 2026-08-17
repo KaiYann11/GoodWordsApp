@@ -81,6 +81,9 @@ interface ExposureEventDao {
     @Query("DELETE FROM exposure_events WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>): Int
 
+    @Query("DELETE FROM exposure_events WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM exposure_events")
     suspend fun clearAll()
 }

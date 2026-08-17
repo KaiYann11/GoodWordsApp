@@ -48,13 +48,35 @@ class SyncCoordinator(
             // 첨부를 먼저 올립니다. 스냅샷에 기기 주소가 그대로 담기면
             // 다른 기기와 웹에서는 그 사진을 열 방법이 없습니다.
             attachmentUploader.uploadPending(syncSettings)
+
+            val cursor = settingsStore.getSyncCursor()
+            val startedAt = System.currentTimeMillis()
+            val local = currentSnapshot()
             val merged = serverSyncClient.mergeSnapshot(
                 settings = syncSettings,
-                snapshot = currentSnapshot()
+                // 처음 맞추는 것이 아니면 이 기기에서 바뀐 것만 보냅니다.
+                snapshot = SyncDelta.changedSince(local, cursor.lastPushAt),
+                since = cursor.serverRev,
+                epoch = cursor.serverEpoch
             )
-            val backup = syncBackupStore.save(backupKind, currentSnapshot())
-            val counts = appDataImporter.importSnapshot(merged)
+
+            val backup = syncBackupStore.save(backupKind, local)
+            // 서버가 일부만 보냈으면 통째로 갈아엎으면 안 됩니다. 담기지 않은 기록이 전부 사라집니다.
+            val counts = if (merged.partial) {
+                appDataImporter.applyDelta(merged)
+            } else {
+                appDataImporter.importSnapshot(merged)
+            }
+
             pruneOldDeletions()
+            settingsStore.updateSyncCursor(
+                SyncCursor(
+                    serverRev = merged.serverRev,
+                    serverEpoch = merged.serverEpoch,
+                    // 보내기 시작한 시각을 기준으로 둡니다. 동기화 도중에 생긴 변경을 놓치지 않으려는 것입니다.
+                    lastPushAt = SyncDelta.nextPushMark(startedAt)
+                )
+            )
             settingsStore.recordSyncResult(System.currentTimeMillis(), error = "")
             return ServerSyncResult(counts = counts, backup = backup)
         } catch (cancellation: CancellationException) {

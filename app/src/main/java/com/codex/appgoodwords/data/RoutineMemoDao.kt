@@ -29,6 +29,9 @@ interface RoutineMemoDao {
     @Query("DELETE FROM routine_memos WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
+    @Query("DELETE FROM routine_memos WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM routine_memos")
     suspend fun clearAll()
 }

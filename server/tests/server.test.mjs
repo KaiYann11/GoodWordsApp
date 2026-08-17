@@ -650,6 +650,227 @@ describe("일기와 할 일 API", () => {
   });
 });
 
+describe("바뀐 것만 주고받기", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  function quote(syncId, title, updatedAt = 1000) {
+    return { syncId, updatedAt, type: "QUOTE", title, body: `${title} 본문`, createdAt: updatedAt };
+  }
+
+  it("처음 붙는 기기는 전체를 받는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "첫 글귀")] }) });
+
+    const full = await (await api("/api/sync", { method: "POST", body: emptySnapshot() })).json();
+
+    assert.equal(full.partial, false);
+    assert.equal(full.items.length, 1);
+    assert.ok(full.rev > 0, "리비전 번호가 없습니다.");
+  });
+
+  it("본 번호 뒤에 바뀐 것만 돌려준다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "예전 글귀")] }) })
+    ).json();
+
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}`, {
+        method: "POST",
+        body: emptySnapshot({ items: [quote("b", "새 글귀", 2000)] }),
+      })
+    ).json();
+
+    assert.equal(delta.partial, true);
+    // 예전 글귀는 그대로라 다시 보낼 이유가 없다.
+    assert.deepEqual(delta.items.map((item) => item.syncId), ["b"]);
+    // 전체 개수는 알려 준다. 기기가 얼마나 맞았는지 확인할 수 있어야 한다.
+    assert.equal(delta.itemCount, 2);
+  });
+
+  it("아무것도 안 바뀌었으면 빈 목록을 준다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "글귀")] }) })
+    ).json();
+
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}`, { method: "POST", body: emptySnapshot() })
+    ).json();
+
+    assert.equal(delta.items.length, 0);
+    assert.equal(delta.exposureEvents.length, 0);
+    assert.equal(delta.rev, first.rev, "바뀐 게 없는데 번호가 올랐습니다.");
+  });
+
+  it("안 바뀐 레코드는 번호를 그대로 지킨다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "그대로 둘 글귀")] }) })
+    ).json();
+    const before = first.items.find((item) => item.syncId === "a").rev;
+
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("b", "새 글귀", 2000)] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+    const after = stored.items.find((item) => item.syncId === "a").rev;
+    // 여기서 번호가 오르면 안 바뀐 레코드까지 매번 다시 보내게 된다.
+    assert.equal(after, before);
+  });
+
+  it("한 건이 늘어도 앞선 레코드의 숫자 id가 밀리지 않는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "먼저 담은 글귀")] }) });
+    const first = await (await api("/api/snapshot")).json();
+    const idBefore = first.items.find((item) => item.syncId === "a").id;
+
+    // 목록 정렬상 새 글귀가 앞에 오는 상황. 예전에는 이때 뒤쪽 번호가 전부 밀렸다.
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("b", "나중 글귀", 9000)] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.items.find((item) => item.syncId === "a").id, idBefore);
+  });
+
+  it("이력이 쌓여도 새로 생긴 것만 보낸다", async () => {
+    await resetServer();
+    const seeded = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("a", "글귀")],
+          exposureEvents: Array.from({ length: 50 }, (_, index) => ({
+            syncId: `event-${index}`,
+            contentItemSyncId: "a",
+            contentTitle: "글귀",
+            contentType: "QUOTE",
+            eventType: "SHOWN",
+            trigger: "APP_LAUNCH",
+            occurredAt: 1000 + index,
+          })),
+        }),
+      })
+    ).json();
+    assert.equal(seeded.exposureEvents.length, 50);
+
+    const delta = await (
+      await api(`/api/sync?since=${seeded.rev}`, {
+        method: "POST",
+        body: emptySnapshot({
+          exposureEvents: [
+            {
+              syncId: "event-new",
+              contentItemSyncId: "a",
+              contentTitle: "글귀",
+              contentType: "QUOTE",
+              eventType: "SHOWN",
+              trigger: "APP_LAUNCH",
+              occurredAt: 9999,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    // 이력이 수천 건 쌓여도 매번 전부 실어 보내면 안 된다.
+    assert.deepEqual(delta.exposureEvents.map((event) => event.syncId), ["event-new"]);
+    assert.equal(delta.eventCount, 51);
+  });
+
+  it("지운 것은 삭제 표식으로 따라온다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "지울 글귀")] }) })
+    ).json();
+    const created = (await (await api("/api/snapshot")).json()).items.find((item) => item.syncId === "a");
+
+    await api(`/api/content/${created.id}`, { method: "DELETE" });
+
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}`, { method: "POST", body: emptySnapshot() })
+    ).json();
+
+    // 부분 응답에는 남은 것만 오므로, 사라졌다는 사실은 표식으로 들어야 한다.
+    assert.ok(delta.deletions.some((entry) => entry.syncId === "a"), "삭제 표식이 오지 않았습니다.");
+  });
+
+  it("합쳐서 사라진 쪽도 삭제 표식을 남긴다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "같은 글귀")] }) })
+    ).json();
+
+    // 다른 기기가 같은 내용을 다른 syncId로 보내 오면 하나로 합쳐진다.
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}`, {
+        method: "POST",
+        body: emptySnapshot({ items: [quote("b", "같은 글귀", 2000)] }),
+      })
+    ).json();
+
+    assert.equal(delta.itemCount, 1);
+    // 기기에는 아직 a가 있다. 표식이 없으면 영영 남는다.
+    assert.ok(delta.deletions.some((entry) => entry.syncId === "a"), "합쳐서 사라진 쪽의 표식이 없습니다.");
+  });
+
+  it("서버가 통째로 교체되면 전체를 다시 보낸다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "글귀")] }) })
+    ).json();
+
+    // 업로드는 서버를 한 기기 데이터로 통째로 바꾼다. 그 뒤 번호는 다른 세대의 것이라 뜻이 없다.
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ items: [quote("b", "새 기준 글귀")] }) });
+
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}&epoch=${first.epoch}`, { method: "POST", body: emptySnapshot() })
+    ).json();
+
+    assert.equal(delta.partial, false, "세대가 바뀌었는데 부분만 보냈습니다.");
+    assert.deepEqual(delta.items.map((item) => item.syncId), ["b"]);
+  });
+
+  it("같은 세대면 계속 부분만 보낸다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "글귀")] }) })
+    ).json();
+
+    const delta = await (
+      await api(`/api/sync?since=${first.rev}&epoch=${first.epoch}`, { method: "POST", body: emptySnapshot() })
+    ).json();
+
+    assert.equal(delta.partial, true);
+    assert.equal(delta.items.length, 0);
+  });
+
+  it("서버 번호보다 앞선 번호를 받으면 전체를 보낸다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "글귀")] }) });
+
+    // 서버 DB를 새로 깔면 번호가 0부터 다시 시작한다. 그때 기기가 들고 있던 큰 번호가 이 경우다.
+    const delta = await (
+      await api("/api/sync?since=999999", { method: "POST", body: emptySnapshot() })
+    ).json();
+
+    assert.equal(delta.partial, false);
+    assert.equal(delta.items.length, 1);
+  });
+
+  it("스냅샷 내려받기도 since를 받는다", async () => {
+    await resetServer();
+    const first = await (
+      await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("a", "글귀")] }) })
+    ).json();
+
+    const delta = await (await api(`/api/snapshot?since=${first.rev}`)).json();
+
+    assert.equal(delta.partial, true);
+    assert.equal(delta.items.length, 0);
+  });
+});
+
 describe("독서", () => {
   async function resetServer() {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });

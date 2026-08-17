@@ -36,6 +36,9 @@ interface RoutineCheckDao {
     @Query("SELECT * FROM routine_checks WHERE routineId = :routineId")
     suspend fun getByRoutineId(routineId: Long): List<RoutineCheckEntity>
 
+    @Query("DELETE FROM routine_checks WHERE syncId IN (:syncIds)")
+    suspend fun deleteBySyncIds(syncIds: List<String>)
+
     @Query("DELETE FROM routine_checks")
     suspend fun clearAll()
 }

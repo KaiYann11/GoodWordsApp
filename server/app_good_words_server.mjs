@@ -165,7 +165,11 @@ async function route(request, response) {
     return;
   }
   if (method === "GET" && url.pathname === "/api/snapshot") {
-    sendJson(response, 200, snapshot(await loadDb()));
+    sendJson(
+      response,
+      200,
+      snapshot(await loadDb(), url.searchParams.get("since"), url.searchParams.get("epoch"))
+    );
     return;
   }
   if (method === "PUT" && url.pathname === "/api/snapshot") {
@@ -177,8 +181,11 @@ async function route(request, response) {
   // 교체가 아니라 합치기. 여러 기기에서 각각 편집해도 한쪽이 사라지지 않는다.
   if (method === "POST" && url.pathname === "/api/sync") {
     const payload = await readJson(request);
+    // `since`를 주면 그 뒤에 바뀐 것만 돌려줍니다. 보내는 쪽도 바뀐 것만 보내면 됩니다.
+    const since = url.searchParams.get("since") ?? payload.since;
+    const epoch = url.searchParams.get("epoch") ?? payload.epoch;
     const merged = await withDb((db) => mergeSnapshot(db, payload));
-    sendJson(response, 200, snapshot(merged));
+    sendJson(response, 200, snapshot(merged, since, epoch ?? null));
     return;
   }
   if (method === "GET" && url.pathname === "/api/content") {
@@ -679,10 +686,26 @@ async function saveDb(db) {
   await rename(tmpPath, config.dbPath);
 }
 
+/** 리비전이 붙는 레코드 종류. 설정은 레코드가 아니라 따로 셉니다. */
+const revisionedCollections = [
+  "items",
+  "exposureEvents",
+  "routines",
+  "routineChecks",
+  "routineMemos",
+  "deletions",
+  "diaries",
+  "todos",
+  "books",
+];
+
 async function withDb(mutator) {
   const run = writeQueue.catch(() => undefined).then(async () => {
     const db = await loadDb();
+    // 쓰기 경로가 여럿이라 각자 번호를 매기게 하면 언젠가 빠뜨립니다. 여기서 한 번에 봅니다.
+    const before = contentBySyncId(db);
     const result = mutator(db);
+    stampRevisions(db, before);
     await saveDb(db);
     return result;
   });
@@ -690,10 +713,59 @@ async function withDb(mutator) {
   return run;
 }
 
+/**
+ * 지금 내용을 종류·syncId별로 적어 둡니다.
+ *
+ * `updatedAt`만 보면 부족합니다. id를 다시 매기거나 자식이 부모를 다시 잇는 것처럼
+ * `updatedAt`이 그대로인데 기기가 알아야 하는 변화가 있습니다. 그래서 내용을 통째로 비교합니다.
+ */
+function contentBySyncId(db) {
+  const map = new Map();
+  for (const collection of revisionedCollections) {
+    for (const record of db[collection] || []) {
+      map.set(`${collection}:${record.syncId}`, contentOf(record));
+    }
+  }
+  return map;
+}
+
+function contentOf(record) {
+  const { rev, ...rest } = record;
+  return JSON.stringify(rest);
+}
+
+/**
+ * 바뀐 레코드에만 새 번호를 붙입니다.
+ *
+ * 안 바뀐 레코드가 번호를 새로 받으면 증분 동기화가 매번 전부를 보내게 되므로,
+ * 내용이 정말 달라진 것만 올립니다.
+ */
+function stampRevisions(db, before) {
+  let rev = Math.max(0, positiveInt(db.rev));
+  for (const collection of revisionedCollections) {
+    const records = db[collection];
+    if (!Array.isArray(records)) continue;
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      const key = `${collection}:${record.syncId}`;
+      const now = contentOf(record);
+      if (before.get(key) === now && positiveInt(record.rev) > 0) continue;
+      rev += 1;
+      records[index] = { ...record, rev };
+    }
+  }
+  db.rev = rev;
+  return db;
+}
+
 function emptyDb() {
   return {
     appName,
     schemaVersion,
+    // 바뀔 때마다 하나씩 오르는 번호. 기기는 "내가 본 번호 다음부터"만 받아 갑니다.
+    rev: 0,
+    // 통째로 교체할 때마다 오릅니다. 세대가 다르면 리비전 번호를 믿을 수 없어 전체를 보냅니다.
+    epoch: 0,
     settings: { ...defaultSettings },
     settingsUpdatedAt: 0,
     items: [],
@@ -712,25 +784,66 @@ function normalizeDb(db) {
   return {
     appName,
     schemaVersion,
+    rev: Math.max(0, positiveInt(db?.rev)),
+    epoch: Math.max(0, positiveInt(db?.epoch)),
     settings: { ...defaultSettings, ...(db?.settings || {}) },
     settingsUpdatedAt: integer(db?.settingsUpdatedAt, 0),
-    items: Array.isArray(db?.items) ? db.items.map(normalizeContent).filter(Boolean) : [],
-    exposureEvents: Array.isArray(db?.exposureEvents) ? db.exposureEvents.map(normalizeEvent).filter(Boolean) : [],
-    routines: Array.isArray(db?.routines) ? db.routines.map(normalizeRoutine).filter(Boolean) : [],
-    routineChecks: Array.isArray(db?.routineChecks) ? db.routineChecks.map(normalizeRoutineCheck).filter(Boolean) : [],
-    routineMemos: Array.isArray(db?.routineMemos) ? db.routineMemos.map(normalizeRoutineMemo).filter(Boolean) : [],
-    deletions: Array.isArray(db?.deletions) ? db.deletions.map(normalizeDeletion).filter(Boolean) : [],
-    diaries: Array.isArray(db?.diaries) ? db.diaries.map(normalizeDiary).filter(Boolean) : [],
-    todos: Array.isArray(db?.todos) ? db.todos.map(normalizeTodo).filter(Boolean) : [],
-    books: Array.isArray(db?.books) ? db.books.map(normalizeBook).filter(Boolean) : [],
+    items: normalizeList(db?.items, normalizeContent),
+    exposureEvents: normalizeList(db?.exposureEvents, normalizeEvent),
+    routines: normalizeList(db?.routines, normalizeRoutine),
+    routineChecks: normalizeList(db?.routineChecks, normalizeRoutineCheck),
+    routineMemos: normalizeList(db?.routineMemos, normalizeRoutineMemo),
+    deletions: normalizeList(db?.deletions, normalizeDeletion),
+    diaries: normalizeList(db?.diaries, normalizeDiary),
+    todos: normalizeList(db?.todos, normalizeTodo),
+    books: normalizeList(db?.books, normalizeBook),
   };
 }
 
-function snapshot(db) {
+/**
+ * 정리하면서 리비전 번호를 함께 지킵니다.
+ *
+ * `rev`는 서버가 매기는 장부라 각 normalize 함수가 알 필요가 없습니다.
+ * 여기서 한 번에 옮겨 두면 종류를 새로 추가할 때 빠뜨릴 곳이 하나 줄어듭니다.
+ * 기기가 보낸 레코드에는 `rev`가 없어 0이 되고, 병합 뒤에 새 번호를 받습니다.
+ */
+function normalizeList(records, normalize) {
+  if (!Array.isArray(records)) return [];
+  return records
+    .map((record) => {
+      const normalized = normalize(record);
+      if (!normalized) return null;
+      normalized.rev = Math.max(0, positiveInt(record?.rev));
+      return normalized;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * 서버 상태를 내보냅니다.
+ *
+ * `since`를 주면 그 번호 뒤에 바뀐 레코드만 담습니다. 이력이 수천 건 쌓이면
+ * 전체 스냅샷이 1MB에 가까워지는데, 대부분은 지난번과 똑같은 내용입니다.
+ * 0이면 전체입니다. 처음 붙는 기기와 백업 내려받기가 이 경우입니다.
+ */
+function snapshot(db, since = 0, epoch = null) {
   const normalized = normalizeDb(db);
+  // 서버 DB를 새로 깔면 번호가 0부터 다시 시작합니다. 그때 기기가 들고 있던 큰 번호를 그대로 믿으면
+  // 아무것도 안 바뀐 것처럼 보여 영영 못 받습니다. 앞선 번호를 받으면 전체를 보냅니다.
+  const asked = Math.max(0, positiveInt(since));
+  // 통째로 교체된 뒤라면 예전 번호는 다른 세대의 것이라 뜻이 없습니다.
+  const sameEpoch = epoch === null || epoch === undefined || Number(epoch) === normalized.epoch;
+  const from = asked > normalized.rev || !sameEpoch ? 0 : asked;
+  const only = (records) => (from > 0 ? records.filter((record) => positiveInt(record.rev) > from) : records);
   return {
     appName,
     schemaVersion,
+    // 기기는 이 두 값을 적어 두었다가 다음번에 since·epoch로 돌려줍니다.
+    rev: normalized.rev,
+    epoch: normalized.epoch,
+    // 부분만 담았는지 알려 줍니다. 기기는 이때 DB를 통째로 갈아엎으면 안 됩니다.
+    partial: from > 0,
+    since: from,
     exportedAt: new Date().toISOString(),
     itemCount: normalized.items.length,
     eventCount: normalized.exposureEvents.length,
@@ -742,15 +855,15 @@ function snapshot(db) {
     bookCount: normalized.books.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
-    items: sortDesc(normalized.items, "createdAt"),
-    exposureEvents: sortDesc(normalized.exposureEvents, "occurredAt"),
-    routines: sortDesc(normalized.routines, "createdAt"),
-    routineChecks: sortDesc(normalized.routineChecks, "checkedAt"),
-    routineMemos: sortDesc(normalized.routineMemos, "createdAt"),
-    deletions: sortDesc(normalized.deletions, "deletedAt"),
-    diaries: sortDesc(normalized.diaries, "createdAt"),
-    todos: sortDesc(normalized.todos, "createdAt"),
-    books: sortDesc(normalized.books, "updatedAt"),
+    items: only(sortDesc(normalized.items, "createdAt")),
+    exposureEvents: only(sortDesc(normalized.exposureEvents, "occurredAt")),
+    routines: only(sortDesc(normalized.routines, "createdAt")),
+    routineChecks: only(sortDesc(normalized.routineChecks, "checkedAt")),
+    routineMemos: only(sortDesc(normalized.routineMemos, "createdAt")),
+    deletions: only(sortDesc(normalized.deletions, "deletedAt")),
+    diaries: only(sortDesc(normalized.diaries, "createdAt")),
+    todos: only(sortDesc(normalized.todos, "createdAt")),
+    books: only(sortDesc(normalized.books, "updatedAt")),
   };
 }
 
@@ -833,6 +946,22 @@ function deduplicate(db) {
   db.diaries = diaries.kept;
   db.todos = todos.kept;
   db.books = books.kept;
+
+  // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
+  // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
+  const collapsedAt = nowMs();
+  for (const [gone, entityType] of [
+    [items.movedTo, "CONTENT_ITEM"],
+    [routines.movedTo, "ROUTINE"],
+    [diaries.movedTo, "DIARY"],
+    [todos.movedTo, "TODO"],
+    [books.movedTo, "BOOK"],
+  ]) {
+    for (const syncId of gone.keys()) {
+      if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
+      db.deletions.push({ syncId, entityType, deletedAt: collapsedAt });
+    }
+  }
 
   db.exposureEvents = db.exposureEvents.map((event) => ({
     ...event,
@@ -931,12 +1060,15 @@ function norm(value) {
 }
 
 /**
- * 숫자 id를 서버 안에서 다시 매깁니다.
+ * 겹치는 숫자 id만 다시 매깁니다.
  *
  * 병합 결과에는 서로 다른 기기에서 온 같은 숫자 id가 함께 들어옵니다.
  * 그대로 두면 /api/content/{id} 같은 경로가 둘 중 아무거나 집게 되고,
- * 이벤트도 엉뚱한 항목에 붙습니다. 그래서 저장 직전에 1부터 다시 부여하고
- * 자식 레코드의 참조는 syncId로 다시 잇습니다.
+ * 이벤트도 엉뚱한 항목에 붙습니다.
+ *
+ * **멀쩡한 id는 그대로 둡니다.** 예전에는 1부터 전부 다시 매겼는데, 그러면 한 건만 추가돼도
+ * 뒤쪽 번호가 모두 밀려 전 레코드가 "바뀐 것"이 됩니다. 바뀐 것만 주고받으려면
+ * 안 바뀐 레코드는 정말로 안 바뀌어야 합니다.
  */
 function reindex(db) {
   // 9 이전 레코드는 부모를 숫자 id로만 가리킨다. 번호를 바꾸기 전에 syncId로 옮겨 둔다.
@@ -958,34 +1090,63 @@ function reindex(db) {
     routineSyncId: parentOf(memo, "routineSyncId", "routineId", routineSyncIdByOldId),
   }));
 
-  db.items = db.items.map((item, index) => ({ ...item, id: index + 1 }));
-  db.routines = db.routines.map((routine, index) => ({ ...routine, id: index + 1 }));
+  db.items = withStableIds(db.items);
+  db.routines = withStableIds(db.routines);
 
   const itemIds = new Map(db.items.map((item) => [item.syncId, item.id]));
   const routineIds = new Map(db.routines.map((routine) => [routine.syncId, routine.id]));
 
   // 이력은 항목이 지워진 뒤에도 남으므로, 부모를 못 찾아도 버리지 않고 0으로 끊는다.
-  db.exposureEvents = events.map((event, index) => ({
+  db.exposureEvents = withStableIds(events).map((event) => ({
     ...event,
-    id: index + 1,
     contentItemId: itemIds.get(event.contentItemSyncId) || 0,
   }));
-  db.routineChecks = checks.map((check, index) => ({
+  db.routineChecks = withStableIds(checks).map((check) => ({
     ...check,
-    id: index + 1,
     routineId: routineIds.get(check.routineSyncId) || 0,
   }));
   // 메모는 루틴 안에서만 보이므로, 붙을 루틴이 없으면 남겨도 볼 방법이 없다.
-  db.routineMemos = memos
-    .filter((memo) => routineIds.has(memo.routineSyncId))
-    .map((memo, index) => ({ ...memo, id: index + 1, routineId: routineIds.get(memo.routineSyncId) }));
-  // 일기·할 일·책은 딸린 자식이 없어 번호만 다시 매기면 된다.
+  db.routineMemos = withStableIds(memos.filter((memo) => routineIds.has(memo.routineSyncId))).map((memo) => ({
+    ...memo,
+    routineId: routineIds.get(memo.routineSyncId),
+  }));
+  // 일기·할 일·책은 딸린 자식이 없어 번호만 보면 된다.
   // 글귀가 책을 가리키지만 숫자 id가 아니라 bookSyncId로 가리켜서 번호가 바뀌어도 그대로다.
-  db.diaries = db.diaries.map((diary, index) => ({ ...diary, id: index + 1 }));
-  db.todos = db.todos.map((todo, index) => ({ ...todo, id: index + 1 }));
-  db.books = db.books.map((book, index) => ({ ...book, id: index + 1 }));
+  db.diaries = withStableIds(db.diaries);
+  db.todos = withStableIds(db.todos);
+  db.books = withStableIds(db.books);
 
   return db;
+}
+
+/**
+ * 쓸 수 있는 id는 그대로 두고, 겹치거나 없는 것만 빈 번호로 채웁니다.
+ *
+ * 먼저 나온 쪽이 자기 번호를 지킵니다. 순서가 바뀌면 안 바뀐 레코드까지 새 번호를 받아
+ * 증분 동기화가 매번 전부를 보내게 됩니다.
+ */
+function withStableIds(records) {
+  const taken = new Set();
+  const needsId = [];
+  const assigned = records.map((record) => {
+    const id = positiveInt(record.id);
+    if (id > 0 && !taken.has(id)) {
+      taken.add(id);
+      return record;
+    }
+    needsId.push(record);
+    return record;
+  });
+
+  let next = 1;
+  const nextFreeId = () => {
+    while (taken.has(next)) next += 1;
+    taken.add(next);
+    return next;
+  };
+  const fresh = new Map(needsId.map((record) => [record, nextFreeId()]));
+
+  return assigned.map((record) => (fresh.has(record) ? { ...record, id: fresh.get(record) } : record));
 }
 
 /** 같은 숫자 id가 여러 번 나오면 어느 쪽인지 알 수 없으므로 아예 잇지 않는다. */
@@ -1046,6 +1207,14 @@ function mergeDeletions(current, incoming) {
 }
 
 function replaceSnapshot(db, payload) {
+  // 세대를 넘긴다. 바뀐 것만 받던 기기는 세대가 다르면 전체를 다시 받는다.
+  //
+  // 사라진 레코드마다 삭제 표식을 남기는 방법도 있지만 그렇게 하지 않는다.
+  // 업로드는 이미 "통째로 교체"라고 경고하는 동작인데, 표식까지 남기면 실수로 빠뜨린 기록을
+  // 다른 기기에서 되살릴 길까지 없어진다. 세대만 넘기면 다른 기기는 서버 상태를 그대로 받아
+  // 같은 결과에 이르면서도, 표식이 없으니 그 기기의 기록은 다음 병합에서 서버로 올라간다.
+  db.epoch = Math.max(0, positiveInt(db.epoch)) + 1;
+
   db.settings = { ...defaultSettings, ...(payload.settings || {}) };
   db.settingsUpdatedAt = integer(payload.settingsUpdatedAt, nowMs());
   db.deletions = Array.isArray(payload.deletions) ? payload.deletions.map(normalizeDeletion).filter(Boolean) : [];

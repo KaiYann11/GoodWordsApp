@@ -39,6 +39,12 @@ class SettingsStore(
         val autoSyncIntervalHours = intPreferencesKey("auto_sync_interval_hours")
         val lastSyncAt = longPreferencesKey("last_sync_at")
         val lastSyncError = stringPreferencesKey("last_sync_error")
+        /** 서버에서 마지막으로 본 리비전 번호. 다음 동기화에서 "이 뒤에 바뀐 것만" 달라고 씁니다. */
+        val serverRev = longPreferencesKey("server_rev")
+        /** 이 시각 뒤에 고친 레코드만 서버로 보냅니다. */
+        val lastPushAt = longPreferencesKey("last_push_at")
+        /** 서버가 통째로 교체될 때마다 오르는 세대 번호. 다르면 리비전 번호를 믿을 수 없습니다. */
+        val serverEpoch = longPreferencesKey("server_epoch")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -124,7 +130,14 @@ class SettingsStore(
 
     suspend fun updateServerSyncSettings(settings: ServerSyncSettings) {
         context.dataStore.edit { preferences ->
-            preferences[Keys.serverUrl] = settings.serverUrl.trim()
+            val url = settings.serverUrl.trim()
+            // 다른 서버의 리비전 번호를 그대로 쓰면 안 바뀐 것처럼 보여 아무것도 못 받습니다.
+            if (preferences[Keys.serverUrl] != url) {
+                preferences[Keys.serverRev] = 0L
+                preferences[Keys.serverEpoch] = 0L
+                preferences[Keys.lastPushAt] = 0L
+            }
+            preferences[Keys.serverUrl] = url
             preferences[Keys.serverApiKey] = settings.apiKey.trim()
             preferences[Keys.autoSyncEnabled] = settings.autoSyncEnabled
             preferences[Keys.autoSyncIntervalHours] = settings.effectiveIntervalHours
@@ -137,4 +150,46 @@ class SettingsStore(
             preferences[Keys.lastSyncError] = error
         }
     }
+
+    /**
+     * 서버와 어디까지 맞췄는지 적어 둡니다.
+     *
+     * 0이면 아직 한 번도 못 맞춘 것이라, 다음 동기화는 전체를 주고받습니다.
+     * 서버 주소를 바꾸면 다른 서버의 번호를 그대로 쓸 수 없으므로 [clearSyncCursor]로 지웁니다.
+     */
+    suspend fun getSyncCursor(): SyncCursor {
+        val preferences = context.dataStore.data.first()
+        return SyncCursor(
+            serverRev = preferences[Keys.serverRev] ?: 0L,
+            serverEpoch = preferences[Keys.serverEpoch] ?: 0L,
+            lastPushAt = preferences[Keys.lastPushAt] ?: 0L
+        )
+    }
+
+    suspend fun updateSyncCursor(cursor: SyncCursor) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.serverRev] = cursor.serverRev
+            preferences[Keys.serverEpoch] = cursor.serverEpoch
+            preferences[Keys.lastPushAt] = cursor.lastPushAt
+        }
+    }
+
+    suspend fun clearSyncCursor() = updateSyncCursor(SyncCursor())
+}
+
+/** 서버와 어디까지 맞췄는지. */
+data class SyncCursor(
+    /** 서버에서 마지막으로 본 리비전 번호. */
+    val serverRev: Long = 0L,
+    /** 그 번호가 어느 세대의 것인지. 서버가 통째로 교체되면 세대가 올라 번호는 뜻을 잃습니다. */
+    val serverEpoch: Long = 0L,
+    /**
+     * 이 시각까지의 변경은 이미 보냈습니다.
+     *
+     * 이 기기의 시계로만 재는 값입니다. 다른 기기의 시계와 비교하지 않으므로 시차가 있어도 안전합니다.
+     */
+    val lastPushAt: Long = 0L
+) {
+    val isFresh: Boolean
+        get() = serverRev <= 0L
 }

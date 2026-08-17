@@ -45,6 +45,122 @@ class AppDataImporter(
         return AppDataJson.fromJsonText(jsonText)
     }
 
+    /**
+     * 서버가 보내온 "바뀐 것만"을 기존 데이터 위에 얹습니다.
+     *
+     * [importSnapshot]과 달리 **지우고 다시 넣지 않습니다.** 부분 응답에 없는 레코드는
+     * 지워진 것이 아니라 안 바뀐 것이라, 통째로 갈아엎으면 담기지 않은 기록이 전부 사라집니다.
+     *
+     * 짝은 `syncId`로 찾고 **이 기기의 숫자 id는 그대로 둡니다.** 들어온 레코드에는 서버의 번호가
+     * 붙어 있는데, 그걸 그대로 쓰면 번호가 겹쳐 엉뚱한 레코드를 덮어씁니다.
+     */
+    suspend fun applyDelta(incoming: AppDataSnapshot): AppImportResult {
+        val itemDao = database.contentItemDao()
+        val routineDao = database.routineDao()
+        val memoDao = database.routineMemoDao()
+        val checkDao = database.routineCheckDao()
+        val eventDao = database.exposureEventDao()
+        val diaryDao = database.diaryDao()
+        val todoDao = database.todoDao()
+        val bookDao = database.bookDao()
+
+        val previousReminders = database.todoDao().getPendingReminders()
+        val deletedSyncIds = incoming.deletions.map { it.syncId }
+
+        database.withTransaction {
+            if (incoming.deletions.isNotEmpty()) {
+                database.deletionDao().insertAll(incoming.deletions)
+                // 지운 표식이 온 레코드는 이 기기에서도 지웁니다. 부분 응답에는 남은 것만 오기 때문입니다.
+                itemDao.deleteBySyncIds(deletedSyncIds)
+                eventDao.deleteBySyncIds(deletedSyncIds)
+                routineDao.deleteBySyncIds(deletedSyncIds)
+                checkDao.deleteBySyncIds(deletedSyncIds)
+                memoDao.deleteBySyncIds(deletedSyncIds)
+                diaryDao.deleteBySyncIds(deletedSyncIds)
+                todoDao.deleteBySyncIds(deletedSyncIds)
+                bookDao.deleteBySyncIds(deletedSyncIds)
+            }
+
+            val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
+            itemDao.insertAll(incoming.items.map { it.copy(id = localItemIds[it.syncId] ?: 0L) })
+
+            val localRoutineIds = routineDao.getAll().associate { it.syncId to it.id }
+            routineDao.insertAll(incoming.routines.map { it.copy(id = localRoutineIds[it.syncId] ?: 0L) })
+
+            // 자식은 부모의 이 기기 번호로 다시 이어야 합니다. 서버 번호를 그대로 두면 남을 가리킵니다.
+            val itemIdBySyncId = itemDao.getAll().associate { it.syncId to it.id }
+            val routineIdBySyncId = routineDao.getAll().associate { it.syncId to it.id }
+
+            val localEventIds = eventDao.getAll().associate { it.syncId to it.id }
+            eventDao.insertAll(
+                incoming.events.map { event ->
+                    event.copy(
+                        id = localEventIds[event.syncId] ?: 0L,
+                        contentItemId = itemIdBySyncId[event.contentItemSyncId] ?: 0L
+                    )
+                }
+            )
+
+            val localCheckIds = checkDao.getAll().associate { it.syncId to it.id }
+            checkDao.insertAll(
+                incoming.routineChecks.map { check ->
+                    check.copy(
+                        id = localCheckIds[check.syncId] ?: 0L,
+                        routineId = routineIdBySyncId[check.routineSyncId] ?: 0L
+                    )
+                }
+            )
+
+            val localMemoIds = memoDao.getAll().associate { it.syncId to it.id }
+            memoDao.insertAll(
+                // 붙을 루틴이 없는 메모는 루틴 화면에서 볼 방법이 없습니다.
+                incoming.routineMemos
+                    .filter { routineIdBySyncId.containsKey(it.routineSyncId) }
+                    .map { memo ->
+                        memo.copy(
+                            id = localMemoIds[memo.syncId] ?: 0L,
+                            routineId = routineIdBySyncId.getValue(memo.routineSyncId)
+                        )
+                    }
+            )
+
+            val localDiaryIds = diaryDao.getAll().associate { it.syncId to it.id }
+            diaryDao.insertAll(incoming.diaries.map { it.copy(id = localDiaryIds[it.syncId] ?: 0L) })
+
+            val localTodoIds = todoDao.getAll().associate { it.syncId to it.id }
+            todoDao.insertAll(incoming.todos.map { it.copy(id = localTodoIds[it.syncId] ?: 0L) })
+
+            val localBookIds = bookDao.getAll().associate { it.syncId to it.id }
+            bookDao.insertAll(incoming.books.map { it.copy(id = localBookIds[it.syncId] ?: 0L) })
+        }
+
+        // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
+        todoAlarmScheduler?.let { scheduler ->
+            previousReminders.forEach(scheduler::cancel)
+            scheduler.syncAll(todoDao.getPendingReminders())
+        }
+
+        // 설정은 레코드가 아니라 한 덩어리라, 서버가 더 최근일 때만 덮어씁니다.
+        if (incoming.settingsUpdatedAt > settingsStore.getSettingsUpdatedAt()) {
+            val settings = incoming.settings.copy(
+                intervalMinutes = incoming.settings.effectiveIntervalMinutes
+            )
+            settingsStore.updateSettings(settings, incoming.settingsUpdatedAt)
+            reminderScheduler.sync(settings)
+        }
+
+        return AppImportResult(
+            itemCount = incoming.items.size,
+            eventCount = incoming.events.size,
+            routineCount = incoming.routines.size,
+            routineCheckCount = incoming.routineChecks.size,
+            routineMemoCount = incoming.routineMemos.size,
+            diaryCount = incoming.diaries.size,
+            todoCount = incoming.todos.size,
+            bookCount = incoming.books.size
+        )
+    }
+
     suspend fun importSnapshot(incoming: AppDataSnapshot): AppImportResult {
         // 병합 결과에는 서로 다른 기기의 같은 숫자 id가 섞여 있어, 그대로 넣으면 서로를 덮어쓴다.
         val snapshot = SnapshotReindexer.reindex(incoming)
@@ -117,6 +233,10 @@ class AppDataImporter(
         settingsStore.setWidgetContentId(
             snapshot.items.firstOrNull { it.syncId == widgetItemSyncId }?.id ?: 0L
         )
+
+        // 통째로 바꿨으니 서버와 어디까지 맞췄는지는 더 이상 믿을 수 없습니다.
+        // 다음 병합이 전체를 주고받고 나서 새 기준을 적습니다.
+        settingsStore.clearSyncCursor()
 
         // 병합 결과를 되쓸 때 설정 시각을 그대로 유지해야 다음 병합에서 뒤집히지 않는다.
         if (snapshot.settingsUpdatedAt > 0L) {

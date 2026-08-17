@@ -64,16 +64,25 @@ class ServerSyncClient {
      * 스냅샷을 서버와 합치고 합쳐진 결과를 돌려받습니다.
      * 서버가 쓰기를 직렬화하므로 여러 기기가 동시에 보내도 서로를 덮지 않습니다.
      */
+    /**
+     * 스냅샷을 서버와 합치고 합쳐진 결과를 돌려받습니다.
+     *
+     * [since]가 0보다 크면 그 리비전 뒤에 바뀐 것만 돌려받습니다. 이력이 수천 건 쌓이면
+     * 전체가 1MB에 가까워지는데 대부분은 지난번과 같은 내용이라, 매번 다 받을 이유가 없습니다.
+     */
     suspend fun mergeSnapshot(
         settings: ServerSyncSettings,
-        snapshot: AppDataSnapshot
+        snapshot: AppDataSnapshot,
+        since: Long = 0L,
+        epoch: Long = 0L
     ): AppDataSnapshot = withContext(Dispatchers.IO) {
         requireCompatibleSchema(settings)
         val response = request(
             method = "POST",
             serverUrl = settings.serverUrl,
             apiKey = settings.apiKey,
-            path = MERGE_PATH,
+            // 세대를 함께 보냅니다. 서버가 통째로 교체된 뒤면 예전 번호는 뜻이 없어 전체를 받습니다.
+            path = if (since > 0L) "$MERGE_PATH?since=$since&epoch=$epoch" else MERGE_PATH,
             body = AppDataJson.toJson(snapshot).toString()
         )
         AppDataJson.fromJsonText(response)
