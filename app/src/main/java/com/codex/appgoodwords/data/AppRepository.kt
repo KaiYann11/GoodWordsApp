@@ -315,6 +315,8 @@ class AppRepository(
                 entryDate = draft.entryDate.toString(),
                 title = draft.title.trim(),
                 body = draft.body.trim(),
+                weather = draft.weather.trim(),
+                mood = draft.mood.trim(),
                 imageUris = draft.imageUris.distinct(),
                 videoUris = draft.videoUris.distinct(),
                 audioUris = draft.audioUris.distinct(),

@@ -23,6 +23,8 @@ class DiaryTodoSyncTest {
                     entryDate = "2026-08-12",
                     title = "오늘",
                     body = "적어 둔 내용",
+                    weather = DiaryWeather.RAIN.name,
+                    mood = DiaryMood.GOOD.name,
                     imageUris = listOf("content://photo/1"),
                     videoUris = listOf("content://video/1"),
                     audioUris = listOf("content://audio/1"),
@@ -48,6 +50,31 @@ class DiaryTodoSyncTest {
 
         assertEquals(snapshot.diaries, restored.diaries)
         assertEquals(snapshot.todos, restored.todos)
+    }
+
+    @Test
+    fun anUnknownWeatherOrMoodSurvivesTheRoundTrip() {
+        // 다음 버전이 선택지를 늘리면 이 앱이 모르는 값이 들어온다.
+        // 읽을 때 지워 버리면, 다음 업로드에서 서버와 다른 기기의 값까지 함께 지워진다.
+        val snapshot = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "diary-1",
+                    entryDate = "2026-08-12",
+                    weather = "AURORA",
+                    mood = "SLEEPY"
+                )
+            )
+        )
+
+        val restored = AppDataJson.fromJsonText(AppDataJson.toJson(snapshot).toString())
+
+        val diary = restored.diaries.single()
+        assertEquals("AURORA", diary.weather)
+        assertEquals("SLEEPY", diary.mood)
+        // 화면에서는 고르지 않은 것으로 보입니다. 앱이 죽지 않는 것이 먼저입니다.
+        assertNull(diary.weatherOption)
+        assertNull(diary.moodOption)
     }
 
     @Test

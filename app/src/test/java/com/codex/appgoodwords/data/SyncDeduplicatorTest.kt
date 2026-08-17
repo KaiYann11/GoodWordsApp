@@ -141,6 +141,50 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun twoMoodOnlyDiariesOnTheSameDayAreKept() {
+        // 글도 사진도 없이 기분만 남기는 날이 있다. 합치면 한쪽 기분이 조용히 사라진다.
+        val merged = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(syncId = "d1", entryDate = "2026-08-12", mood = DiaryMood.GOOD.name, updatedAt = 1_000L),
+                DiaryEntity(syncId = "d2", entryDate = "2026-08-12", mood = DiaryMood.SAD.name, updatedAt = 2_000L)
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(2, result.diaries.size)
+    }
+
+    @Test
+    fun theSameDiaryWithTheSameWeatherAndMoodBecomesOne() {
+        val merged = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "d1",
+                    entryDate = "2026-08-12",
+                    body = "같은 하루",
+                    weather = DiaryWeather.RAIN.name,
+                    mood = DiaryMood.GOOD.name,
+                    updatedAt = 1_000L
+                ),
+                DiaryEntity(
+                    syncId = "d2",
+                    entryDate = "2026-08-12",
+                    body = "같은 하루",
+                    weather = DiaryWeather.RAIN.name,
+                    mood = DiaryMood.GOOD.name,
+                    updatedAt = 2_000L
+                )
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(1, result.diaries.size)
+        assertEquals("나중에 고친 쪽이 남아야 합니다.", "d2", result.diaries.single().syncId)
+    }
+
+    @Test
     fun theSameTodoOnTheSameDayBecomesOne() {
         val merged = snapshotOf(
             todos = listOf(

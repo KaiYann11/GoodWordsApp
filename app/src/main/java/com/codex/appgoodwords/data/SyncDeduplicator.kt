@@ -90,10 +90,14 @@ object SyncDeduplicator {
 
     private fun routineFingerprint(routine: RoutineEntity): String = normalize(routine.title)
 
+    // 날씨와 기분도 함께 봅니다. 글 없이 기분만 남긴 날이 있을 수 있어서,
+    // 빼면 같은 날 남긴 두 기분 중 하나가 조용히 사라집니다.
     private fun diaryFingerprint(diary: DiaryEntity): String = listOf(
         diary.entryDate.trim(),
         normalize(diary.title),
         normalize(diary.body),
+        diary.weather.trim(),
+        diary.mood.trim(),
         diary.imageUris.joinToString(","),
         diary.videoUris.joinToString(","),
         diary.audioUris.joinToString(",")

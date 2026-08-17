@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 10;
+const schemaVersion = 11;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -564,11 +564,14 @@ function routineFingerprint(routine) {
   return norm(routine.title);
 }
 
+// 날씨와 기분도 함께 본다. 앱의 diaryFingerprint와 같은 항목이어야 한다.
 function diaryFingerprint(diary) {
   return [
     text(diary.entryDate),
     norm(diary.title),
     norm(diary.body),
+    text(diary.weather),
+    text(diary.mood),
     diary.imageUris.join(","),
     diary.videoUris.join(","),
     diary.audioUris.join(","),
@@ -960,6 +963,10 @@ function normalizeDiary(diary) {
     entryDate,
     title: text(diary.title),
     body: text(diary.body),
+    // 날씨와 기분은 앱의 DiaryWeather·DiaryMood 이름이다.
+    // 서버는 값을 검사하지 않는다. 앱이 선택지를 늘려도 서버를 같이 고칠 필요가 없게 하려는 것이다.
+    weather: text(diary.weather),
+    mood: text(diary.mood),
     // 첨부는 URI 문자열만 오간다. 파일 자체는 기기에 있고 서버로 올라오지 않는다.
     imageUris: stringList(diary.imageUris),
     videoUris: stringList(diary.videoUris),

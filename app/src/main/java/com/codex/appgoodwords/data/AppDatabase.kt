@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DiaryEntity::class,
         TodoEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -285,6 +285,19 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_todos_syncId ON todos(syncId)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_todos_dueDate ON todos(dueDate)")
+            }
+        }
+
+        /**
+         * 일기에 날씨와 기분을 붙입니다.
+         *
+         * 이미 쓴 일기는 고른 적이 없으므로 빈 문자열이 됩니다. 화면에서는 아무것도 안 보입니다.
+         * 값은 [DiaryWeather]·[DiaryMood]의 이름이고, 모르는 값이 들어와도 읽기만 실패합니다.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE diaries ADD COLUMN weather TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE diaries ADD COLUMN mood TEXT NOT NULL DEFAULT ''")
             }
         }
     }

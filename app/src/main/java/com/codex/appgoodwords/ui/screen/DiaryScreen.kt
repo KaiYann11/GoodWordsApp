@@ -11,13 +11,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,11 +41,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.DiaryMood
+import com.codex.appgoodwords.data.DiaryWeather
 import java.time.LocalDate
 
 internal const val diaryWriteButtonTag = "diary_write_button"
 internal const val diaryBodyTag = "diary_body"
 internal const val diarySaveButtonTag = "diary_save_button"
+
+/** 날씨·기분 칩은 개수가 많아 하나씩 태그를 답니다. 테스트에서 특정 칩만 누르기 위한 것입니다. */
+internal fun diaryWeatherChipTag(weather: DiaryWeather) = "diary_weather_${weather.name}"
+
+internal fun diaryMoodChipTag(mood: DiaryMood) = "diary_mood_${mood.name}"
 
 /**
  * 날짜별 일기.
@@ -73,7 +84,8 @@ fun DiaryScreen(
                 ) {
                     Text("일기", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "사진·동영상·음성 파일을 함께 붙일 수 있습니다. 하루에 여러 번 써도 됩니다.",
+                        text = "날씨와 기분을 고르고 사진·동영상·음성 파일을 붙일 수 있습니다. " +
+                            "하루에 여러 번 써도 됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -107,7 +119,14 @@ fun DiaryScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(diary.entryDate, style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = listOfNotNull(
+                                    diary.entryDate,
+                                    diary.weatherOption?.let { "${it.emoji} ${it.label}" },
+                                    diary.moodOption?.let { "${it.emoji} ${it.label}" }
+                                ).joinToString("  ·  "),
+                                style = MaterialTheme.typography.labelMedium
+                            )
                             if (diary.displayTitle.isNotBlank()) {
                                 Text(diary.displayTitle, style = MaterialTheme.typography.titleSmall)
                             }
@@ -200,7 +219,11 @@ private fun DiaryEditDialog(
         onDismissRequest = onDismiss,
         title = { Text("${current.entryDate} 일기") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 선택 줄까지 들어가면 작은 화면에서는 넘칩니다. 스크롤이 없으면 저장 버튼에 닿지 못합니다.
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = current.title,
                     onValueChange = { current = current.copy(title = it) },
@@ -208,6 +231,45 @@ private fun DiaryEditDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // 같은 칩을 다시 누르면 선택이 풀립니다. 잘못 골랐을 때 되돌릴 방법이 달리 없습니다.
+                // 개수가 몇 개뿐이라 LazyRow를 쓰지 않습니다. 화면 밖 칩도 만들어 두어야 스크롤로 닿습니다.
+                Text("오늘의 날씨", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    DiaryWeather.entries.forEach { weather ->
+                        val selected = current.weather == weather.name
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                current = current.copy(weather = if (selected) "" else weather.name)
+                            },
+                            label = { Text("${weather.emoji} ${weather.label}") },
+                            modifier = Modifier.testTag(diaryWeatherChipTag(weather))
+                        )
+                    }
+                }
+
+                Text("오늘의 기분", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    DiaryMood.entries.forEach { mood ->
+                        val selected = current.mood == mood.name
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                current = current.copy(mood = if (selected) "" else mood.name)
+                            },
+                            label = { Text("${mood.emoji} ${mood.label}") },
+                            modifier = Modifier.testTag(diaryMoodChipTag(mood))
+                        )
+                    }
+                }
+
                 OutlinedTextField(
                     value = current.body,
                     onValueChange = { current = current.copy(body = it) },

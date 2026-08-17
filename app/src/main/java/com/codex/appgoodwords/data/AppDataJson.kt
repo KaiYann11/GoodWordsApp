@@ -21,7 +21,7 @@ data class AppDataSnapshot(
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 10
+    const val schemaVersion: Int = 11
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -110,6 +110,8 @@ object AppDataJson {
         .put("entryDate", entryDate)
         .put("title", title)
         .put("body", body)
+        .put("weather", weather)
+        .put("mood", mood)
         .put("imageUris", JSONArray(imageUris))
         .put("videoUris", JSONArray(videoUris))
         .put("audioUris", JSONArray(audioUris))
@@ -134,6 +136,9 @@ object AppDataJson {
                         entryDate = entryDate,
                         title = diary.optString("title"),
                         body = diary.optString("body"),
+                        // 모르는 값이어도 그대로 둡니다. 여기서 지우면 다음 업로드 때 서버에서도 사라집니다.
+                        weather = diary.optString("weather").trim(),
+                        mood = diary.optString("mood").trim(),
                         imageUris = diary.optJSONArray("imageUris").toStringList(),
                         videoUris = diary.optJSONArray("videoUris").toStringList(),
                         audioUris = diary.optJSONArray("audioUris").toStringList(),

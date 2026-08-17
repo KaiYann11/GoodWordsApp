@@ -36,7 +36,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 10입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 11입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·

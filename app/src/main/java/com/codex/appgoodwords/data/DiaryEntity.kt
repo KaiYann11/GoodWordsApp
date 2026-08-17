@@ -25,6 +25,10 @@ data class DiaryEntity(
     val entryDate: String,
     val title: String = "",
     val body: String = "",
+    /** [DiaryWeather]의 이름. 고르지 않았으면 빈 문자열입니다. */
+    val weather: String = "",
+    /** [DiaryMood]의 이름. 고르지 않았으면 빈 문자열입니다. */
+    val mood: String = "",
     val imageUris: List<String> = emptyList(),
     val videoUris: List<String> = emptyList(),
     val audioUris: List<String> = emptyList(),
@@ -32,6 +36,13 @@ data class DiaryEntity(
 ) {
     val hasAttachments: Boolean
         get() = imageUris.isNotEmpty() || videoUris.isNotEmpty() || audioUris.isNotEmpty()
+
+    // 모르는 값은 null이 됩니다. 저장된 문자열은 그대로 두므로 동기화로 사라지지는 않습니다.
+    val weatherOption: DiaryWeather?
+        get() = DiaryWeather.fromCode(weather)
+
+    val moodOption: DiaryMood?
+        get() = DiaryMood.fromCode(mood)
 
     /** 제목이 비어 있으면 목록에서 본문 앞부분을 대신 보여 줍니다. */
     val displayTitle: String

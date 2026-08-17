@@ -553,6 +553,74 @@ describe("일기와 할 일 병합", () => {
     assert.deepEqual(merged.diaries[0].videoUris, []);
   });
 
+  it("일기의 날씨와 기분도 함께 오간다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-weather",
+              updatedAt: 1000,
+              entryDate: "2026-08-17",
+              body: "비 오는 날",
+              weather: "RAIN",
+              mood: "GOOD",
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries[0].weather, "RAIN");
+    assert.equal(merged.diaries[0].mood, "GOOD");
+  });
+
+  it("고르지 않은 날씨와 기분은 빈 값으로 남는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [{ syncId: "diary-plain", updatedAt: 1000, entryDate: "2026-08-17", body: "그냥 하루", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    // null이나 undefined가 되면 앱이 읽을 때 "null"이라는 날씨가 생긴다.
+    assert.equal(merged.diaries[0].weather, "");
+    assert.equal(merged.diaries[0].mood, "");
+  });
+
+  it("서버가 모르는 날씨 값도 지우지 않고 그대로 둔다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-future",
+              updatedAt: 1000,
+              entryDate: "2026-08-17",
+              body: "새 앱이 보낸 일기",
+              weather: "AURORA",
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    // 서버가 선택지를 검사하면, 앱이 새 날씨를 추가할 때마다 서버도 같이 고쳐야 한다.
+    assert.equal(merged.diaries[0].weather, "AURORA");
+  });
+
   it("날짜가 없는 일기는 놓을 자리가 없어 버린다", async () => {
     await resetServer();
 
@@ -829,6 +897,44 @@ describe("같은 내용 합치기", () => {
 
     // 합치면 한쪽 사진이 사라진다.
     assert.equal(merged.diaries.length, 2);
+  });
+
+  it("같은 날 기분만 다른 일기는 각각 남는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            { syncId: "d1", updatedAt: 1000, entryDate: "2026-08-17", mood: "GOOD", createdAt: 1000 },
+            { syncId: "d2", updatedAt: 2000, entryDate: "2026-08-17", mood: "SAD", createdAt: 2000 },
+          ],
+        }),
+      })
+    ).json();
+
+    // 합치면 한쪽 기분이 사라진다. 앱의 SyncDeduplicator와 같은 판정이어야 한다.
+    assert.equal(merged.diaries.length, 2);
+  });
+
+  it("날씨와 기분까지 같은 일기는 하나로 합친다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            { syncId: "d1", updatedAt: 1000, entryDate: "2026-08-17", body: "같은 하루", weather: "RAIN", mood: "GOOD", createdAt: 1000 },
+            { syncId: "d2", updatedAt: 2000, entryDate: "2026-08-17", body: "같은 하루", weather: "RAIN", mood: "GOOD", createdAt: 2000 },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 1);
+    assert.equal(merged.diaries[0].syncId, "d2");
   });
 
   it("두 기기가 같은 할 일을 만들면 하나로 합친다", async () => {
