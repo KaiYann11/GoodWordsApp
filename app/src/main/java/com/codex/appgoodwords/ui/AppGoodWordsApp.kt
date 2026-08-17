@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -72,6 +73,7 @@ import com.codex.appgoodwords.ui.screen.HomeScreen
 import com.codex.appgoodwords.ui.screen.LibraryScreen
 import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
+import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
 import com.codex.appgoodwords.ui.screen.TodayScreen
 import com.codex.appgoodwords.ui.screen.TodoScreen
@@ -93,6 +95,8 @@ private enum class AppTab(
     ADD("추가"),
     /** 이력은 매일 볼 화면이 아니라 설정 안으로 옮겼습니다. 하단 바에는 없습니다. */
     HISTORY("이력"),
+    /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
+    SEARCH("검색"),
     SETTINGS("설정")
 }
 
@@ -293,6 +297,17 @@ fun AppGoodWordsApp(
                                 )
                             }
                         }
+                    },
+                    actions = {
+                        // 검색은 특정 탭에 매이지 않습니다. 다섯 기능을 한 번에 찾기 때문입니다.
+                        if (selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SEARCH) {
+                            IconButton(onClick = { pushRoute(tabRoute(AppTab.SEARCH)) }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Search,
+                                    contentDescription = "검색"
+                                )
+                            }
+                        }
                     }
                 )
             },
@@ -321,6 +336,7 @@ fun AppGoodWordsApp(
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
+                                                AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
                                             },
                                             contentDescription = tab.title
@@ -611,6 +627,16 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             }
+                        )
+
+                        AppTab.SEARCH -> SearchScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            items = allItems,
+                            diaries = diaries,
+                            todos = todos,
+                            books = books,
+                            routines = routines,
+                            onOpenQuote = { itemId -> openItemDetail(AppTab.SEARCH, itemId) }
                         )
 
                         AppTab.HISTORY -> HistoryScreen(
