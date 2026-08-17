@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RoutineMemoEntity::class,
         DeletionEntity::class,
         DiaryEntity::class,
-        TodoEntity::class
+        TodoEntity::class,
+        BookEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun deletionDao(): DeletionDao
     abstract fun diaryDao(): DiaryDao
     abstract fun todoDao(): TodoDao
+    abstract fun bookDao(): BookDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -298,6 +300,40 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE diaries ADD COLUMN weather TEXT NOT NULL DEFAULT ''")
                 database.execSQL("ALTER TABLE diaries ADD COLUMN mood TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * 독서 관리를 추가합니다.
+         *
+         * 책 표를 새로 만들고, 글귀가 어느 책 몇 쪽에서 나왔는지 가리킬 열을 붙입니다.
+         * 책은 `bookSyncId`로 가리킵니다. 숫자 id는 기기마다 따로 증가해서
+         * 다른 기기로 넘어가면 엉뚱한 책을 가리킵니다.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS books (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "title TEXT NOT NULL, " +
+                        "author TEXT NOT NULL, " +
+                        "totalPages INTEGER NOT NULL, " +
+                        "currentPage INTEGER NOT NULL, " +
+                        "status TEXT NOT NULL, " +
+                        "note TEXT NOT NULL, " +
+                        // 시작·완독 시각은 없을 수 있어 NULL을 허용한다.
+                        "startedAt INTEGER, " +
+                        "finishedAt INTEGER, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_books_syncId ON books(syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_books_status ON books(status)")
+
+                database.execSQL("ALTER TABLE content_items ADD COLUMN bookSyncId TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE content_items ADD COLUMN bookPage INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

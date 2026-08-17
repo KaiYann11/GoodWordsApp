@@ -64,11 +64,13 @@ import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.ui.screen.AddContentScreen
+import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DetailScreen
 import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
 import com.codex.appgoodwords.ui.screen.LibraryScreen
+import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
 import com.codex.appgoodwords.ui.screen.TodayScreen
@@ -124,6 +126,7 @@ fun AppGoodWordsApp(
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
     val diaries by viewModel.diaries.collectAsStateWithLifecycle()
     val todos by viewModel.todos.collectAsStateWithLifecycle()
+    val books by viewModel.books.collectAsStateWithLifecycle()
 
     // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
     val context = LocalContext.current
@@ -390,8 +393,62 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.LIBRARY -> LibraryScreen(
+                        AppTab.LIBRARY -> LibraryTabsScreen(
                             modifier = Modifier.padding(innerPadding),
+                            bookContent = {
+                                BookScreen(
+                                    books = books,
+                                    // 책마다 그 책에서 뽑은 글귀가 몇 개인지 세어 카드에 보여 줍니다.
+                                    quoteCountBySyncId = remember(allItems) {
+                                        allItems
+                                            .filter { it.bookSyncId.isNotBlank() }
+                                            .groupingBy { it.bookSyncId }
+                                            .eachCount()
+                                    },
+                                    onSaveBook = { draft ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.saveBook(draft)
+                                            snackbarHostState.showSnackbar(
+                                                if (result.isSuccess) "책을 저장했습니다."
+                                                else result.exceptionOrNull()?.message ?: "책을 저장하지 못했습니다."
+                                            )
+                                        }
+                                    },
+                                    onUpdateProgress = { id, page ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.updateBookProgress(id, page)
+                                            if (result.isFailure) {
+                                                snackbarHostState.showSnackbar(
+                                                    result.exceptionOrNull()?.message ?: "진도를 기록하지 못했습니다."
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onToggleFinished = { id ->
+                                        coroutineScope.launch { viewModel.toggleBookFinished(id) }
+                                    },
+                                    onDeleteBook = { id ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.deleteBook(id)
+                                            snackbarHostState.showSnackbar(
+                                                if (result.isSuccess) "책을 지웠습니다."
+                                                else result.exceptionOrNull()?.message ?: "책을 지우지 못했습니다."
+                                            )
+                                        }
+                                    },
+                                    onExtractQuote = { id, body, page ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.extractQuoteFromBook(id, body, page)
+                                            snackbarHostState.showSnackbar(
+                                                if (result.isSuccess) "보관함에 글귀를 넣었습니다."
+                                                else result.exceptionOrNull()?.message ?: "글귀를 넣지 못했습니다."
+                                            )
+                                        }
+                                    }
+                                )
+                            },
+                            quoteContent = {
+                        LibraryScreen(
                             items = allItems,
                             categories = categories,
                             confirmedTodayIds = confirmedTodayIds,
@@ -419,6 +476,8 @@ fun AppGoodWordsApp(
                                     }
                                     snackbarHostState.showSnackbar(message)
                                 }
+                            }
+                        )
                             }
                         )
 

@@ -13,7 +13,8 @@ class AppRepository(
     private val linkMetadataFetcher: LinkMetadataFetcher,
     private val deletionDao: DeletionDao? = null,
     private val diaryDao: DiaryDao? = null,
-    private val todoDao: TodoDao? = null
+    private val todoDao: TodoDao? = null,
+    private val bookDao: BookDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -332,6 +333,116 @@ class AppRepository(
         existing?.let { recordDeletion(it.syncId, SyncEntityType.DIARY) }
     }
 
+    // ---- 독서 ----
+
+    fun observeBooks(): Flow<List<BookEntity>> =
+        bookDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun getBookById(id: Long): BookEntity? = bookDao?.getById(id)
+
+    suspend fun saveBook(draft: BookDraft): BookEntity {
+        val dao = bookDao ?: error("책을 저장할 수 없습니다.")
+        val title = draft.title.trim()
+        require(title.isNotBlank()) { "책 제목을 입력해 주세요." }
+        val existing = if (draft.id != 0L) dao.getById(draft.id) else null
+        val totalPages = draft.totalPages.coerceAtLeast(0)
+        val book = BookEntity(
+            id = if (draft.id == 0L) 0 else draft.id,
+            // 고쳐도 syncId는 지켜야 다른 기기에서 같은 책으로 인식되고, 뽑아 둔 글귀도 출처를 잃지 않는다.
+            syncId = existing?.syncId ?: SyncIdentity.newId(),
+            updatedAt = System.currentTimeMillis(),
+            title = title,
+            author = draft.author.trim(),
+            totalPages = totalPages,
+            // 전체 쪽수를 줄였는데 현재 쪽이 그대로면 100%를 넘습니다.
+            currentPage = draft.currentPage.coerceAtLeast(0).let { page ->
+                if (totalPages > 0) page.coerceAtMost(totalPages) else page
+            },
+            status = draft.status.trim().ifBlank { BookStatus.READING.name },
+            note = draft.note.trim(),
+            startedAt = existing?.startedAt ?: System.currentTimeMillis(),
+            finishedAt = existing?.finishedAt,
+            createdAt = existing?.createdAt ?: System.currentTimeMillis()
+        )
+        val id = dao.insert(book)
+        return book.copy(id = if (book.id == 0L) id else book.id)
+    }
+
+    /** 읽은 쪽수만 고칩니다. 다 읽으면 상태도 함께 넘깁니다. */
+    suspend fun updateBookProgress(id: Long, currentPage: Int): BookEntity? {
+        val dao = bookDao ?: return null
+        val existing = dao.getById(id) ?: return null
+        val page = currentPage.coerceAtLeast(0).let { value ->
+            if (existing.totalPages > 0) value.coerceAtMost(existing.totalPages) else value
+        }
+        // 마지막 쪽에 닿으면 다 읽은 것으로 봅니다. 따로 한 번 더 누르게 하지 않습니다.
+        val finished = existing.totalPages > 0 && page >= existing.totalPages
+        val updated = existing.copy(
+            currentPage = page,
+            updatedAt = System.currentTimeMillis(),
+            status = if (finished) BookStatus.FINISHED.name else BookStatus.READING.name,
+            finishedAt = if (finished) existing.finishedAt ?: System.currentTimeMillis() else null
+        )
+        dao.insert(updated)
+        return updated
+    }
+
+    /** 다 읽음/다시 읽는 중을 오갑니다. */
+    suspend fun toggleBookFinished(id: Long): BookEntity? {
+        val dao = bookDao ?: return null
+        val existing = dao.getById(id) ?: return null
+        val nowFinished = !existing.isFinished
+        val updated = existing.copy(
+            updatedAt = System.currentTimeMillis(),
+            status = if (nowFinished) BookStatus.FINISHED.name else BookStatus.READING.name,
+            // 다 읽었다고 하면 마지막 쪽까지 읽은 것으로 맞춰 줍니다.
+            currentPage = if (nowFinished && existing.totalPages > 0) existing.totalPages else existing.currentPage,
+            finishedAt = if (nowFinished) System.currentTimeMillis() else null
+        )
+        dao.insert(updated)
+        return updated
+    }
+
+    suspend fun deleteBook(id: Long) {
+        val dao = bookDao ?: return
+        val existing = dao.getById(id) ?: return
+        dao.deleteById(id)
+        // 뽑아 둔 글귀는 남깁니다. 책을 정리했다고 밑줄 그은 문장까지 사라지면 안 됩니다.
+        recordDeletion(existing.syncId, SyncEntityType.BOOK)
+    }
+
+    /**
+     * 읽고 있는 책에서 글귀를 바로 뽑아 보관함에 넣습니다.
+     *
+     * 저자와 출처를 책에서 채워 주므로, 사용자는 문장과 쪽수만 적으면 됩니다.
+     * 적은 쪽수가 지금 읽는 쪽보다 뒤면 진도도 함께 옮겨 줍니다. 뽑았다는 것은 거기까지 읽었다는 뜻입니다.
+     */
+    suspend fun extractQuoteFromBook(bookId: Long, body: String, page: Int): ContentItemEntity {
+        val dao = bookDao ?: error("책을 찾을 수 없습니다.")
+        val book = dao.getById(bookId) ?: error("책을 찾을 수 없습니다.")
+        val text = body.trim()
+        require(text.isNotBlank()) { "뽑아낼 글귀를 입력해 주세요." }
+
+        val quote = ContentItemEntity(
+            syncId = SyncIdentity.newId(),
+            updatedAt = System.currentTimeMillis(),
+            type = ContentType.QUOTE,
+            title = book.title,
+            body = text,
+            author = book.author,
+            category = BOOK_CATEGORY,
+            bookSyncId = book.syncId,
+            bookPage = page.coerceAtLeast(0),
+            createdAt = System.currentTimeMillis()
+        )
+        val id = contentItemDao.insert(quote)
+
+        if (page > book.currentPage) {
+            updateBookProgress(bookId, page)
+        }
+        return quote.copy(id = id)
+    }
+
     // ---- 할 일 ----
 
     fun observeTodos(): Flow<List<TodoEntity>> =
@@ -491,5 +602,8 @@ class AppRepository(
     companion object {
         /** 가장 오래 안 나온 항목만 뽑으면 순서가 뻔해지므로 상위 후보 몇 개 중에서 무작위로 고른다. */
         const val SURFACE_POOL_SIZE = 5
+
+        /** 책에서 뽑은 글귀에 붙는 카테고리. 보관함에서 한데 모아 보려는 것입니다. */
+        const val BOOK_CATEGORY = "독서"
     }
 }

@@ -24,7 +24,8 @@ class AppContainer(
                 AppDatabase.MIGRATION_7_8,
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
-                AppDatabase.MIGRATION_10_11
+                AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -56,7 +57,8 @@ class AppContainer(
             linkMetadataFetcher = LinkMetadataFetcher(),
             deletionDao = database.deletionDao(),
             diaryDao = database.diaryDao(),
-            todoDao = database.todoDao()
+            todoDao = database.todoDao(),
+            bookDao = database.bookDao()
         )
     }
 

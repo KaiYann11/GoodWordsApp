@@ -75,6 +75,14 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            // 책도 고칠 수 있습니다. 특히 읽은 쪽수는 기기마다 달라져서, 나중에 넘긴 쪽이 남아야 합니다.
+            books = mergeMutable(
+                local = local.books,
+                remote = remote.books,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }

@@ -254,6 +254,22 @@ button.ghost {
   line-height: 1.5;
 }
 
+/* 독서 진도. 전체 쪽수를 아는 책에만 그린다. */
+.bookBar {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+
+.bookBar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
 .attachmentGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

@@ -20,12 +20,18 @@ object SyncDeduplicator {
         val routines = resolve(snapshot.routines, { it.syncId }, { it.updatedAt }, ::routineFingerprint)
         val diaries = resolve(snapshot.diaries, { it.syncId }, { it.updatedAt }, ::diaryFingerprint)
         val todos = resolve(snapshot.todos, { it.syncId }, { it.updatedAt }, ::todoFingerprint)
+        val books = resolve(snapshot.books, { it.syncId }, { it.updatedAt }, ::bookFingerprint)
 
         return snapshot.copy(
-            items = items.kept,
+            items = items.kept.map { item ->
+                // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙입니다. 안 옮기면 출처를 잃습니다.
+                if (item.bookSyncId.isBlank()) item
+                else item.copy(bookSyncId = books.survivorOf(item.bookSyncId))
+            },
             routines = routines.kept,
             diaries = diaries.kept,
             todos = todos.kept,
+            books = books.kept,
             events = snapshot.events.map { event ->
                 event.copy(contentItemSyncId = items.survivorOf(event.contentItemSyncId))
             },
@@ -101,6 +107,18 @@ object SyncDeduplicator {
         diary.imageUris.joinToString(","),
         diary.videoUris.joinToString(","),
         diary.audioUris.joinToString(",")
+    ).joinToString("|")
+
+    /**
+     * 같은 책은 제목과 저자로 봅니다.
+     *
+     * 읽은 쪽수는 넣지 않습니다. 두 기기에서 같은 책을 각자 담으면 진도가 다른 것이 당연한데,
+     * 쪽수까지 보면 서로 다른 책이 되어 목록에 같은 책이 두 벌 남습니다.
+     * 진도는 최신 `updatedAt`이 이깁니다.
+     */
+    private fun bookFingerprint(book: BookEntity): String = listOf(
+        normalize(book.title),
+        normalize(book.author)
     ).joinToString("|")
 
     private fun todoFingerprint(todo: TodoEntity): String = listOf(

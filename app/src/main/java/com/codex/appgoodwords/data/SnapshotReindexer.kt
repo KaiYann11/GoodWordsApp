@@ -53,9 +53,11 @@ object SnapshotReindexer {
                     memo.copy(routineSyncId = parentSyncId, routineId = routineId)
                 }
                 .mapIndexed { index, memo -> memo.copy(id = index + 1L) },
-            // 일기와 할 일은 딸린 자식이 없어 번호만 다시 매기면 된다.
+            // 일기·할 일·책은 딸린 자식이 없어 번호만 다시 매기면 된다.
+            // 글귀가 책을 가리키지만 숫자 id가 아니라 bookSyncId로 가리켜서 번호가 바뀌어도 그대로다.
             diaries = snapshot.diaries.mapIndexed { index, diary -> diary.copy(id = index + 1L) },
-            todos = snapshot.todos.mapIndexed { index, todo -> todo.copy(id = index + 1L) }
+            todos = snapshot.todos.mapIndexed { index, todo -> todo.copy(id = index + 1L) },
+            books = snapshot.books.mapIndexed { index, book -> book.copy(id = index + 1L) }
         )
     }
 

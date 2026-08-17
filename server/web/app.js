@@ -5,6 +5,9 @@ const state = {
   editingRoutineId: null,
   editingDiaryId: null,
   editingTodoId: null,
+  editingBookId: null,
+  /** 글귀를 뽑는 중인 책. null이면 창이 닫혀 있습니다. */
+  quotingBookId: null,
   /** 편집 중인 일기의 첨부. 저장 전까지는 화면에만 있습니다. */
   diaryUris: { imageUris: [], videoUris: [], audioUris: [] },
   query: "",
@@ -61,6 +64,8 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
     state.editingRoutineId = null;
     state.editingDiaryId = null;
     state.editingTodoId = null;
+    state.editingBookId = null;
+    state.quotingBookId = null;
     state.diaryUris = emptyDiaryUris();
     syncTabs();
     render();
@@ -101,6 +106,10 @@ app.addEventListener("submit", async (event) => {
       await submitDiary(form);
     } else if (form.dataset.form === "todo") {
       await submitTodo(form);
+    } else if (form.dataset.form === "book") {
+      await submitBook(form);
+    } else if (form.dataset.form === "bookQuote") {
+      await submitBookQuote(form);
     }
   } catch (error) {
     showToast(error.message || "요청에 실패했습니다.");
@@ -186,6 +195,31 @@ app.addEventListener("click", async (event) => {
     } else if (action === "toggle-todo") {
       await api(`/api/todos/${id}/toggle-done`, { method: "POST" });
       await loadSnapshot(false);
+    } else if (action === "edit-book") {
+      state.editingBookId = id;
+      state.quotingBookId = null;
+      render();
+    } else if (action === "cancel-book") {
+      state.editingBookId = null;
+      render();
+    } else if (action === "delete-book") {
+      await api(`/api/books/${id}`, { method: "DELETE" });
+      showToast("책을 지웠습니다. 뽑아 둔 글귀는 보관함에 남습니다.");
+      await loadSnapshot(false);
+    } else if (action === "quote-book") {
+      state.quotingBookId = id;
+      state.editingBookId = null;
+      render();
+    } else if (action === "cancel-quote") {
+      state.quotingBookId = null;
+      render();
+    } else if (action === "toggle-book-finished") {
+      const book = findById(state.snapshot.books, id);
+      await api(`/api/books/${id}`, {
+        method: "PUT",
+        body: { status: book?.status === "FINISHED" ? "READING" : "FINISHED" },
+      });
+      await loadSnapshot(false);
     } else if (action === "delete-event") {
       await api(`/api/events?ids=${id}`, { method: "DELETE" });
       await loadSnapshot(false);
@@ -247,6 +281,7 @@ function emptySnapshot() {
     routineMemos: [],
     diaries: [],
     todos: [],
+    books: [],
     settings: {},
   };
 }
@@ -344,6 +379,7 @@ function render() {
   if (state.activeTab === "routines") renderRoutines();
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
+  if (state.activeTab === "books") renderBooks();
   if (state.activeTab === "history") renderHistory();
   if (state.activeTab === "settings") renderSettings();
 }
@@ -758,6 +794,130 @@ function findOption(options, code) {
   return options.find((item) => item.code === code) || null;
 }
 
+function renderBooks() {
+  const editing = findById(state.snapshot.books, state.editingBookId) || {};
+  const quoting = findById(state.snapshot.books, state.quotingBookId);
+  const books = state.snapshot.books;
+  const reading = books.filter((book) => book.status !== "FINISHED");
+  const finished = books.filter((book) => book.status === "FINISHED");
+  // 책마다 그 책에서 뽑은 글귀가 몇 개인지. 책은 syncId로 가리킵니다.
+  const quoteCounts = new Map();
+  for (const item of state.snapshot.items) {
+    if (!item.bookSyncId) continue;
+    quoteCounts.set(item.bookSyncId, (quoteCounts.get(item.bookSyncId) || 0) + 1);
+  }
+
+  app.innerHTML = `
+    <section class="grid two">
+      <div>
+        <form class="panel" data-form="book">
+          <h2>${editing.id ? "책 수정" : "책 추가"}</h2>
+          <div class="formGrid">
+            <div class="field full">
+              <label for="bookTitle">제목</label>
+              <input id="bookTitle" name="title" value="${attr(editing.title)}" required>
+            </div>
+            <div class="field full">
+              <label for="bookAuthor">저자 (선택)</label>
+              <input id="bookAuthor" name="author" value="${attr(editing.author)}">
+            </div>
+            <div class="field">
+              <label for="bookCurrentPage">읽은 쪽</label>
+              <input id="bookCurrentPage" name="currentPage" type="number" min="0" value="${attr(editing.currentPage || "")}">
+            </div>
+            <div class="field">
+              <label for="bookTotalPages">전체 쪽 (선택)</label>
+              <input id="bookTotalPages" name="totalPages" type="number" min="0" value="${attr(editing.totalPages || "")}">
+            </div>
+            <div class="field full">
+              <label for="bookNote">메모 (선택)</label>
+              <textarea id="bookNote" name="note">${escapeHtml(editing.note)}</textarea>
+            </div>
+          </div>
+          <div class="actions" style="margin-top:14px">
+            <button class="primary" type="submit">${editing.id ? "수정 완료" : "저장"}</button>
+            ${editing.id ? `<button type="button" data-action="cancel-book">취소</button>` : ""}
+          </div>
+        </form>
+        ${quoting ? bookQuoteForm(quoting) : ""}
+      </div>
+      <section>
+        ${bookGroup(`읽고 있는 책 ${reading.length}권`, reading, quoteCounts)}
+        ${bookGroup(`읽은 책 ${finished.length}권`, finished, quoteCounts)}
+        ${books.length ? "" : empty("아직 담아 둔 책이 없습니다.")}
+      </section>
+    </section>
+  `;
+}
+
+function bookQuoteForm(book) {
+  return `
+    <form class="panel" data-form="bookQuote" style="margin-top:16px">
+      <h2>글귀 뽑기</h2>
+      <p class="hint">${escapeHtml(book.title)} · ${escapeHtml(book.author || "저자 미상")}</p>
+      <input type="hidden" name="bookId" value="${book.id}">
+      <div class="formGrid">
+        <div class="field full">
+          <label for="quoteBody">마음에 남은 문장</label>
+          <textarea id="quoteBody" name="body" required></textarea>
+        </div>
+        <div class="field">
+          <label for="quotePage">쪽 (선택)</label>
+          <input id="quotePage" name="page" type="number" min="0" value="${attr(book.currentPage || "")}">
+        </div>
+      </div>
+      <p class="hint">저자와 제목은 책에서 채웁니다. 적은 쪽이 지금 진도보다 뒤면 진도도 함께 옮깁니다.</p>
+      <div class="actions" style="margin-top:14px">
+        <button class="primary" type="submit">보관함에 넣기</button>
+        <button type="button" data-action="cancel-quote">취소</button>
+      </div>
+    </form>
+  `;
+}
+
+function bookGroup(title, books, quoteCounts) {
+  if (!books.length) return "";
+  return `
+    <h2 class="sectionTitle">${escapeHtml(title)}</h2>
+    <div class="itemList">${books.map((book) => bookCard(book, quoteCounts.get(book.syncId) || 0)).join("")}</div>
+  `;
+}
+
+function bookCard(book, quoteCount) {
+  const finished = book.status === "FINISHED";
+  // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
+  const ratio = book.totalPages > 0 ? Math.min(1, book.currentPage / book.totalPages) : null;
+  const progressText =
+    book.totalPages > 0
+      ? `${book.currentPage} / ${book.totalPages}쪽 · ${Math.round(ratio * 100)}%`
+      : `${book.currentPage}쪽까지`;
+
+  return `
+    <article class="item">
+      <div class="itemHeader">
+        <div>
+          <h3>${escapeHtml(book.title)}</h3>
+          <div class="meta">
+            <span class="chip">${escapeHtml(book.author || "저자 미상")}</span>
+            <span class="chip">${escapeHtml(progressText)}</span>
+            ${quoteCount ? `<span class="chip">뽑은 글귀 ${quoteCount}개</span>` : ""}
+          </div>
+        </div>
+        <button type="button" data-action="toggle-book-finished" data-id="${book.id}">
+          ${finished ? "다시 읽는 중" : "다 읽음"}
+        </button>
+      </div>
+      ${ratio === null ? "" : `<div class="bookBar"><span style="width:${Math.round(ratio * 100)}%"></span></div>`}
+      ${book.note ? `<p>${escapeHtml(book.note)}</p>` : ""}
+      <div class="actions">
+        <button type="button" data-action="quote-book" data-id="${book.id}">글귀 뽑기</button>
+        <button type="button" data-action="edit-book" data-id="${book.id}">수정</button>
+        <button class="danger" type="button" data-action="delete-book" data-id="${book.id}">삭제</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderHistory() {
   app.innerHTML = `
     <section>
@@ -796,6 +956,7 @@ function renderSettings() {
           ${stat("메모", state.snapshot.routineMemos.length)}
           ${stat("일기", state.snapshot.diaries.length)}
           ${stat("할 일", state.snapshot.todos.length)}
+          ${stat("책", state.snapshot.books.length)}
         </div>
         <div id="attachmentUsage"></div>
       </div>
@@ -921,6 +1082,37 @@ async function submitTodo(form) {
   });
   state.editingTodoId = null;
   showToast(id ? "할 일을 수정했습니다." : "할 일을 저장했습니다.");
+  await loadSnapshot(false);
+}
+
+async function submitBook(form) {
+  const data = new FormData(form);
+  const payload = {
+    title: data.get("title"),
+    author: data.get("author"),
+    note: data.get("note"),
+    currentPage: Number(data.get("currentPage") || 0),
+    totalPages: Number(data.get("totalPages") || 0),
+  };
+  const id = state.editingBookId;
+  await api(id ? `/api/books/${id}` : "/api/books", {
+    method: id ? "PUT" : "POST",
+    body: payload,
+  });
+  state.editingBookId = null;
+  showToast(id ? "책을 수정했습니다." : "책을 저장했습니다.");
+  await loadSnapshot(false);
+}
+
+async function submitBookQuote(form) {
+  const data = new FormData(form);
+  const bookId = Number(data.get("bookId"));
+  await api(`/api/books/${bookId}/quotes`, {
+    method: "POST",
+    body: { body: data.get("body"), page: Number(data.get("page") || 0) },
+  });
+  state.quotingBookId = null;
+  showToast("보관함에 글귀를 넣었습니다.");
   await loadSnapshot(false);
 }
 

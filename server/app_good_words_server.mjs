@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 11;
+const schemaVersion = 12;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +73,12 @@ const deletionEntityTypes = new Set([
   "ROUTINE_MEMO",
   "DIARY",
   "TODO",
+  "BOOK",
 ]);
+
+const bookStatuses = new Set(["READING", "FINISHED"]);
+/** 책에서 뽑은 글귀에 붙는 카테고리. 앱 AppRepository.BOOK_CATEGORY와 같아야 한다. */
+const bookCategory = "독서";
 
 const defaultSettings = {
   remindersEnabled: true,
@@ -226,6 +231,16 @@ async function route(request, response) {
     sendJson(response, 201, todo);
     return;
   }
+  if (method === "GET" && url.pathname === "/api/books") {
+    sendJson(response, 200, { books: sortDesc((await loadDb()).books, "updatedAt") });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/api/books") {
+    const payload = await readJson(request);
+    const book = await withDb((db) => saveBook(db, payload));
+    sendJson(response, 201, book);
+    return;
+  }
   if (method === "POST" && url.pathname === "/api/attachments") {
     sendJson(response, 201, await saveAttachment(request));
     return;
@@ -262,6 +277,10 @@ async function route(request, response) {
   }
   if (parts[0] === "api" && parts[1] === "todos" && parts[2]) {
     await routeTodoMember(method, parts, request, response);
+    return;
+  }
+  if (parts[0] === "api" && parts[1] === "books" && parts[2]) {
+    await routeBookMember(method, parts, request, response);
     return;
   }
   if (parts[0] === "api" && parts[1] === "attachments" && parts[2]) {
@@ -449,6 +468,40 @@ async function routeDiaryMember(method, parts, request, response) {
     return;
   }
   sendJson(response, 405, { error: "지원하지 않는 메서드입니다." });
+}
+
+async function routeBookMember(method, parts, request, response) {
+  const bookId = Number(parts[2]);
+  const action = parts[3] || "";
+  if (!Number.isFinite(bookId) || bookId <= 0) {
+    sendJson(response, 400, { error: "책 ID가 올바르지 않습니다." });
+    return;
+  }
+
+  if (method === "GET" && !action) {
+    const book = (await loadDb()).books.find((candidate) => candidate.id === bookId);
+    sendJson(response, book ? 200 : 404, book || { error: "책을 찾을 수 없습니다." });
+    return;
+  }
+  if (method === "PUT" && !action) {
+    const payload = await readJson(request);
+    const book = await withDb((db) => saveBook(db, payload, bookId));
+    sendJson(response, 200, book);
+    return;
+  }
+  if (method === "DELETE" && !action) {
+    // 뽑아 둔 글귀는 남긴다. 책을 정리했다고 밑줄 그은 문장까지 사라지면 안 된다.
+    const result = await withDb((db) => deleteWithTombstone(db, db.books, [bookId], "BOOK"));
+    sendJson(response, 200, { deleted: result.deleted });
+    return;
+  }
+  if (method === "POST" && action === "quotes") {
+    const payload = await readJson(request);
+    const quote = await withDb((db) => extractQuoteFromBook(db, bookId, payload));
+    sendJson(response, 201, quote);
+    return;
+  }
+  sendJson(response, 404, { error: "엔드포인트를 찾을 수 없습니다." });
 }
 
 async function routeTodoMember(method, parts, request, response) {
@@ -651,6 +704,7 @@ function emptyDb() {
     deletions: [],
     diaries: [],
     todos: [],
+    books: [],
   };
 }
 
@@ -668,6 +722,7 @@ function normalizeDb(db) {
     deletions: Array.isArray(db?.deletions) ? db.deletions.map(normalizeDeletion).filter(Boolean) : [],
     diaries: Array.isArray(db?.diaries) ? db.diaries.map(normalizeDiary).filter(Boolean) : [],
     todos: Array.isArray(db?.todos) ? db.todos.map(normalizeTodo).filter(Boolean) : [],
+    books: Array.isArray(db?.books) ? db.books.map(normalizeBook).filter(Boolean) : [],
   };
 }
 
@@ -684,6 +739,7 @@ function snapshot(db) {
     routineMemoCount: normalized.routineMemos.length,
     diaryCount: normalized.diaries.length,
     todoCount: normalized.todos.length,
+    bookCount: normalized.books.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: sortDesc(normalized.items, "createdAt"),
@@ -694,6 +750,7 @@ function snapshot(db) {
     deletions: sortDesc(normalized.deletions, "deletedAt"),
     diaries: sortDesc(normalized.diaries, "createdAt"),
     todos: sortDesc(normalized.todos, "createdAt"),
+    books: sortDesc(normalized.books, "updatedAt"),
   };
 }
 
@@ -716,6 +773,7 @@ function mergeSnapshot(db, payload) {
     deletions: payload?.deletions,
     diaries: payload?.diaries,
     todos: payload?.todos,
+    books: payload?.books,
   });
   const current = normalizeDb(db);
 
@@ -731,6 +789,8 @@ function mergeSnapshot(db, payload) {
   // 일기와 할 일은 고칠 수 있다. 특히 할 일의 완료 표시는 한쪽에서 눌러도 양쪽에 반영되어야 한다.
   db.diaries = mergeMutable(current.diaries, incoming.diaries, deletedAt);
   db.todos = mergeMutable(current.todos, incoming.todos, deletedAt);
+  // 책도 고칠 수 있다. 읽은 쪽수는 기기마다 달라져서 나중에 넘긴 쪽이 남아야 한다.
+  db.books = mergeMutable(current.books, incoming.books, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -763,11 +823,16 @@ function deduplicate(db) {
   const routines = resolveDuplicates(db.routines, routineFingerprint);
   const diaries = resolveDuplicates(db.diaries, diaryFingerprint);
   const todos = resolveDuplicates(db.todos, todoFingerprint);
+  const books = resolveDuplicates(db.books, bookFingerprint);
 
-  db.items = items.kept;
+  // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
+  db.items = items.kept.map((item) =>
+    item.bookSyncId ? { ...item, bookSyncId: books.movedTo.get(item.bookSyncId) || item.bookSyncId } : item,
+  );
   db.routines = routines.kept;
   db.diaries = diaries.kept;
   db.todos = todos.kept;
+  db.books = books.kept;
 
   db.exposureEvents = db.exposureEvents.map((event) => ({
     ...event,
@@ -850,6 +915,16 @@ function todoFingerprint(todo) {
   return [text(todo.dueDate), norm(todo.title), norm(todo.note)].join("|");
 }
 
+/**
+ * 같은 책은 제목과 저자로 본다.
+ *
+ * 읽은 쪽수는 넣지 않는다. 두 기기에서 같은 책을 각자 담으면 진도가 다른 것이 당연한데,
+ * 쪽수까지 보면 서로 다른 책이 되어 목록에 같은 책이 두 벌 남는다. 앱의 bookFingerprint와 같아야 한다.
+ */
+function bookFingerprint(book) {
+  return [norm(book.title), norm(book.author)].join("|");
+}
+
 /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 본다. */
 function norm(value) {
   return text(value).toLowerCase().replace(/\s+/g, " ");
@@ -904,9 +979,11 @@ function reindex(db) {
   db.routineMemos = memos
     .filter((memo) => routineIds.has(memo.routineSyncId))
     .map((memo, index) => ({ ...memo, id: index + 1, routineId: routineIds.get(memo.routineSyncId) }));
-  // 일기와 할 일은 딸린 자식이 없어 번호만 다시 매기면 된다.
+  // 일기·할 일·책은 딸린 자식이 없어 번호만 다시 매기면 된다.
+  // 글귀가 책을 가리키지만 숫자 id가 아니라 bookSyncId로 가리켜서 번호가 바뀌어도 그대로다.
   db.diaries = db.diaries.map((diary, index) => ({ ...diary, id: index + 1 }));
   db.todos = db.todos.map((todo, index) => ({ ...todo, id: index + 1 }));
+  db.books = db.books.map((book, index) => ({ ...book, id: index + 1 }));
 
   return db;
 }
@@ -987,6 +1064,7 @@ function replaceSnapshot(db, payload) {
   // 여기서 빠뜨리면 그 종류만 서버에 남아, 사용자가 지운 일기가 다음 병합에 되살아난다.
   db.diaries = Array.isArray(payload.diaries) ? payload.diaries.map(normalizeDiary).filter(Boolean) : [];
   db.todos = Array.isArray(payload.todos) ? payload.todos.map(normalizeTodo).filter(Boolean) : [];
+  db.books = Array.isArray(payload.books) ? payload.books.map(normalizeBook).filter(Boolean) : [];
   return db;
 }
 
@@ -1073,6 +1151,60 @@ function saveTodo(db, payload, todoId = null) {
   const normalized = normalizeTodo(merged);
   upsert(db.todos, normalized);
   return normalized;
+}
+
+/** 책도 같은 이유로 `updatedAt`을 지금으로 올립니다. */
+function saveBook(db, payload, bookId = null) {
+  const existing = bookId ? db.books.find((book) => book.id === bookId) : null;
+  const merged = {
+    ...existing,
+    ...payload,
+    id: bookId || payload.id || nextId(db.books),
+    updatedAt: nowMs(),
+    createdAt: payload.createdAt || existing?.createdAt || nowMs(),
+    startedAt: existing?.startedAt ?? payload.startedAt ?? nowMs(),
+  };
+  if (!text(merged.title)) throw new HttpError(400, "책 제목을 입력해 주세요.");
+
+  const normalized = normalizeBook(merged);
+  // 다 읽었다고 하면 완독 시각을 남기고, 다시 읽는 중이면 지운다.
+  if (normalized.status === "FINISHED") {
+    normalized.finishedAt = normalized.finishedAt || nowMs();
+    if (normalized.totalPages > 0) normalized.currentPage = normalized.totalPages;
+  } else {
+    normalized.finishedAt = null;
+  }
+  upsert(db.books, normalized);
+  return normalized;
+}
+
+/**
+ * 읽고 있는 책에서 글귀를 바로 뽑아 보관함에 넣습니다.
+ *
+ * 저자와 제목을 책에서 채워 주므로 사용자는 문장과 쪽수만 적으면 됩니다.
+ * 적은 쪽수가 지금 읽는 쪽보다 뒤면 진도도 함께 옮깁니다. 뽑았다는 것은 거기까지 읽었다는 뜻입니다.
+ */
+function extractQuoteFromBook(db, bookId, payload) {
+  const book = db.books.find((candidate) => candidate.id === bookId);
+  if (!book) throw new HttpError(404, "책을 찾을 수 없습니다.");
+  const body = text(payload?.body);
+  if (!body) throw new HttpError(400, "뽑아낼 글귀를 입력해 주세요.");
+  const page = Math.max(0, positiveInt(payload?.page));
+
+  const quote = saveContent(db, {
+    type: "QUOTE",
+    title: book.title,
+    body,
+    author: book.author,
+    category: bookCategory,
+    bookSyncId: book.syncId,
+    bookPage: page,
+  });
+
+  if (page > book.currentPage) {
+    saveBook(db, { currentPage: page }, book.id);
+  }
+  return quote;
 }
 
 /** 최근 날짜가 위로. 같은 날이면 나중에 쓴 것이 위로 옵니다. */
@@ -1221,6 +1353,9 @@ function normalizeContent(item) {
     tags: stringList(item.tags),
     imageUris: stringList(item.imageUris),
     videoUris: stringList(item.videoUris),
+    // 어느 책 몇 쪽에서 뽑았는지. 책은 숫자 id가 아니라 syncId로 가리킨다.
+    bookSyncId: text(item.bookSyncId),
+    bookPage: Math.max(0, positiveInt(item.bookPage)),
     createdAt: integer(item.createdAt, nowMs()),
     lastShownAt: nullableInteger(item.lastShownAt),
     showCount: integer(item.showCount, 0),
@@ -1324,6 +1459,31 @@ function normalizeTodo(todo) {
     remindAt: nullableInteger(todo.remindAt),
     doneAt: nullableInteger(todo.doneAt),
     createdAt: integer(todo.createdAt, nowMs()),
+  };
+}
+
+function normalizeBook(book) {
+  if (!book) return null;
+  const title = text(book.title);
+  // 제목이 없으면 목록에서 무엇인지 알 수 없어 놓을 자리가 없다.
+  if (!title) return null;
+  const totalPages = Math.max(0, positiveInt(book.totalPages));
+  const currentPage = Math.max(0, positiveInt(book.currentPage));
+  return {
+    id: positiveInt(book.id),
+    syncId: syncId(book.syncId),
+    updatedAt: integer(book.updatedAt, integer(book.createdAt, nowMs())),
+    title,
+    author: text(book.author),
+    totalPages,
+    // 전체 쪽수를 넘는 진도는 있을 수 없다. 화면에서 100%를 넘겨 그린다.
+    currentPage: totalPages > 0 ? Math.min(currentPage, totalPages) : currentPage,
+    status: normalizeEnum(book.status, bookStatuses, "READING"),
+    note: text(book.note),
+    // 시작·완독 시각은 없을 수 있다. 0으로 바꾸면 1970년에 읽은 책이 된다.
+    startedAt: nullableInteger(book.startedAt),
+    finishedAt: nullableInteger(book.finishedAt),
+    createdAt: integer(book.createdAt, nowMs()),
   };
 }
 

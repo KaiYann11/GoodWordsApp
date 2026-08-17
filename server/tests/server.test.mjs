@@ -53,6 +53,7 @@ function emptySnapshot(overrides = {}) {
     deletions: [],
     diaries: [],
     todos: [],
+    books: [],
     ...overrides,
   };
 }
@@ -646,6 +647,231 @@ describe("일기와 할 일 API", () => {
       listed.todos.map((todo) => todo.title),
       ["먼저", "나중"],
     );
+  });
+});
+
+describe("독서", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  async function addBook(body) {
+    return (await (await api("/api/books", { method: "POST", body })).json());
+  }
+
+  it("책을 담고 진도를 고친다", async () => {
+    await resetServer();
+
+    const created = await addBook({ title: "아주 작은 습관의 힘", author: "제임스 클리어", totalPages: 320 });
+    assert.ok(created.id > 0);
+    assert.ok(created.syncId, "기기와 짝지을 syncId가 없습니다.");
+    assert.equal(created.status, "READING");
+    assert.equal(created.currentPage, 0);
+
+    const updated = await (
+      await api(`/api/books/${created.id}`, { method: "PUT", body: { currentPage: 120 } })
+    ).json();
+
+    assert.equal(updated.currentPage, 120);
+    assert.equal(updated.title, "아주 작은 습관의 힘", "고칠 때 다른 값이 지워졌습니다.");
+    assert.equal(updated.syncId, created.syncId, "고칠 때 syncId가 바뀌면 다른 책이 됩니다.");
+  });
+
+  it("전체 쪽수를 넘는 진도는 마지막 쪽으로 맞춘다", async () => {
+    await resetServer();
+    const created = await addBook({ title: "쪽수 있는 책", totalPages: 100 });
+
+    const updated = await (
+      await api(`/api/books/${created.id}`, { method: "PUT", body: { currentPage: 999 } })
+    ).json();
+
+    // 넘겨 두면 화면이 100%를 넘겨 그린다.
+    assert.equal(updated.currentPage, 100);
+  });
+
+  it("다 읽음으로 바꾸면 완독 시각이 남는다", async () => {
+    await resetServer();
+    const created = await addBook({ title: "다 읽을 책", totalPages: 200, currentPage: 50 });
+
+    const finished = await (
+      await api(`/api/books/${created.id}`, { method: "PUT", body: { status: "FINISHED" } })
+    ).json();
+    assert.ok(finished.finishedAt > 0);
+    assert.equal(finished.currentPage, 200, "다 읽었는데 진도가 중간에 멈춰 있습니다.");
+
+    const reopened = await (
+      await api(`/api/books/${created.id}`, { method: "PUT", body: { status: "READING" } })
+    ).json();
+    // 다시 읽는 중인데 완독 시각이 남아 있으면 목록에서 다 읽은 책으로 샙니다.
+    assert.equal(reopened.finishedAt, null);
+  });
+
+  it("제목 없는 책은 받지 않는다", async () => {
+    await resetServer();
+
+    const response = await api("/api/books", { method: "POST", body: { author: "저자만" } });
+
+    assert.equal(response.status, 400);
+  });
+
+  it("책에서 뽑은 글귀가 보관함에 들어가고 출처가 남는다", async () => {
+    await resetServer();
+    const book = await addBook({ title: "출처 있는 책", author: "지은이", totalPages: 300, currentPage: 10 });
+
+    const quote = await (
+      await api(`/api/books/${book.id}/quotes`, {
+        method: "POST",
+        body: { body: "행동이 먼저다.", page: 42 },
+      })
+    ).json();
+
+    assert.equal(quote.type, "QUOTE");
+    assert.equal(quote.body, "행동이 먼저다.");
+    // 저자와 제목을 사용자가 다시 적지 않아도 되게 책에서 채운다.
+    assert.equal(quote.author, "지은이");
+    assert.equal(quote.title, "출처 있는 책");
+    assert.equal(quote.bookSyncId, book.syncId);
+    assert.equal(quote.bookPage, 42);
+
+    // 뽑았다는 것은 거기까지 읽었다는 뜻이다.
+    const after = await (await api(`/api/books/${book.id}`)).json();
+    assert.equal(after.currentPage, 42);
+  });
+
+  it("지금 진도보다 앞쪽 글귀를 뽑아도 진도가 뒤로 가지 않는다", async () => {
+    await resetServer();
+    const book = await addBook({ title: "되돌아가지 않는 책", totalPages: 300, currentPage: 200 });
+
+    await api(`/api/books/${book.id}/quotes`, { method: "POST", body: { body: "앞쪽 문장", page: 30 } });
+
+    const after = await (await api(`/api/books/${book.id}`)).json();
+    assert.equal(after.currentPage, 200);
+  });
+
+  it("빈 글귀는 뽑지 않는다", async () => {
+    await resetServer();
+    const book = await addBook({ title: "빈 글귀 책" });
+
+    const response = await api(`/api/books/${book.id}/quotes`, { method: "POST", body: { body: "   " } });
+
+    assert.equal(response.status, 400);
+  });
+
+  it("책을 지워도 뽑아 둔 글귀는 남는다", async () => {
+    await resetServer();
+    const book = await addBook({ title: "지울 책" });
+    await api(`/api/books/${book.id}/quotes`, { method: "POST", body: { body: "남아야 하는 문장" } });
+
+    await api(`/api/books/${book.id}`, { method: "DELETE" });
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.books.length, 0);
+    // 책을 정리했다고 밑줄 그은 문장까지 사라지면 안 된다.
+    assert.equal(stored.items.filter((item) => item.body === "남아야 하는 문장").length, 1);
+  });
+
+  it("웹에서 지운 책은 삭제 표식을 남겨 되살아나지 않는다", async () => {
+    await resetServer();
+    const book = await addBook({ title: "되살아나면 안 되는 책" });
+    await api(`/api/books/${book.id}`, { method: "DELETE" });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          books: [{ syncId: book.syncId, updatedAt: 1000, title: "되살아나면 안 되는 책", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.books.length, 0);
+  });
+
+  it("두 기기가 같은 책을 담으면 하나로 합치고 진도는 최신을 따른다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          books: [
+            { syncId: "b1", updatedAt: 1000, title: "같은 책", author: "같은 저자", currentPage: 30, createdAt: 1000 },
+            { syncId: "b2", updatedAt: 2000, title: "같은 책", author: "같은 저자", currentPage: 80, createdAt: 2000 },
+          ],
+        }),
+      })
+    ).json();
+
+    // 진도가 다르다고 다른 책이 되면 목록에 같은 책이 두 벌 남는다.
+    assert.equal(merged.books.length, 1);
+    assert.equal(merged.books[0].currentPage, 80);
+  });
+
+  it("사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          books: [
+            { syncId: "b1", updatedAt: 1000, title: "합쳐질 책", author: "저자", createdAt: 1000 },
+            { syncId: "b2", updatedAt: 2000, title: "합쳐질 책", author: "저자", createdAt: 2000 },
+          ],
+          items: [
+            {
+              syncId: "q1",
+              updatedAt: 1000,
+              type: "QUOTE",
+              title: "합쳐질 책",
+              body: "출처를 잃으면 안 되는 문장",
+              bookSyncId: "b1",
+              bookPage: 12,
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.books.length, 1);
+    const quote = merged.items.find((item) => item.syncId === "q1");
+    assert.equal(quote.bookSyncId, merged.books[0].syncId, "글귀가 출처를 잃었습니다.");
+    assert.equal(quote.bookPage, 12);
+  });
+
+  it("업로드는 책도 통째로 교체한다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        books: [{ syncId: "book-old", updatedAt: 1000, title: "예전 책", createdAt: 1000 }],
+      }),
+    });
+
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+
+    // 여기서 남으면 사용자가 지운 책이 다음 병합에 서버에서 되살아난다.
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.books.length, 0);
+  });
+
+  it("여러 기기에서 온 같은 숫자 id를 서로 덮어쓰지 않는다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          books: [
+            { id: 1, syncId: "device-a", updatedAt: 1000, title: "A기기 책", createdAt: 1000 },
+            { id: 1, syncId: "device-b", updatedAt: 1000, title: "B기기 책", createdAt: 1000 },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.books.length, 2);
+    assert.deepEqual(merged.books.map((book) => book.id).sort(), [1, 2]);
   });
 });
 

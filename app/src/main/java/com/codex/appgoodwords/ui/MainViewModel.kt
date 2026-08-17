@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
+import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryDraft
@@ -53,6 +54,9 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val todos = container.repository.observeTodos()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val books = container.repository.observeBooks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val routineChecks = container.repository.observeRoutineChecks()
@@ -362,6 +366,32 @@ class MainViewModel(
 
     suspend fun deleteDiary(id: Long): Result<Unit> = runCatching {
         container.repository.deleteDiary(id)
+    }
+
+    // ---- 독서 ----
+
+    suspend fun saveBook(draft: BookDraft): Result<Unit> = runCatching {
+        container.repository.saveBook(draft)
+        Unit
+    }
+
+    suspend fun updateBookProgress(id: Long, currentPage: Int): Result<Unit> = runCatching {
+        container.repository.updateBookProgress(id, currentPage)
+        Unit
+    }
+
+    suspend fun toggleBookFinished(id: Long): Result<Unit> = runCatching {
+        container.repository.toggleBookFinished(id)
+        Unit
+    }
+
+    suspend fun deleteBook(id: Long): Result<Unit> = runCatching {
+        container.repository.deleteBook(id)
+    }
+
+    suspend fun extractQuoteFromBook(bookId: Long, body: String, page: Int): Result<Unit> = runCatching {
+        container.repository.extractQuoteFromBook(bookId, body, page)
+        Unit
     }
 
     // ---- 할 일 ----

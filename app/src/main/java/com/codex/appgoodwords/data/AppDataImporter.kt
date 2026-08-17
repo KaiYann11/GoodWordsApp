@@ -12,7 +12,8 @@ data class AppImportResult(
     val routineCheckCount: Int,
     val routineMemoCount: Int,
     val diaryCount: Int = 0,
-    val todoCount: Int = 0
+    val todoCount: Int = 0,
+    val bookCount: Int = 0
 )
 
 class AppDataImporter(
@@ -59,6 +60,7 @@ class AppDataImporter(
         val previousReminders = database.todoDao().getPendingReminders()
 
         database.withTransaction {
+            database.bookDao().clearAll()
             database.todoDao().clearAll()
             database.diaryDao().clearAll()
             database.routineMemoDao().clearAll()
@@ -99,6 +101,10 @@ class AppDataImporter(
             if (snapshot.todos.isNotEmpty()) {
                 database.todoDao().insertAll(snapshot.todos)
             }
+
+            if (snapshot.books.isNotEmpty()) {
+                database.bookDao().insertAll(snapshot.books)
+            }
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
@@ -127,7 +133,8 @@ class AppDataImporter(
             routineCheckCount = snapshot.routineChecks.size,
             routineMemoCount = snapshot.routineMemos.size,
             diaryCount = snapshot.diaries.size,
-            todoCount = snapshot.todos.size
+            todoCount = snapshot.todos.size,
+            bookCount = snapshot.books.size
         )
     }
 }

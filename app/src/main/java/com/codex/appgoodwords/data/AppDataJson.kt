@@ -17,11 +17,12 @@ data class AppDataSnapshot(
     val settingsUpdatedAt: Long = 0L,
     val deletions: List<DeletionEntity> = emptyList(),
     val diaries: List<DiaryEntity> = emptyList(),
-    val todos: List<TodoEntity> = emptyList()
+    val todos: List<TodoEntity> = emptyList(),
+    val books: List<BookEntity> = emptyList()
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 11
+    const val schemaVersion: Int = 12
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -84,6 +85,13 @@ object AppDataJson {
                 snapshot.todos.forEach { todo -> put(todo.toJson()) }
             }
         )
+        .put("bookCount", snapshot.books.size)
+        .put(
+            "books",
+            JSONArray().apply {
+                snapshot.books.forEach { book -> put(book.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -99,8 +107,56 @@ object AppDataJson {
             settingsUpdatedAt = payload.optLong("settingsUpdatedAt", 0L),
             deletions = payload.optJSONArray("deletions").toDeletions(),
             diaries = payload.optJSONArray("diaries").toDiaries(),
-            todos = payload.optJSONArray("todos").toTodos()
+            todos = payload.optJSONArray("todos").toTodos(),
+            books = payload.optJSONArray("books").toBooks()
         )
+    }
+
+    private fun BookEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("title", title)
+        .put("author", author)
+        .put("totalPages", totalPages)
+        .put("currentPage", currentPage)
+        .put("status", status)
+        .put("note", note)
+        // 없으면 JSONObject.NULL로 보냅니다. 0으로 보내면 1970년에 읽기 시작한 책이 됩니다.
+        .put("startedAt", startedAt ?: JSONObject.NULL)
+        .put("finishedAt", finishedAt ?: JSONObject.NULL)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toBooks(): List<BookEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val book = optJSONObject(index) ?: continue
+                val title = book.optString("title").trim()
+                // 제목이 없으면 목록에서 무엇인지 알 수 없어 놓을 자리가 없다.
+                if (title.isBlank()) continue
+
+                add(
+                    BookEntity(
+                        id = book.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(book.optString("syncId")),
+                        updatedAt = book.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: book.optLong("createdAt", 0L),
+                        title = title,
+                        author = book.optString("author"),
+                        totalPages = book.optInt("totalPages", 0).coerceAtLeast(0),
+                        currentPage = book.optInt("currentPage", 0).coerceAtLeast(0),
+                        // 모르는 상태가 와도 그대로 둡니다. 지우면 다음 업로드에서 서버 값까지 사라집니다.
+                        status = book.optString("status").trim().ifBlank { BookStatus.READING.name },
+                        note = book.optString("note"),
+                        startedAt = book.optNullableLong("startedAt"),
+                        finishedAt = book.optNullableLong("finishedAt"),
+                        createdAt = book.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
     }
 
     private fun DiaryEntity.toJson(): JSONObject = JSONObject()
@@ -244,6 +300,8 @@ object AppDataJson {
         .put("tags", JSONArray(tags))
         .put("imageUris", JSONArray(imageUris))
         .put("videoUris", JSONArray(videoUris))
+        .put("bookSyncId", bookSyncId)
+        .put("bookPage", bookPage)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
         .put("lastShownAt", lastShownAt ?: JSONObject.NULL)
@@ -337,6 +395,8 @@ object AppDataJson {
                         tags = item.optJSONArray("tags").toStringList(),
                         imageUris = item.optJSONArray("imageUris").toStringList(),
                         videoUris = item.optJSONArray("videoUris").toStringList(),
+                        bookSyncId = item.optString("bookSyncId").trim(),
+                        bookPage = item.optInt("bookPage", 0).coerceAtLeast(0),
                         createdAt = item.optLong("createdAt", System.currentTimeMillis()),
                         lastShownAt = item.optNullableLong("lastShownAt"),
                         showCount = item.optInt("showCount", 0),
