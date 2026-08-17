@@ -65,12 +65,21 @@ class MainViewModel(
     val routineMemos = container.repository.observeRoutineMemos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val stats = combine(historyEvents, allItems, routineChecks) { events, items, checks ->
+    // 다섯 가지를 다 봅니다. 글귀와 루틴만 세면 앱이 하는 일의 절반만 돌아보는 셈입니다.
+    val stats = combine(
+        historyEvents,
+        allItems,
+        routineChecks,
+        combine(diaries, todos, books) { diaryList, todoList, bookList -> Triple(diaryList, todoList, bookList) }
+    ) { events, items, checks, extras ->
         StatsCalculator.build(
             events = events,
             items = items,
             routineChecks = checks,
-            today = LocalDate.now()
+            today = LocalDate.now(),
+            diaries = extras.first,
+            todos = extras.second,
+            books = extras.third
         )
     }.stateIn(
         viewModelScope,

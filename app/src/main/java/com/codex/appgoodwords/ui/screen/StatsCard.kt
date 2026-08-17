@@ -38,7 +38,7 @@ fun StatsCard(
 
             if (!summary.hasActivity) {
                 Text(
-                    text = "글귀를 확인하거나 루틴을 체크하면 여기에 기록이 쌓입니다.",
+                    text = "글귀를 확인하거나 루틴을 체크하고, 일기·할 일·독서를 남기면 여기에 기록이 쌓입니다.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 return@Column
@@ -73,6 +73,74 @@ fun StatsCard(
 
             Text("최근 7일", style = MaterialTheme.typography.titleSmall)
             WeeklyBars(summary)
+
+            // 아직 안 쓰는 기능의 빈 칸은 두지 않습니다. 기록이 생기면 그때 나타납니다.
+            if (summary.reading.hasBooks) {
+                Text("독서", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    StatTile(
+                        label = "읽는 중",
+                        value = "${summary.reading.readingCount}권",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatTile(
+                        label = "올해 완독",
+                        value = "${summary.reading.finishedThisYear}권",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatTile(
+                        label = "읽은 쪽",
+                        value = "${summary.reading.pagesRead}쪽",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (summary.reading.quotesFromBooks > 0) {
+                    Text(
+                        text = "책에서 뽑은 글귀 ${summary.reading.quotesFromBooks}개",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (summary.diary.hasDiaries) {
+                Text("일기", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "이번 달 ${summary.diary.daysThisMonth}일 · 전체 ${summary.diary.totalCount}편",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (summary.diary.topMoods.isNotEmpty()) {
+                    Text(
+                        text = summary.diary.topMoods.take(3).joinToString("  ") { entry ->
+                            "${entry.mood.emoji} ${entry.mood.label} ${entry.count}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (summary.todo.hasTodos) {
+                Text("할 일", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = buildString {
+                        append("끝낸 일 ${summary.todo.doneCount}개 · 남은 일 ${summary.todo.openCount}개")
+                        // 비율은 할 일이 하나라도 있을 때만 뜻이 있습니다.
+                        summary.todo.doneRatio?.let { append(" · ${(it * 100).toInt()}%") }
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (summary.todo.overdueCount > 0) {
+                    Text(
+                        text = "지난 일 ${summary.todo.overdueCount}개",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
 
             if (summary.topCategories.isNotEmpty()) {
                 Text("많이 본 카테고리", style = MaterialTheme.typography.titleSmall)
