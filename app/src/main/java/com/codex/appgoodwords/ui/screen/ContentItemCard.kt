@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -149,6 +150,17 @@ fun ContentItemCard(
                                 contentDescription = "공유하기",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+
+                        // 글귀만 카드로 만듭니다. 링크와 영상은 주소가 핵심이라 그림으로 만들 것이 없습니다.
+                        if (item.type == ContentType.QUOTE) {
+                            IconButton(onClick = { shareQuoteImage(context, item) }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Image,
+                                    contentDescription = "이미지로 공유",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         IconButton(onClick = { onToggleFavorite(item) }) {

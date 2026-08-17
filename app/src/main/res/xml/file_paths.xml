@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  내보내는 것은 캐시 안의 글귀 카드 한 폴더뿐입니다.
+  넓게 열어 두면 다른 앱이 앱 데이터 전체를 들여다볼 수 있게 됩니다.
+-->
+<paths>
+    <cache-path
+        name="quote_cards"
+        path="quote-cards/" />
+</paths>
