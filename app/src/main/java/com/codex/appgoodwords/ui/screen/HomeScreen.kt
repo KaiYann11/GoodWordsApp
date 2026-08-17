@@ -5,11 +5,16 @@ import android.view.SoundEffectConstants
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +41,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -61,10 +67,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.ComboLevel
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.ReadingCombo
 import com.codex.appgoodwords.data.ReminderSettings
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.coroutines.delay
 
@@ -76,16 +82,15 @@ private enum class HomeReadTab(
     READ("읽은 것")
 }
 
+/**
+ * 스와이프 한 번에 대한 피드백.
+ *
+ * 개수는 여기에 담지 않습니다. 확인 결과가 DB를 거쳐 돌아오는 데 잠깐 걸려서,
+ * 누를 때 세면 실제와 어긋납니다. 화면은 [ReadingCombo]로 그때그때 계산해 보여 줍니다.
+ */
 private data class ComboFeedback(
     val token: Long,
-    val title: String,
-    val subtitle: String,
-    val comboCount: Int
-)
-
-private data class CelebrationBurstState(
-    val token: Long,
-    val intense: Boolean
+    val confirmed: Boolean
 )
 
 @Composable
@@ -99,11 +104,8 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeReadTab.UNREAD.name) }
-    var lastSwipeAt by rememberSaveable { mutableLongStateOf(0L) }
-    var comboCount by rememberSaveable { mutableLongStateOf(0L) }
     var shuffleSeed by rememberSaveable { mutableLongStateOf(0L) }
     var comboFeedback by remember { mutableStateOf<ComboFeedback?>(null) }
-    var burstState by remember { mutableStateOf<CelebrationBurstState?>(null) }
 
     val currentTab = HomeReadTab.valueOf(selectedTab)
     val readCount = remember(todayItems, confirmedTodayIds) {
@@ -121,43 +123,33 @@ fun HomeScreen(
     val haptic = LocalHapticFeedback.current
     val view = LocalView.current
 
+    // 오늘 확인한 글귀 수가 곧 콤보입니다. 빨리 넘기는 것과는 상관이 없습니다.
+    val combo = remember(confirmedTodayIds.size) { ReadingCombo.of(confirmedTodayIds.size) }
+
     LaunchedEffect(comboFeedback?.token) {
         val token = comboFeedback?.token ?: return@LaunchedEffect
-        delay(1100)
+        delay(1600)
         if (comboFeedback?.token == token) {
             comboFeedback = null
         }
     }
 
-    LaunchedEffect(burstState?.token) {
-        val token = burstState?.token ?: return@LaunchedEffect
-        delay(750)
-        if (burstState?.token == token) {
-            burstState = null
-        }
-    }
-
     fun registerSwipeFeedback(nowConfirmed: Boolean) {
-        val now = SystemClock.elapsedRealtime()
-        val nextCombo = if (now - lastSwipeAt <= 2_000L) comboCount + 1L else 1L
-        lastSwipeAt = now
-        comboCount = nextCombo
+        // 확인 결과가 아직 안 돌아왔으므로 이번 스와이프까지 더해 봅니다.
+        // 진동 세기를 고르는 데만 쓰고, 화면에 보이는 숫자는 실제 상태에서 가져옵니다.
+        val expected = if (nowConfirmed) confirmedTodayIds.size + 1 else confirmedTodayIds.size
 
         view.playSoundEffect(SoundEffectConstants.CLICK)
+        // 이정표에서만 무겁게 울립니다. 매번 세게 울리면 금세 성가십니다.
         haptic.performHapticFeedback(
-            if (nextCombo >= 2L) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove
+            if (nowConfirmed && ReadingCombo.of(expected).isMilestone) {
+                HapticFeedbackType.LongPress
+            } else {
+                HapticFeedbackType.TextHandleMove
+            }
         )
 
-        comboFeedback = ComboFeedback(
-            token = now,
-            title = if (nextCombo >= 2L) "${nextCombo} COMBO" else if (nowConfirmed) "읽음 완료" else "읽음 취소",
-            subtitle = if (nextCombo >= 2L) "속도감 있게 정리하고 있습니다" else if (nowConfirmed) "오늘의 글귀 하나를 정리했습니다" else "다시 읽을 글귀로 되돌렸습니다",
-            comboCount = nextCombo.toInt()
-        )
-        burstState = CelebrationBurstState(
-            token = now,
-            intense = nextCombo >= 2L || nowConfirmed
-        )
+        comboFeedback = ComboFeedback(token = SystemClock.elapsedRealtime(), confirmed = nowConfirmed)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -242,49 +234,109 @@ fun HomeScreen(
             }
         }
 
-        burstState?.let { state ->
-            CelebrationBurst(
-                state = state,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 96.dp)
+        // 잔물결은 목록 한가운데에서 번집니다. 스와이프한 카드가 있는 자리입니다.
+        comboFeedback?.let { feedback ->
+            CelebrationPulse(
+                token = feedback.token,
+                milestone = feedback.confirmed && combo.isMilestone,
+                modifier = Modifier.align(Alignment.Center)
             )
         }
 
+        // 알약은 스낵바 자리에 둡니다. 위에 두면 카드 제목을 가립니다.
         AnimatedVisibility(
             visible = comboFeedback != null,
-            enter = fadeIn() + scaleIn(initialScale = 0.88f),
-            exit = fadeOut() + scaleOut(targetScale = 0.88f),
+            enter = fadeIn(tween(220)) +
+                slideInVertically(spring(dampingRatio = 0.72f, stiffness = 420f)) { it / 2 } +
+                scaleIn(tween(220), initialScale = 0.96f),
+            exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.96f),
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 18.dp)
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp)
         ) {
-            comboFeedback?.let { feedback ->
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (feedback.comboCount >= 2) {
-                            MaterialTheme.colorScheme.tertiaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer
+            ComboBanner(combo = combo, confirmed = comboFeedback?.confirmed ?: true)
+        }
+    }
+}
+
+/**
+ * 오늘 몇 개째인지 알려 주는 알약.
+ *
+ * 숫자는 실제 상태에서 오므로, 저장이 끝나면 자연스럽게 올라갑니다.
+ * 막대는 다음 이정표까지의 거리라, 콤보가 "빠르기"가 아니라 "쌓임"으로 읽힙니다.
+ */
+@Composable
+private fun ComboBanner(combo: ComboLevel, confirmed: Boolean) {
+    val animatedCount by animateIntAsState(
+        targetValue = combo.count,
+        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        label = "comboCount"
+    )
+    val animatedProgress by animateFloatAsState(
+        targetValue = combo.progressToNext,
+        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+        label = "comboProgress"
+    )
+    val accent = if (combo.isMilestone) {
+        MaterialTheme.colorScheme.tertiary
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 18.dp, end = 22.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = animatedCount.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accent
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = if (confirmed) combo.title else "읽음 취소",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    text = combo.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                // 다음 이정표까지 얼마나 왔는지. 다 지났으면 굳이 빈 막대를 두지 않습니다.
+                if (combo.nextMilestone != null) {
+                    Canvas(modifier = Modifier.size(width = 132.dp, height = 3.dp)) {
+                        drawLine(
+                            color = accent.copy(alpha = 0.18f),
+                            start = Offset(0f, size.height / 2f),
+                            end = Offset(size.width, size.height / 2f),
+                            strokeWidth = size.height,
+                            cap = StrokeCap.Round
+                        )
+                        if (animatedProgress > 0f) {
+                            drawLine(
+                                color = accent,
+                                start = Offset(0f, size.height / 2f),
+                                end = Offset(size.width * animatedProgress, size.height / 2f),
+                                strokeWidth = size.height,
+                                cap = StrokeCap.Round
+                            )
                         }
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = feedback.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = feedback.subtitle,
-                            style = MaterialTheme.typography.bodySmall
-                        )
                     }
                 }
             }
@@ -552,72 +604,69 @@ private fun SwipeStatusBackground(
     }
 }
 
+/**
+ * 확인했을 때 번지는 잔물결.
+ *
+ * 예전에는 여섯 가지 색의 폭죽이 터졌습니다. 한 번은 즐겁지만 하루에 수십 번 보면 시끄럽고,
+ * 앱의 다른 화면과도 따로 놀았습니다. 지금은 테마 색으로 얇은 고리만 번지게 하고,
+ * 이정표일 때만 고리를 늘려 무게를 줍니다.
+ */
 @Composable
-private fun CelebrationBurst(
-    state: CelebrationBurstState,
+private fun CelebrationPulse(
+    token: Long,
+    milestone: Boolean,
     modifier: Modifier = Modifier
 ) {
     val progress = remember { Animatable(0f) }
-    val colors = listOf(
-        Color(0xFFFFB74D),
-        Color(0xFFFF8A65),
-        Color(0xFFFFD54F),
-        Color(0xFF67C7FF),
-        Color(0xFF7BE3D0),
-        Color(0xFFFF6F91)
-    )
+    val ringColor = MaterialTheme.colorScheme.primary
+    val accentColor = MaterialTheme.colorScheme.tertiary
 
-    LaunchedEffect(state.token) {
+    LaunchedEffect(token) {
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
             animationSpec = tween(
-                durationMillis = if (state.intense) 720 else 560,
-                easing = FastOutSlowInEasing
+                durationMillis = if (milestone) 1_100 else 760,
+                easing = LinearOutSlowInEasing
             )
         )
     }
 
-    Canvas(
-        modifier = modifier.size(if (state.intense) 220.dp else 180.dp)
-    ) {
-        val p = progress.value
+    Canvas(modifier = modifier.size(if (milestone) 260.dp else 200.dp)) {
         val centerPoint = Offset(size.width / 2f, size.height / 2f)
-        val ringRadius = size.minDimension * (0.12f + 0.34f * p)
-        val alpha = (1f - p).coerceAtLeast(0f)
+        val ringCount = if (milestone) 3 else 1
 
-        drawCircle(
-            color = Color.White.copy(alpha = 0.18f * alpha),
-            radius = ringRadius,
-            center = centerPoint,
-            style = Stroke(width = size.minDimension * 0.03f)
-        )
+        repeat(ringCount) { index ->
+            // 뒤 고리는 조금 늦게 출발해 물결처럼 번집니다.
+            val head = index * 0.16f
+            val local = ((progress.value - head) / (1f - head)).coerceIn(0f, 1f)
+            if (local <= 0f) return@repeat
 
-        repeat(if (state.intense) 18 else 12) { index ->
-            val angle = Math.toRadians(index * (360.0 / if (state.intense) 18 else 12))
-            val radius = size.minDimension * (0.08f + 0.34f * p) + (index % 3) * 6f
-            val end = Offset(
-                x = centerPoint.x + cos(angle).toFloat() * radius,
-                y = centerPoint.y + sin(angle).toFloat() * radius
-            )
-            val start = Offset(
-                x = centerPoint.x + cos(angle).toFloat() * (radius * 0.42f),
-                y = centerPoint.y + sin(angle).toFloat() * (radius * 0.42f)
-            )
-            val color = colors[index % colors.size].copy(alpha = alpha)
-            drawLine(
-                color = color,
-                start = start,
-                end = end,
-                strokeWidth = if (state.intense) 8f else 6f,
-                cap = StrokeCap.Round
-            )
+            val radius = size.minDimension * (0.10f + 0.40f * local)
+            val fade = (1f - local) * (1f - index * 0.22f)
             drawCircle(
-                color = color,
-                radius = if (state.intense) 7f else 5f,
-                center = end
+                color = (if (index == 0) ringColor else accentColor).copy(alpha = 0.38f * fade),
+                radius = radius,
+                center = centerPoint,
+                // 번져 나가면서 선이 가늘어져야 사라지는 것처럼 보입니다.
+                style = Stroke(width = size.minDimension * (0.018f - 0.012f * local))
             )
         }
+
+        // 가운데에서 옅게 퍼지는 빛. 고리만 있으면 가운데가 비어 허전합니다.
+        val glowRadius = size.minDimension * (0.18f + 0.26f * progress.value)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    ringColor.copy(alpha = 0.20f * (1f - progress.value)),
+                    Color.Transparent
+                ),
+                center = centerPoint,
+                radius = glowRadius
+            ),
+            radius = glowRadius,
+            center = centerPoint
+        )
     }
 }
 
