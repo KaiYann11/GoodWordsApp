@@ -510,6 +510,145 @@ describe("콘텐츠 API", () => {
   });
 });
 
+describe("일기와 할 일 API", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  it("웹에서 만든 일기를 다시 읽고 고치고 지운다", async () => {
+    await resetServer();
+
+    const created = await (
+      await api("/api/diaries", {
+        method: "POST",
+        body: { entryDate: "2026-08-17", title: "웹에서 쓴 일기", body: "본문", weather: "RAIN", mood: "GOOD" },
+      })
+    ).json();
+    assert.ok(created.id > 0);
+    assert.equal(created.weather, "RAIN");
+    assert.equal(created.mood, "GOOD");
+    assert.ok(created.syncId, "기기와 짝지을 syncId가 없습니다.");
+
+    const listed = await (await api("/api/diaries")).json();
+    assert.equal(listed.diaries.length, 1);
+
+    const updated = await (
+      await api(`/api/diaries/${created.id}`, { method: "PUT", body: { mood: "SAD" } })
+    ).json();
+    // 고친 항목만 바뀌고 나머지는 남아야 한다.
+    assert.equal(updated.mood, "SAD");
+    assert.equal(updated.body, "본문");
+    assert.equal(updated.syncId, created.syncId, "고칠 때 syncId가 바뀌면 다른 일기가 됩니다.");
+
+    await api(`/api/diaries/${created.id}`, { method: "DELETE" });
+    const afterDelete = await (await api("/api/diaries")).json();
+    assert.equal(afterDelete.diaries.length, 0);
+  });
+
+  it("웹에서 지운 일기는 삭제 표식을 남겨 되살아나지 않는다", async () => {
+    await resetServer();
+    const created = await (
+      await api("/api/diaries", { method: "POST", body: { entryDate: "2026-08-17", body: "지울 일기" } })
+    ).json();
+    await api(`/api/diaries/${created.id}`, { method: "DELETE" });
+
+    // 아직 그 일기를 들고 있는 기기가 병합을 걸어 온 상황.
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            { syncId: created.syncId, updatedAt: 1000, entryDate: "2026-08-17", body: "지울 일기", createdAt: 1000 },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 0, "웹에서 지운 일기가 다음 병합에 되살아났습니다.");
+  });
+
+  it("웹에서 고친 내용이 기기의 옛 사본에 밀리지 않는다", async () => {
+    await resetServer();
+    const created = await (
+      await api("/api/diaries", { method: "POST", body: { entryDate: "2026-08-17", body: "웹에서 고친 본문" } })
+    ).json();
+
+    // 기기에는 같은 일기의 예전 사본이 남아 있다.
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            { syncId: created.syncId, updatedAt: 1000, entryDate: "2026-08-17", body: "기기의 옛 본문", createdAt: 1000 },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries[0].body, "웹에서 고친 본문");
+  });
+
+  it("웹에서 만든 할 일을 완료하고 되돌린다", async () => {
+    await resetServer();
+
+    const created = await (
+      await api("/api/todos", { method: "POST", body: { title: "우체국 가기", dueDate: "2026-08-17" } })
+    ).json();
+    assert.equal(created.doneAt, null);
+
+    const done = await (await api(`/api/todos/${created.id}/toggle-done`, { method: "POST" })).json();
+    assert.ok(done.doneAt > 0);
+
+    const undone = await (await api(`/api/todos/${created.id}/toggle-done`, { method: "POST" })).json();
+    // 0으로 돌아오면 1970년에 끝낸 일이 된다.
+    assert.equal(undone.doneAt, null);
+  });
+
+  it("이름이나 마감이 없는 할 일은 무엇이 빠졌는지 알려 준다", async () => {
+    await resetServer();
+
+    const noTitle = await api("/api/todos", { method: "POST", body: { dueDate: "2026-08-17" } });
+    assert.equal(noTitle.status, 400);
+    assert.match((await noTitle.json()).error, /이름/);
+
+    const noDueDate = await api("/api/todos", { method: "POST", body: { title: "마감 없음" } });
+    assert.equal(noDueDate.status, 400);
+    assert.match((await noDueDate.json()).error, /날짜/);
+  });
+
+  it("아무것도 안 적은 일기는 저장하지 않는다", async () => {
+    await resetServer();
+
+    const response = await api("/api/diaries", { method: "POST", body: { entryDate: "2026-08-17" } });
+
+    assert.equal(response.status, 400);
+  });
+
+  it("날씨나 기분만 골라도 일기가 저장된다", async () => {
+    await resetServer();
+
+    // 글 쓸 기운은 없어도 기분만 남기고 싶은 날이 있다. 앱과 같은 기준이어야 한다.
+    const created = await (
+      await api("/api/diaries", { method: "POST", body: { entryDate: "2026-08-17", mood: "TIRED" } })
+    ).json();
+
+    assert.equal(created.mood, "TIRED");
+  });
+
+  it("할 일 목록은 마감이 빠른 것부터 준다", async () => {
+    await resetServer();
+    await api("/api/todos", { method: "POST", body: { title: "나중", dueDate: "2026-08-20" } });
+    await api("/api/todos", { method: "POST", body: { title: "먼저", dueDate: "2026-08-18" } });
+
+    const listed = await (await api("/api/todos")).json();
+
+    assert.deepEqual(
+      listed.todos.map((todo) => todo.title),
+      ["먼저", "나중"],
+    );
+  });
+});
+
 describe("라우팅", () => {
   it("없는 엔드포인트는 404를 준다", async () => {
     const response = await api("/api/nope");

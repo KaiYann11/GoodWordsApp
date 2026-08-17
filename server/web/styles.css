@@ -136,9 +136,10 @@ button.ghost {
   grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
 }
 
+/* 개수가 늘어도 줄이 어색하게 남지 않도록 칸 수를 폭에 맡긴다. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
 
@@ -237,6 +238,20 @@ button.ghost {
   border-color: rgba(242, 140, 82, 0.35);
   background: #fff3ea;
   color: #9d552a;
+}
+
+/* 마감이 지난 할 일. 목록에서 한눈에 갈라 보여야 밀린 것을 놓치지 않는다. */
+.chip.danger {
+  border-color: rgba(189, 75, 75, 0.35);
+  background: #fdeeee;
+  color: var(--danger);
+}
+
+.hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .formGrid {

@@ -3,10 +3,38 @@ const state = {
   snapshot: emptySnapshot(),
   editingContentId: null,
   editingRoutineId: null,
+  editingDiaryId: null,
+  editingTodoId: null,
   query: "",
   typeFilter: "ALL",
   categoryFilter: "",
 };
+
+/**
+ * 날씨와 기분 선택지.
+ *
+ * 앱의 DiaryWeather·DiaryMood와 이름이 같아야 합니다. 값은 그 이름을 그대로 저장하므로,
+ * 한쪽만 늘리면 다른 쪽에서는 고르지 않은 것처럼 보입니다.
+ */
+const weatherOptions = [
+  { code: "SUNNY", emoji: "☀️", label: "맑음" },
+  { code: "PARTLY_CLOUDY", emoji: "⛅", label: "구름 조금" },
+  { code: "CLOUDY", emoji: "☁️", label: "흐림" },
+  { code: "RAIN", emoji: "🌧️", label: "비" },
+  { code: "SNOW", emoji: "❄️", label: "눈" },
+  { code: "WIND", emoji: "💨", label: "바람" },
+  { code: "FOG", emoji: "🌫️", label: "안개" },
+];
+
+const moodOptions = [
+  { code: "GREAT", emoji: "😄", label: "아주 좋음" },
+  { code: "GOOD", emoji: "🙂", label: "좋음" },
+  { code: "NEUTRAL", emoji: "😐", label: "보통" },
+  { code: "TIRED", emoji: "😪", label: "지침" },
+  { code: "ANGRY", emoji: "😠", label: "화남" },
+  { code: "SAD", emoji: "😢", label: "슬픔" },
+  { code: "BAD", emoji: "🙁", label: "나쁨" },
+];
 
 const app = document.querySelector("#app");
 const toast = document.querySelector("#toast");
@@ -18,6 +46,8 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
     state.activeTab = button.dataset.tab;
     state.editingContentId = null;
     state.editingRoutineId = null;
+    state.editingDiaryId = null;
+    state.editingTodoId = null;
     syncTabs();
     render();
   });
@@ -53,6 +83,10 @@ app.addEventListener("submit", async (event) => {
       await submitRoutine(form);
     } else if (form.dataset.form === "memo") {
       await submitMemo(form);
+    } else if (form.dataset.form === "diary") {
+      await submitDiary(form);
+    } else if (form.dataset.form === "todo") {
+      await submitTodo(form);
     }
   } catch (error) {
     showToast(error.message || "요청에 실패했습니다.");
@@ -102,6 +136,29 @@ app.addEventListener("click", async (event) => {
     } else if (action === "delete-memo") {
       await api(`/api/routine-memos/${id}`, { method: "DELETE" });
       await loadSnapshot(false);
+    } else if (action === "edit-diary") {
+      state.editingDiaryId = id;
+      render();
+    } else if (action === "cancel-diary") {
+      state.editingDiaryId = null;
+      render();
+    } else if (action === "delete-diary") {
+      await api(`/api/diaries/${id}`, { method: "DELETE" });
+      showToast("일기를 삭제했습니다.");
+      await loadSnapshot(false);
+    } else if (action === "edit-todo") {
+      state.editingTodoId = id;
+      render();
+    } else if (action === "cancel-todo") {
+      state.editingTodoId = null;
+      render();
+    } else if (action === "delete-todo") {
+      await api(`/api/todos/${id}`, { method: "DELETE" });
+      showToast("할 일을 삭제했습니다.");
+      await loadSnapshot(false);
+    } else if (action === "toggle-todo") {
+      await api(`/api/todos/${id}/toggle-done`, { method: "POST" });
+      await loadSnapshot(false);
     } else if (action === "delete-event") {
       await api(`/api/events?ids=${id}`, { method: "DELETE" });
       await loadSnapshot(false);
@@ -142,6 +199,8 @@ function emptySnapshot() {
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    diaries: [],
+    todos: [],
     settings: {},
   };
 }
@@ -169,7 +228,8 @@ async function api(path, options = {}) {
 
 async function loadSnapshot(showMessage = true) {
   try {
-    state.snapshot = await api("/api/snapshot");
+    // 옛 서버는 일기·할 일을 안 돌려줍니다. 기본값을 깔아 두지 않으면 화면이 통째로 안 그려집니다.
+    state.snapshot = { ...emptySnapshot(), ...(await api("/api/snapshot")) };
     connectionText.textContent = `DB ${state.snapshot.itemCount || 0}개 항목`;
     render();
     if (showMessage) showToast("서버 DB를 불러왔습니다.");
@@ -184,6 +244,8 @@ function render() {
   if (state.activeTab === "home") renderHome();
   if (state.activeTab === "library") renderLibrary();
   if (state.activeTab === "routines") renderRoutines();
+  if (state.activeTab === "todos") renderTodos();
+  if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "history") renderHistory();
   if (state.activeTab === "settings") renderSettings();
 }
@@ -204,6 +266,8 @@ function renderHome() {
       ${stat("저장 항목", state.snapshot.items.length)}
       ${stat("오늘 확인", summary.confirmedIds.size)}
       ${stat("루틴", state.snapshot.routines.length)}
+      ${stat("오늘 남은 일", remainingTodayTodos().length)}
+      ${stat("일기", state.snapshot.diaries.length)}
       ${stat("이력", state.snapshot.exposureEvents.length)}
     </section>
     <section class="grid two" style="margin-top:16px">
@@ -350,6 +414,190 @@ function renderRoutines() {
   `;
 }
 
+function renderTodos() {
+  const editing = findById(state.snapshot.todos, state.editingTodoId) || {};
+  const today = todayIso();
+  const groups = groupTodos(state.snapshot.todos, today);
+  app.innerHTML = `
+    <section class="grid two">
+      <form class="panel" data-form="todo">
+        <h2>${editing.id ? "할 일 수정" : "할 일 추가"}</h2>
+        <div class="formGrid">
+          <div class="field full">
+            <label for="todoTitle">할 일</label>
+            <input id="todoTitle" name="title" value="${attr(editing.title)}" required>
+          </div>
+          <div class="field">
+            <label for="todoDueDate">마감 날짜</label>
+            <input id="todoDueDate" name="dueDate" type="date" value="${attr(editing.dueDate || today)}" required>
+          </div>
+          <div class="field">
+            <label for="todoRemindAt">알람</label>
+            <input id="todoRemindAt" name="remindAt" type="datetime-local" value="${attr(toLocalInput(editing.remindAt))}">
+          </div>
+          <div class="field full">
+            <label for="todoNote">메모</label>
+            <textarea id="todoNote" name="note">${escapeHtml(editing.note)}</textarea>
+          </div>
+        </div>
+        <p class="hint">알람은 기기에서 울립니다. 여기서 시각만 정해 두면 다음 동기화에 기기가 예약합니다.</p>
+        <div class="actions" style="margin-top:14px">
+          <button class="primary" type="submit">${editing.id ? "수정 완료" : "저장"}</button>
+          ${editing.id ? `<button type="button" data-action="cancel-todo">취소</button>` : ""}
+        </div>
+      </form>
+      <section>
+        ${todoGroup(`지난 일 ${groups.overdue.length}개`, groups.overdue, today)}
+        ${todoGroup(`오늘 ${groups.today.length}개`, groups.today, today)}
+        ${todoGroup(`예정 ${groups.upcoming.length}개`, groups.upcoming, today)}
+        ${todoGroup(`끝낸 일 ${groups.done.length}개`, groups.done, today)}
+        ${state.snapshot.todos.length ? "" : empty("저장된 할 일이 없습니다.")}
+      </section>
+    </section>
+  `;
+}
+
+function todoGroup(title, todos, today) {
+  if (!todos.length) return "";
+  return `
+    <h2 class="sectionTitle">${escapeHtml(title)}</h2>
+    <div class="itemList">${todos.map((todo) => todoCard(todo, today)).join("")}</div>
+  `;
+}
+
+/**
+ * 앱의 오늘 화면과 같은 묶음입니다.
+ *
+ * 못 끝낸 지난 일을 오늘에 그냥 섞으면 며칠만 밀려도 목록을 읽을 수 없고,
+ * 아예 안 보이면 밀린 일을 영영 놓칩니다. 그래서 따로 모읍니다.
+ */
+function groupTodos(todos, today) {
+  const groups = { overdue: [], today: [], upcoming: [], done: [] };
+  for (const todo of todos) {
+    if (todo.doneAt) groups.done.push(todo);
+    else if (todo.dueDate < today) groups.overdue.push(todo);
+    else if (todo.dueDate === today) groups.today.push(todo);
+    else groups.upcoming.push(todo);
+  }
+  return groups;
+}
+
+function todoCard(todo, today) {
+  const done = Boolean(todo.doneAt);
+  const overdue = !done && todo.dueDate < today;
+  return `
+    <article class="item">
+      <div class="itemHeader">
+        <div>
+          <h3>${escapeHtml(todo.title)}</h3>
+          <div class="meta">
+            <span class="chip">${escapeHtml(todo.dueDate)}</span>
+            ${overdue ? `<span class="chip danger">지남</span>` : ""}
+            ${todo.remindAt ? `<span class="chip">알람 ${formatDate(todo.remindAt)}</span>` : ""}
+            ${done ? `<span class="chip">완료 ${formatDate(todo.doneAt)}</span>` : ""}
+          </div>
+        </div>
+        <button type="button" data-action="toggle-todo" data-id="${todo.id}">${done ? "되돌리기" : "완료"}</button>
+      </div>
+      ${todo.note ? `<p>${escapeHtml(todo.note)}</p>` : ""}
+      <div class="actions">
+        <button type="button" data-action="edit-todo" data-id="${todo.id}">수정</button>
+        <button class="danger" type="button" data-action="delete-todo" data-id="${todo.id}">삭제</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderDiaries() {
+  const editing = findById(state.snapshot.diaries, state.editingDiaryId) || {};
+  const diaries = state.snapshot.diaries;
+  app.innerHTML = `
+    <section class="grid two">
+      <form class="panel" data-form="diary">
+        <h2>${editing.id ? "일기 수정" : "일기 쓰기"}</h2>
+        <div class="formGrid">
+          <div class="field">
+            <label for="diaryEntryDate">날짜</label>
+            <input id="diaryEntryDate" name="entryDate" type="date" value="${attr(editing.entryDate || todayIso())}" required>
+          </div>
+          <div class="field">
+            <label for="diaryTitle">제목 (선택)</label>
+            <input id="diaryTitle" name="title" value="${attr(editing.title)}">
+          </div>
+          <div class="field">
+            <label for="diaryWeather">오늘의 날씨</label>
+            <select id="diaryWeather" name="weather">
+              ${option("", "고르지 않음", editing.weather)}
+              ${weatherOptions.map((item) => option(item.code, `${item.emoji} ${item.label}`, editing.weather)).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="diaryMood">오늘의 기분</label>
+            <select id="diaryMood" name="mood">
+              ${option("", "고르지 않음", editing.mood)}
+              ${moodOptions.map((item) => option(item.code, `${item.emoji} ${item.label}`, editing.mood)).join("")}
+            </select>
+          </div>
+          <div class="field full">
+            <label for="diaryBody">오늘 있었던 일</label>
+            <textarea id="diaryBody" name="body">${escapeHtml(editing.body)}</textarea>
+          </div>
+        </div>
+        <p class="hint">사진·동영상·음성 첨부는 기기 안에 있는 파일이라 웹에서는 붙일 수 없습니다. 개수만 보여 줍니다.</p>
+        <div class="actions" style="margin-top:14px">
+          <button class="primary" type="submit">${editing.id ? "수정 완료" : "저장"}</button>
+          ${editing.id ? `<button type="button" data-action="cancel-diary">취소</button>` : ""}
+        </div>
+      </form>
+      <section>
+        <h2 class="sectionTitle">일기 ${diaries.length}개</h2>
+        <div class="itemList">
+          ${diaries.length ? diaries.map(diaryCard).join("") : empty("작성한 일기가 없습니다.")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function diaryCard(diary) {
+  const weather = findOption(weatherOptions, diary.weather);
+  const mood = findOption(moodOptions, diary.mood);
+  const attachments = attachmentSummary(diary);
+  return `
+    <article class="item">
+      <div class="itemHeader">
+        <div>
+          <h3>${escapeHtml(diary.title || diary.entryDate)}</h3>
+          <div class="meta">
+            <span class="chip">${escapeHtml(diary.entryDate)}</span>
+            ${weather ? `<span class="chip">${weather.emoji} ${escapeHtml(weather.label)}</span>` : ""}
+            ${mood ? `<span class="chip">${mood.emoji} ${escapeHtml(mood.label)}</span>` : ""}
+            ${attachments ? `<span class="chip">${escapeHtml(attachments)}</span>` : ""}
+          </div>
+        </div>
+      </div>
+      ${diary.body ? `<p>${escapeHtml(diary.body)}</p>` : ""}
+      <div class="actions">
+        <button type="button" data-action="edit-diary" data-id="${diary.id}">수정</button>
+        <button class="danger" type="button" data-action="delete-diary" data-id="${diary.id}">삭제</button>
+      </div>
+    </article>
+  `;
+}
+
+function attachmentSummary(diary) {
+  const parts = [];
+  if (diary.imageUris?.length) parts.push(`사진 ${diary.imageUris.length}`);
+  if (diary.videoUris?.length) parts.push(`동영상 ${diary.videoUris.length}`);
+  if (diary.audioUris?.length) parts.push(`음성 ${diary.audioUris.length}`);
+  return parts.join(" · ");
+}
+
+/** 앱이 모르는 값이 들어올 수 있습니다. 못 찾으면 그냥 안 보여 줍니다. */
+function findOption(options, code) {
+  return options.find((item) => item.code === code) || null;
+}
+
 function renderHistory() {
   app.innerHTML = `
     <section>
@@ -386,6 +634,8 @@ function renderSettings() {
           ${stat("루틴", state.snapshot.routines.length)}
           ${stat("체크", state.snapshot.routineChecks.length)}
           ${stat("메모", state.snapshot.routineMemos.length)}
+          ${stat("일기", state.snapshot.diaries.length)}
+          ${stat("할 일", state.snapshot.todos.length)}
         </div>
       </div>
     </section>
@@ -439,6 +689,43 @@ async function submitMemo(form) {
     body: { body: data.get("body") },
   });
   showToast("메모를 저장했습니다.");
+  await loadSnapshot(false);
+}
+
+async function submitDiary(form) {
+  const data = new FormData(form);
+  const payload = {
+    entryDate: data.get("entryDate"),
+    title: data.get("title"),
+    body: data.get("body"),
+    weather: data.get("weather"),
+    mood: data.get("mood"),
+  };
+  const id = state.editingDiaryId;
+  await api(id ? `/api/diaries/${id}` : "/api/diaries", {
+    method: id ? "PUT" : "POST",
+    body: payload,
+  });
+  state.editingDiaryId = null;
+  showToast(id ? "일기를 수정했습니다." : "일기를 저장했습니다.");
+  await loadSnapshot(false);
+}
+
+async function submitTodo(form) {
+  const data = new FormData(form);
+  const payload = {
+    title: data.get("title"),
+    note: data.get("note"),
+    dueDate: data.get("dueDate"),
+    remindAt: fromLocalInput(data.get("remindAt")),
+  };
+  const id = state.editingTodoId;
+  await api(id ? `/api/todos/${id}` : "/api/todos", {
+    method: id ? "PUT" : "POST",
+    body: payload,
+  });
+  state.editingTodoId = null;
+  showToast(id ? "할 일을 수정했습니다." : "할 일을 저장했습니다.");
   await loadSnapshot(false);
 }
 
@@ -552,6 +839,12 @@ function todaySummary() {
   return { confirmedIds, lines };
 }
 
+/** 오늘까지 마감인데 아직 안 끝낸 일. 지난 일도 오늘 할 일로 봅니다. */
+function remainingTodayTodos() {
+  const today = todayIso();
+  return state.snapshot.todos.filter((todo) => !todo.doneAt && todo.dueDate <= today);
+}
+
 function summaryLine(line) {
   return `
     <div class="item">
@@ -625,6 +918,30 @@ function isToday(timestamp) {
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate()
   );
+}
+
+/** 앱과 같은 `yyyy-MM-dd`. toISOString은 UTC라 저녁에 하루 밀리므로 쓰지 않습니다. */
+function todayIso() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+/** datetime-local 입력은 지역 시각 문자열입니다. 저장은 epoch millis로 합니다. */
+function toLocalInput(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function fromLocalInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parsed = new Date(text).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
 }
 
 function formatDate(timestamp) {

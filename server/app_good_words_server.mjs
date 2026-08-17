@@ -152,7 +152,7 @@ async function route(request, response) {
   }
   if (method === "DELETE" && url.pathname === "/api/events") {
     const ids = parseIds(url.searchParams.get("ids"));
-    const result = await withDb((db) => deleteByIds(db.exposureEvents, ids));
+    const result = await withDb((db) => deleteWithTombstone(db, db.exposureEvents, ids, "EXPOSURE_EVENT"));
     sendJson(response, 200, { deleted: result.deleted });
     return;
   }
@@ -164,6 +164,26 @@ async function route(request, response) {
     const payload = await readJson(request);
     const routine = await withDb((db) => saveRoutine(db, payload));
     sendJson(response, 201, routine);
+    return;
+  }
+  if (method === "GET" && url.pathname === "/api/diaries") {
+    sendJson(response, 200, { diaries: sortDiaries((await loadDb()).diaries) });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/api/diaries") {
+    const payload = await readJson(request);
+    const diary = await withDb((db) => saveDiary(db, payload));
+    sendJson(response, 201, diary);
+    return;
+  }
+  if (method === "GET" && url.pathname === "/api/todos") {
+    sendJson(response, 200, { todos: sortTodos((await loadDb()).todos) });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/api/todos") {
+    const payload = await readJson(request);
+    const todo = await withDb((db) => saveTodo(db, payload));
+    sendJson(response, 201, todo);
     return;
   }
   if (method === "GET" && url.pathname === "/api/summary/today") {
@@ -186,6 +206,14 @@ async function route(request, response) {
   }
   if (parts[0] === "api" && parts[1] === "routine-memos" && parts[2]) {
     await routeMemoMember(method, parts, response);
+    return;
+  }
+  if (parts[0] === "api" && parts[1] === "diaries" && parts[2]) {
+    await routeDiaryMember(method, parts, request, response);
+    return;
+  }
+  if (parts[0] === "api" && parts[1] === "todos" && parts[2]) {
+    await routeTodoMember(method, parts, request, response);
     return;
   }
 
@@ -212,7 +240,7 @@ async function routeContentMember(method, parts, request, response) {
     return;
   }
   if (method === "DELETE" && !action) {
-    const result = await withDb((db) => deleteByIds(db.items, [itemId]));
+    const result = await withDb((db) => deleteWithTombstone(db, db.items, [itemId], "CONTENT_ITEM"));
     sendJson(response, 200, { deleted: result.deleted });
     return;
   }
@@ -284,14 +312,18 @@ async function routeRoutineMember(method, parts, request, response) {
   }
   if (method === "DELETE" && !action) {
     const result = await withDb((db) => {
-      const deleted = deleteByIds(db.routines, [routineId]).deleted;
-      deleteByIds(
+      const deleted = deleteWithTombstone(db, db.routines, [routineId], "ROUTINE").deleted;
+      deleteWithTombstone(
+        db,
         db.routineChecks,
         db.routineChecks.filter((check) => check.routineId === routineId).map((check) => check.id),
+        "ROUTINE_CHECK",
       );
-      deleteByIds(
+      deleteWithTombstone(
+        db,
         db.routineMemos,
         db.routineMemos.filter((memo) => memo.routineId === routineId).map((memo) => memo.id),
+        "ROUTINE_MEMO",
       );
       return { deleted };
     });
@@ -337,8 +369,71 @@ async function routeMemoMember(method, parts, response) {
     sendJson(response, 405, { error: "지원하지 않는 메서드입니다." });
     return;
   }
-  const result = await withDb((db) => deleteByIds(db.routineMemos, [memoId]));
+  const result = await withDb((db) => deleteWithTombstone(db, db.routineMemos, [memoId], "ROUTINE_MEMO"));
   sendJson(response, 200, { deleted: result.deleted });
+}
+
+async function routeDiaryMember(method, parts, request, response) {
+  const diaryId = Number(parts[2]);
+  if (!Number.isFinite(diaryId) || diaryId <= 0) {
+    sendJson(response, 400, { error: "일기 ID가 올바르지 않습니다." });
+    return;
+  }
+
+  if (method === "GET") {
+    const diary = (await loadDb()).diaries.find((candidate) => candidate.id === diaryId);
+    sendJson(response, diary ? 200 : 404, diary || { error: "일기를 찾을 수 없습니다." });
+    return;
+  }
+  if (method === "PUT") {
+    const payload = await readJson(request);
+    const diary = await withDb((db) => saveDiary(db, payload, diaryId));
+    sendJson(response, 200, diary);
+    return;
+  }
+  if (method === "DELETE") {
+    const result = await withDb((db) => deleteWithTombstone(db, db.diaries, [diaryId], "DIARY"));
+    sendJson(response, 200, { deleted: result.deleted });
+    return;
+  }
+  sendJson(response, 405, { error: "지원하지 않는 메서드입니다." });
+}
+
+async function routeTodoMember(method, parts, request, response) {
+  const todoId = Number(parts[2]);
+  const action = parts[3] || "";
+  if (!Number.isFinite(todoId) || todoId <= 0) {
+    sendJson(response, 400, { error: "할 일 ID가 올바르지 않습니다." });
+    return;
+  }
+
+  if (method === "GET" && !action) {
+    const todo = (await loadDb()).todos.find((candidate) => candidate.id === todoId);
+    sendJson(response, todo ? 200 : 404, todo || { error: "할 일을 찾을 수 없습니다." });
+    return;
+  }
+  if (method === "PUT" && !action) {
+    const payload = await readJson(request);
+    const todo = await withDb((db) => saveTodo(db, payload, todoId));
+    sendJson(response, 200, todo);
+    return;
+  }
+  if (method === "DELETE" && !action) {
+    const result = await withDb((db) => deleteWithTombstone(db, db.todos, [todoId], "TODO"));
+    sendJson(response, 200, { deleted: result.deleted });
+    return;
+  }
+  if (method === "POST" && action === "toggle-done") {
+    const todo = await withDb((db) => {
+      const existing = db.todos.find((candidate) => candidate.id === todoId);
+      if (!existing) throw new HttpError(404, "할 일을 찾을 수 없습니다.");
+      // 완료 시각으로 켜고 끕니다. 앱도 같은 방식이라 병합할 때 최근에 누른 쪽이 남습니다.
+      return saveTodo(db, { doneAt: existing.doneAt ? null : nowMs() }, todoId);
+    });
+    sendJson(response, 200, todo);
+    return;
+  }
+  sendJson(response, 404, { error: "엔드포인트를 찾을 수 없습니다." });
 }
 
 async function loadDb() {
@@ -728,6 +823,8 @@ function saveContent(db, payload, itemId = null) {
     ...existing,
     ...payload,
     id: itemId || payload.id || nextId(db.items),
+    // 웹에서 고쳤다는 사실을 병합이 알아야 합니다. 안 올리면 기기의 옛 사본이 이겨 되돌아갑니다.
+    updatedAt: nowMs(),
     createdAt: payload.createdAt || existing?.createdAt || nowMs(),
     lastShownAt: Object.hasOwn(payload, "lastShownAt") ? payload.lastShownAt : existing?.lastShownAt,
     showCount: Object.hasOwn(payload, "showCount") ? payload.showCount : existing?.showCount || 0,
@@ -749,11 +846,74 @@ function saveRoutine(db, payload, routineId = null) {
     ...existing,
     ...payload,
     id: routineId || payload.id || nextId(db.routines),
+    updatedAt: nowMs(),
     createdAt: payload.createdAt || existing?.createdAt || nowMs(),
   });
   if (!normalized.title) throw new HttpError(400, "루틴 이름을 입력해 주세요.");
   upsert(db.routines, normalized);
   return normalized;
+}
+
+/**
+ * 웹에서 만든 일기를 저장합니다.
+ *
+ * `updatedAt`을 반드시 지금으로 올립니다. 그대로 두면 기기에 있는 옛 사본이 병합에서 이겨
+ * 웹에서 고친 내용이 조용히 되돌아갑니다.
+ */
+function saveDiary(db, payload, diaryId = null) {
+  const existing = diaryId ? db.diaries.find((diary) => diary.id === diaryId) : null;
+  const normalized = normalizeDiary({
+    ...existing,
+    ...payload,
+    id: diaryId || payload.id || nextId(db.diaries),
+    updatedAt: nowMs(),
+    createdAt: payload.createdAt || existing?.createdAt || nowMs(),
+  });
+  if (!normalized) throw new HttpError(400, "날짜를 입력해 주세요.");
+  // 사진만 올리는 날도 있어서 본문만 보고 판단하지 않습니다. 앱의 hasSomethingToSave와 같은 기준입니다.
+  const hasSomething =
+    normalized.title ||
+    normalized.body ||
+    normalized.weather ||
+    normalized.mood ||
+    normalized.imageUris.length ||
+    normalized.videoUris.length ||
+    normalized.audioUris.length;
+  if (!hasSomething) throw new HttpError(400, "내용이나 날씨·기분 중 하나는 필요합니다.");
+  upsert(db.diaries, normalized);
+  return normalized;
+}
+
+/** 할 일도 같은 이유로 `updatedAt`을 지금으로 올립니다. */
+function saveTodo(db, payload, todoId = null) {
+  const existing = todoId ? db.todos.find((todo) => todo.id === todoId) : null;
+  const merged = {
+    ...existing,
+    ...payload,
+    id: todoId || payload.id || nextId(db.todos),
+    updatedAt: nowMs(),
+    createdAt: payload.createdAt || existing?.createdAt || nowMs(),
+  };
+  // normalizeTodo는 둘 중 하나만 없어도 null을 돌려주므로, 무엇이 빠졌는지 먼저 알려 줍니다.
+  if (!text(merged.title)) throw new HttpError(400, "할 일 이름을 입력해 주세요.");
+  if (!text(merged.dueDate)) throw new HttpError(400, "마감 날짜를 입력해 주세요.");
+  const normalized = normalizeTodo(merged);
+  upsert(db.todos, normalized);
+  return normalized;
+}
+
+/** 최근 날짜가 위로. 같은 날이면 나중에 쓴 것이 위로 옵니다. */
+function sortDiaries(diaries) {
+  return [...diaries].sort(
+    (a, b) => String(b.entryDate).localeCompare(String(a.entryDate)) || Number(b.createdAt || 0) - Number(a.createdAt || 0),
+  );
+}
+
+/** 마감이 빠른 것부터. 앱의 오늘 목록과 읽는 순서를 맞춥니다. */
+function sortTodos(todos) {
+  return [...todos].sort(
+    (a, b) => String(a.dueDate).localeCompare(String(b.dueDate)) || Number(a.createdAt || 0) - Number(b.createdAt || 0),
+  );
 }
 
 function saveRoutineCheck(db, payload) {
@@ -1040,6 +1200,25 @@ function deleteByIds(items, ids) {
   items.length = 0;
   items.push(...kept);
   return { deleted: before - items.length };
+}
+
+/**
+ * 지우면서 삭제 표식을 함께 남깁니다.
+ *
+ * 표식이 없으면 웹에서 지워도 기기에는 그 레코드가 그대로 있어서, 다음 병합에 서버로 다시
+ * 올라옵니다. 사용자가 보기에는 지웠는데 잠시 뒤 되살아나는 셈입니다.
+ */
+function deleteWithTombstone(db, collection, ids, entityType) {
+  const idSet = new Set(ids);
+  const removed = collection.filter((record) => idSet.has(record.id));
+  const result = deleteByIds(collection, ids);
+  const deletedAt = nowMs();
+  for (const record of removed) {
+    if (!record.syncId) continue;
+    db.deletions = db.deletions.filter((entry) => entry.syncId !== record.syncId);
+    db.deletions.push({ syncId: record.syncId, entityType, deletedAt });
+  }
+  return result;
 }
 
 function nextId(items) {

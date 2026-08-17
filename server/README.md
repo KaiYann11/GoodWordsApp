@@ -15,6 +15,8 @@ node app_good_words_server.mjs --seed
 http://127.0.0.1:8765
 ```
 
+탭은 홈 · 보관함 · 루틴 · 할 일 · 일기 · 이력 · 서버입니다. 앱에서 하는 일은 첨부를 빼면 웹에서도 됩니다.
+
 Windows에서 간단히 실행하려면 `server\run_server.cmd`를 열면 됩니다.
 
 ## 맥미니에서 실행
@@ -279,6 +281,26 @@ POST /api/routines
 PUT  /api/routines/{id}
 POST /api/routines/{id}/check
 POST /api/routines/{id}/memos
+GET  /api/diaries
+POST /api/diaries
+PUT  /api/diaries/{id}
+DELETE /api/diaries/{id}
+GET  /api/todos
+POST /api/todos
+PUT  /api/todos/{id}
+DELETE /api/todos/{id}
+POST /api/todos/{id}/toggle-done
 GET  /api/events
 DELETE /api/events?ids=1,2,3
 ```
+
+### 웹에서 고치고 지우는 것도 병합에 참여합니다
+
+REST로 저장하면 `updatedAt`을 지금으로 올리고, 지우면 삭제 표식을 함께 남깁니다. 둘 중 하나라도
+빠지면 기기가 다음 병합에서 옛 사본을 다시 올려 주어, 웹에서 한 일이 조용히 되돌아갑니다.
+
+웹 UI에는 일기와 할 일 탭이 있습니다. **첨부는 웹에서 붙일 수 없습니다.** 파일이 기기 안에 있어서
+서버로 올라오지 않기 때문이고, 목록에는 개수만 보여 줍니다.
+
+할 일 알람도 웹에서는 시각만 정합니다. 예약은 기기의 AlarmManager가 하므로, 그 기기가 병합을
+마칠 때 실제로 걸립니다.

@@ -41,9 +41,18 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
 `SnapshotReindexer`(id 재부여) · `AppDataImporter`(저장) ·
-서버의 `normalizeDb`/`mergeSnapshot`/`replaceSnapshot`/`reindex`/`deduplicate`.
+서버의 `normalizeDb`/`mergeSnapshot`/`replaceSnapshot`/`reindex`/`deduplicate` ·
+웹 `server/web`(탭·화면·`emptySnapshot`).
 특히 서버 `replaceSnapshot`을 빠뜨리면 업로드가 그 종류만 남겨 두어, 사용자가 지운 레코드가
 다음 병합에 되살아납니다.
+
+**날씨·기분 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의 `DiaryWeather`·`DiaryMood`와
+웹 `server/web/app.js`의 `weatherOptions`·`moodOptions`가 같은 코드 값을 씁니다. 한쪽만 늘리면
+다른 쪽에서는 고르지 않은 것처럼 보입니다. 서버는 값을 검사하지 않으므로 서버는 고칠 필요가 없습니다.
+
+**웹에서 저장·삭제할 때는 `updatedAt`을 올리고 삭제 표식을 남깁니다.** 둘 중 하나라도 빠지면
+기기가 다음 병합에서 옛 사본을 다시 올려 주어 웹에서 한 일이 조용히 되돌아갑니다.
+서버의 `deleteWithTombstone()`을 쓰고, `save*()`에서 `updatedAt: nowMs()`를 넣습니다.
 
 **`SyncDeduplicator`(앱)와 서버 `deduplicate()`는 규칙이 같아야 합니다.** 판정 기준과 승자 선택
 (최신 `updatedAt`, 같으면 큰 `syncId`)이 어긋나면 두 기기가 병합할 때마다 서로를 고쳐 끝나지 않습니다.
