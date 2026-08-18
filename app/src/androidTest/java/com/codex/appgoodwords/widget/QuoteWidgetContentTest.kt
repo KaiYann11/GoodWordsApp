@@ -4,6 +4,7 @@ import androidx.glance.appwidget.testing.unit.runGlanceAppWidgetUnitTest
 import androidx.glance.testing.unit.hasText
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
+import com.codex.appgoodwords.data.WidgetSummary
 import org.junit.Test
 
 /**
@@ -57,4 +58,47 @@ class QuoteWidgetContentTest {
         onNode(hasText("앱 열기")).assertExists()
         onNode(hasText("다음 글귀")).assertDoesNotExist()
     }
+
+    @Test
+    fun showsTodayWorkUnderTheQuote() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            WidgetContent(
+                quote(),
+                WidgetSummary(remainingTodos = 2, overdueTodos = 1, readingTitle = "몰입의 즐거움", readingPercent = 34)
+            )
+        }
+
+        // 앱을 열지 않고도 오늘 무엇이 남았는지 보이는 것이 위젯을 놓는 이유입니다.
+        onNode(hasText("할 일 2개 · 지난 일 1개")).assertExists()
+        onNode(hasText("읽는 중 · 몰입의 즐거움 34%")).assertExists()
+    }
+
+    @Test
+    fun nothingIsAddedWhenThereIsNoWorkLeft() = runGlanceAppWidgetUnitTest {
+        provideComposable { WidgetContent(quote()) }
+
+        // 할 것이 없는데 "할 일 0개"를 띄우면 글귀 자리만 줄어듭니다.
+        onNode(hasText("할 일 0개")).assertDoesNotExist()
+        onNode(hasText("읽는 중")).assertDoesNotExist()
+    }
+
+    @Test
+    fun onlyTheBookLineShowsWhenNothingIsDue() = runGlanceAppWidgetUnitTest {
+        provideComposable {
+            WidgetContent(
+                quote(),
+                WidgetSummary(remainingTodos = 0, overdueTodos = 0, readingTitle = "읽는 책", readingPercent = null)
+            )
+        }
+
+        onNode(hasText("읽는 중 · 읽는 책")).assertExists()
+        onNode(hasText("할 일 0개")).assertDoesNotExist()
+    }
+
+    private fun quote() = ContentItemEntity(
+        id = 1L,
+        type = ContentType.QUOTE,
+        title = "제목",
+        body = "본문"
+    )
 }

@@ -28,7 +28,9 @@ import com.codex.appgoodwords.MainActivity
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ExposureTrigger
+import com.codex.appgoodwords.data.WidgetSummary
 import com.codex.appgoodwords.work.AppNotifications
+import java.time.LocalDate
 
 /**
  * 홈 화면에 글귀를 상시 노출하는 위젯입니다.
@@ -41,10 +43,15 @@ class QuoteWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val container = (context.applicationContext as AppGoodWordsApplication).container
         val item = currentItem(container)
+        val summary = WidgetSummary.of(
+            todos = container.database.todoDao().getAll(),
+            books = container.database.bookDao().getAll(),
+            today = LocalDate.now()
+        )
 
         provideContent {
             GlanceTheme {
-                WidgetContent(item)
+                WidgetContent(item, summary)
             }
         }
     }
@@ -76,7 +83,10 @@ class QuoteWidget : GlanceAppWidget() {
 }
 
 @androidx.compose.runtime.Composable
-internal fun WidgetContent(item: ContentItemEntity?) {
+internal fun WidgetContent(
+    item: ContentItemEntity?,
+    summary: WidgetSummary = WidgetSummary(0, 0, "", null)
+) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -123,6 +133,27 @@ internal fun WidgetContent(item: ContentItemEntity?) {
                 Text(
                     text = "— ${item.author}",
                     maxLines = 1,
+                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)
+                )
+            }
+        }
+
+        // 오늘 해야 할 것만 한두 줄. 위젯이 좁아서 다 보여 주면 글귀가 밀려납니다.
+        if (!summary.isEmpty) {
+            Spacer(modifier = GlanceModifier.height(6.dp))
+            if (summary.hasTodos) {
+                Text(
+                    text = summary.todoLine,
+                    maxLines = 1,
+                    modifier = GlanceModifier.clickable(actionStartActivity(launchAppIntent())),
+                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)
+                )
+            }
+            if (summary.hasBook) {
+                Text(
+                    text = summary.bookLine,
+                    maxLines = 1,
+                    modifier = GlanceModifier.clickable(actionStartActivity(launchAppIntent())),
                     style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)
                 )
             }
