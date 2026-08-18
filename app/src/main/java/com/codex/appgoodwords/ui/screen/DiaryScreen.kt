@@ -50,8 +50,10 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.codex.appgoodwords.data.AttachmentUris
+import com.codex.appgoodwords.data.DiaryAnswers
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.DiaryKind
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.DiaryWeather
 import java.time.LocalDate
@@ -64,6 +66,11 @@ internal const val diarySaveButtonTag = "diary_save_button"
 internal fun diaryWeatherChipTag(weather: DiaryWeather) = "diary_weather_${weather.name}"
 
 internal fun diaryMoodChipTag(mood: DiaryMood) = "diary_mood_${mood.name}"
+
+internal fun diaryKindChipTag(kind: DiaryKind) = "diary_kind_${kind.name}"
+
+/** 물음 칸도 순서대로 태그를 답니다. */
+internal fun diaryAnswerTag(index: Int) = "diary_answer_$index"
 
 /**
  * 날짜별 일기.
@@ -109,6 +116,7 @@ fun DiaryScreen(
                     Text("일기", style = MaterialTheme.typography.titleMedium)
                     Text(
                         text = "날씨와 기분을 고르고 사진·동영상·음성 파일을 붙일 수 있습니다. " +
+                            "쓸 말이 떠오르지 않는 날에는 감사·반성을 골라 물음에 답만 해도 됩니다. " +
                             "하루에 여러 번 써도 됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -150,6 +158,7 @@ fun DiaryScreen(
                             Text(
                                 text = listOfNotNull(
                                     diary.entryDate,
+                                    diary.kindOption.takeIf { it.isGuided }?.let { "${it.label} 일기" },
                                     diary.weatherOption?.let { "${it.emoji} ${it.label}" },
                                     diary.moodOption?.let { "${it.emoji} ${it.label}" }
                                 ).joinToString("  ·  "),
@@ -162,6 +171,17 @@ fun DiaryScreen(
                         TextButton(onClick = { editing = DiaryDraft.from(diary) }) { Text("수정") }
                         IconButton(onClick = { pendingDelete = diary }) {
                             Icon(Icons.Outlined.Delete, contentDescription = "지우기")
+                        }
+                    }
+                    // 물음과 답을 함께 보여 줍니다. 답만 있으면 무엇에 답한 것인지 알 수 없습니다.
+                    diary.filledAnswers.forEach { (prompt, answer) ->
+                        Column {
+                            Text(
+                                text = prompt,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(answer, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                     if (diary.body.isNotBlank()) {
@@ -318,6 +338,39 @@ private fun DiaryEditDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // 종류를 바꿔도 적어 둔 답은 지우지 않습니다. 잘못 눌렀을 때 되돌릴 방법이 없어집니다.
+                // 물음 수가 다른 종류로 옮기면 넘치는 답은 화면에서 사라지지만, 되돌아오면 다시 보입니다.
+                Text("일기 종류", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    DiaryKind.entries.forEach { kind ->
+                        FilterChip(
+                            selected = current.kindOption == kind,
+                            onClick = { current = current.copy(kind = kind.name) },
+                            label = { Text(kind.label) },
+                            modifier = Modifier.testTag(diaryKindChipTag(kind))
+                        )
+                    }
+                }
+
+                val prompts = current.kindOption.prompts
+                if (prompts.isNotEmpty()) {
+                    val answers = DiaryAnswers.padded(current.answers, prompts.size)
+                    prompts.forEachIndexed { index, prompt ->
+                        OutlinedTextField(
+                            value = answers[index],
+                            onValueChange = { current = current.withAnswer(index, it) },
+                            label = { Text(prompt) },
+                            minLines = 2,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(diaryAnswerTag(index))
+                        )
+                    }
+                }
+
                 // 같은 칩을 다시 누르면 선택이 풀립니다. 잘못 골랐을 때 되돌릴 방법이 달리 없습니다.
                 // 개수가 몇 개뿐이라 LazyRow를 쓰지 않습니다. 화면 밖 칩도 만들어 두어야 스크롤로 닿습니다.
                 Text("오늘의 날씨", style = MaterialTheme.typography.labelLarge)
@@ -359,7 +412,8 @@ private fun DiaryEditDialog(
                 OutlinedTextField(
                     value = current.body,
                     onValueChange = { current = current.copy(body = it) },
-                    label = { Text("오늘 있었던 일") },
+                    // 물음이 있는 날은 본문을 비워 두는 일이 흔해서, 안 적어도 된다고 알려 줍니다.
+                    label = { Text(if (prompts.isEmpty()) "오늘 있었던 일" else "더 적고 싶은 말 (선택)") },
                     minLines = 4,
                     modifier = Modifier
                         .fillMaxWidth()

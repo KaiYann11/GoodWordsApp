@@ -36,7 +36,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 12입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 13입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -50,9 +50,17 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 앱 `AttachmentUris.SCHEME` · 서버 `attachmentScheme` · 웹 `app.js`의 `attachmentScheme`에 각각 있습니다.
 파일은 DB JSON 밖 `attachments/` 폴더에 둡니다. DB에 넣으면 스냅샷마다 사진이 통째로 오갑니다.
 
-**날씨·기분 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의 `DiaryWeather`·`DiaryMood`와
-웹 `server/web/app.js`의 `weatherOptions`·`moodOptions`가 같은 코드 값을 씁니다. 한쪽만 늘리면
+**날씨·기분·일기 종류 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의
+`DiaryWeather`·`DiaryMood`·`DiaryKind`와 웹 `server/web/app.js`의
+`weatherOptions`·`moodOptions`·`diaryKinds`가 같은 코드 값을 씁니다. 한쪽만 늘리면
 다른 쪽에서는 고르지 않은 것처럼 보입니다. 서버는 값을 검사하지 않으므로 서버는 고칠 필요가 없습니다.
+
+**감사·반성 일기의 답(`answers`)은 물음 순서에 자리를 맞춘 목록입니다.** 물음 문구와 순서도 앱
+`DiaryKind.prompts`와 웹 `diaryKinds`가 같아야 합니다. 답은 물음 번호로만 이어져 있어서, 한쪽에서
+물음을 끼워 넣거나 순서를 바꾸면 답이 다른 물음에 가서 붙습니다. **가운데 빈칸은 버리지 않습니다.**
+버리면 뒤의 답이 앞으로 밀립니다(마지막 물음에만 답한 날 그 답이 첫 물음의 답이 됩니다).
+뒤쪽 빈칸만 떼는 규칙이 앱 `DiaryAnswers.normalize`와 서버 `normalizeAnswers()`에 같이 있습니다.
+Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `DiaryAnswerConverters`를 따로 붙였습니다.
 
 **웹에서 저장·삭제할 때는 `updatedAt`을 올리고 삭제 표식을 남깁니다.** 둘 중 하나라도 빠지면
 기기가 다음 병합에서 옛 사본을 다시 올려 주어 웹에서 한 일이 조용히 되돌아갑니다.

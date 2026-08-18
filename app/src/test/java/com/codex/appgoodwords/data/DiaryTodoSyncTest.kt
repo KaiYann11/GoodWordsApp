@@ -25,6 +25,8 @@ class DiaryTodoSyncTest {
                     body = "적어 둔 내용",
                     weather = DiaryWeather.RAIN.name,
                     mood = DiaryMood.GOOD.name,
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("따뜻한 커피", "", "비 그친 하늘"),
                     imageUris = listOf("content://photo/1"),
                     videoUris = listOf("content://video/1"),
                     audioUris = listOf("content://audio/1"),
@@ -75,6 +77,56 @@ class DiaryTodoSyncTest {
         // 화면에서는 고르지 않은 것으로 보입니다. 앱이 죽지 않는 것이 먼저입니다.
         assertNull(diary.weatherOption)
         assertNull(diary.moodOption)
+    }
+
+    @Test
+    fun blankAnswersKeepTheirPlaceAcrossDevices() {
+        // 빈칸을 버리고 보내면, 받은 기기에서는 마지막 답이 첫 물음의 답이 됩니다.
+        val snapshot = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "diary-1",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("", "", "비 그친 하늘")
+                )
+            )
+        )
+
+        val restored = AppDataJson.fromJsonText(AppDataJson.toJson(snapshot).toString())
+
+        assertEquals(listOf("", "", "비 그친 하늘"), restored.diaries.single().answers)
+    }
+
+    @Test
+    fun aDiaryFromAnOlderDeviceIsReadAsAFreeDiary() {
+        // 종류를 모르던 시절의 기기가 보낸 일기. 빈 값으로 두면 화면에서 아무 종류도 안 고른 것이 됩니다.
+        val json = AppDataJson.toJson(snapshotOf()).toString().replace(
+            "\"diaries\":[]",
+            """"diaries":[{"syncId":"old","entryDate":"2026-08-12","body":"예전 일기"}]"""
+        )
+
+        val restored = AppDataJson.fromJsonText(json)
+
+        assertEquals(DiaryKind.FREE.name, restored.diaries.single().kind)
+        assertEquals(emptyList<String>(), restored.diaries.single().answers)
+    }
+
+    @Test
+    fun anUnknownKindSurvivesTheRoundTrip() {
+        // 다음 버전이 종류를 늘리면 이 앱이 모르는 값이 들어옵니다.
+        // 읽을 때 FREE로 바꿔 버리면 다음 업로드에서 다른 기기의 종류까지 지워집니다.
+        val snapshot = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(syncId = "diary-1", entryDate = "2026-08-12", kind = "MORNING_PAGE")
+            )
+        )
+
+        val restored = AppDataJson.fromJsonText(AppDataJson.toJson(snapshot).toString())
+
+        assertEquals("MORNING_PAGE", restored.diaries.single().kind)
+        // 화면에서는 자유 일기로 보입니다. 앱이 죽지 않는 것이 먼저입니다.
+        assertEquals(DiaryKind.FREE, restored.diaries.single().kindOption)
     }
 
     @Test

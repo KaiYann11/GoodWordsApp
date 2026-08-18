@@ -36,7 +36,7 @@ data class AppDataSnapshot(
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 12
+    const val schemaVersion: Int = 13
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -185,6 +185,8 @@ object AppDataJson {
         .put("body", body)
         .put("weather", weather)
         .put("mood", mood)
+        .put("kind", kind)
+        .put("answers", JSONArray(answers))
         .put("imageUris", JSONArray(imageUris))
         .put("videoUris", JSONArray(videoUris))
         .put("audioUris", JSONArray(audioUris))
@@ -212,6 +214,9 @@ object AppDataJson {
                         // 모르는 값이어도 그대로 둡니다. 여기서 지우면 다음 업로드 때 서버에서도 사라집니다.
                         weather = diary.optString("weather").trim(),
                         mood = diary.optString("mood").trim(),
+                        // 옛 기기가 보낸 일기에는 종류가 없습니다. 물음 없이 쓴 일기로 봅니다.
+                        kind = diary.optString("kind").trim().ifBlank { DiaryKind.FREE.name },
+                        answers = diary.optJSONArray("answers").toAnswerList(),
                         imageUris = diary.optJSONArray("imageUris").toStringList(),
                         videoUris = diary.optJSONArray("videoUris").toStringList(),
                         audioUris = diary.optJSONArray("audioUris").toStringList(),
@@ -527,6 +532,22 @@ object AppDataJson {
                 }
             }
         }
+    }
+
+    /**
+     * 일기 물음의 답. [toStringList]와 달리 빈칸을 버리지 않습니다.
+     *
+     * 답은 물음과 자리를 맞춰 놓은 목록이라, 빈칸을 버리면 뒤의 답이 다른 물음의 답이 됩니다.
+     * 뒤쪽 빈칸만 [DiaryAnswers.normalize]와 같은 규칙으로 떼어 냅니다.
+     */
+    private fun JSONArray?.toAnswerList(): List<String> {
+        if (this == null) return emptyList()
+        val values = buildList {
+            for (index in 0 until length()) {
+                add(optString(index))
+            }
+        }
+        return DiaryAnswers.normalize(values)
     }
 
     private fun JSONObject.optNullableLong(key: String): Long? {

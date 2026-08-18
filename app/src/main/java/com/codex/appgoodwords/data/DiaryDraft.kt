@@ -16,14 +16,25 @@ data class DiaryDraft(
      */
     val weather: String = "",
     val mood: String = "",
+    /** [DiaryKind]의 이름. 물음 없이 쓰면 `FREE`입니다. 모르는 값도 그대로 들고 있습니다. */
+    val kind: String = DiaryKind.FREE.name,
+    /** 물음에 대한 답. [DiaryKind.prompts]와 같은 순서라 빈칸도 자리를 지킵니다. */
+    val answers: List<String> = emptyList(),
     val imageUris: List<String> = emptyList(),
     val videoUris: List<String> = emptyList(),
     val audioUris: List<String> = emptyList()
 ) {
-    /** 사진만 넣거나 날씨·기분만 남기는 날도 있으므로 본문만 보고 판단하지 않습니다. */
+    val kindOption: DiaryKind
+        get() = DiaryKind.fromCode(kind) ?: DiaryKind.FREE
+
+    /**
+     * 사진만 넣거나 날씨·기분만 남기는 날도 있으므로 본문만 보고 판단하지 않습니다.
+     * 감사·반성 일기는 본문 없이 답만 적는 날이 흔해서 답도 함께 봅니다.
+     */
     val hasSomethingToSave: Boolean
         get() = title.isNotBlank() || body.isNotBlank() ||
             weather.isNotBlank() || mood.isNotBlank() ||
+            answers.any { it.isNotBlank() } ||
             imageUris.isNotEmpty() || videoUris.isNotEmpty() || audioUris.isNotEmpty()
 
     val weatherOption: DiaryWeather?
@@ -31,6 +42,14 @@ data class DiaryDraft(
 
     val moodOption: DiaryMood?
         get() = DiaryMood.fromCode(mood)
+
+    /** 물음 하나의 답만 바꿉니다. 아직 짧은 목록이어도 물음 개수만큼은 자리를 채워 둡니다. */
+    fun withAnswer(index: Int, answer: String): DiaryDraft {
+        val size = maxOf(kindOption.prompts.size, answers.size)
+        if (index !in 0 until size) return this
+        val padded = DiaryAnswers.padded(answers, size)
+        return copy(answers = padded.mapIndexed { at, value -> if (at == index) answer else value })
+    }
 
     companion object {
         fun from(diary: DiaryEntity): DiaryDraft = DiaryDraft(
@@ -40,6 +59,8 @@ data class DiaryDraft(
             body = diary.body,
             weather = diary.weather,
             mood = diary.mood,
+            kind = diary.kind,
+            answers = diary.answers,
             imageUris = diary.imageUris,
             videoUris = diary.videoUris,
             audioUris = diary.audioUris

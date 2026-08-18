@@ -98,12 +98,17 @@ object SyncDeduplicator {
 
     // 날씨와 기분도 함께 봅니다. 글 없이 기분만 남긴 날이 있을 수 있어서,
     // 빼면 같은 날 남긴 두 기분 중 하나가 조용히 사라집니다.
+    // 종류와 답도 같은 이유로 봅니다. 같은 날 쓴 감사 일기와 반성 일기는 서로 다른 기록입니다.
     private fun diaryFingerprint(diary: DiaryEntity): String = listOf(
         diary.entryDate.trim(),
         normalize(diary.title),
         normalize(diary.body),
         diary.weather.trim(),
         diary.mood.trim(),
+        // 이 앱이 모르는 종류여도 적힌 그대로 봅니다. FREE로 바꿔 보면 다른 종류끼리 합쳐집니다.
+        diary.kind.trim().ifBlank { DiaryKind.FREE.name },
+        // 답에도 쉼표가 들어갈 수 있어 다른 자리 표시를 씁니다. 서버 diaryFingerprint와 같아야 합니다.
+        DiaryAnswers.normalize(diary.answers).joinToString(ANSWER_SEPARATOR) { normalize(it) },
         diary.imageUris.joinToString(","),
         diary.videoUris.joinToString(","),
         diary.audioUris.joinToString(",")
@@ -131,4 +136,10 @@ object SyncDeduplicator {
     private fun normalize(value: String): String = value.trim().lowercase().replace(WHITESPACE, " ")
 
     private val WHITESPACE = Regex("\\s+")
+
+    /**
+     * 답과 답 사이를 잇는 표시. 답에는 쉼표도 줄바꿈도 들어가므로 글자가 아닌 것을 씁니다.
+     * 서버 `answerSeparator`와 같은 값이어야 지문이 어긋나지 않습니다.
+     */
+    private const val ANSWER_SEPARATOR = "\u001F"
 }

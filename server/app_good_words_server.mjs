@@ -7,9 +7,15 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 12;
+const schemaVersion = 13;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
+/**
+ * 일기 물음의 답을 이어 붙일 때 쓰는 구분자.
+ * 답에는 쉼표도 줄바꿈도 들어가므로 글자가 아닌 것을 쓴다.
+ * 앱 `SyncDeduplicator.ANSWER_SEPARATOR`와 같은 값이어야 지문이 어긋나지 않는다.
+ */
+const answerSeparator = "\u001F";
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
@@ -1027,6 +1033,7 @@ function routineFingerprint(routine) {
 }
 
 // 날씨와 기분도 함께 본다. 앱의 diaryFingerprint와 같은 항목이어야 한다.
+// 종류와 답도 같은 이유로 본다. 같은 날 쓴 감사 일기와 반성 일기는 서로 다른 기록이다.
 function diaryFingerprint(diary) {
   return [
     text(diary.entryDate),
@@ -1034,6 +1041,10 @@ function diaryFingerprint(diary) {
     norm(diary.body),
     text(diary.weather),
     text(diary.mood),
+    diary.kind,
+    // 답에는 쉼표도 줄바꿈도 들어가므로 글자가 아닌 구분자로 잇는다.
+    // 앱 SyncDeduplicator.ANSWER_SEPARATOR와 같은 값이어야 한다.
+    diary.answers.map(norm).join(answerSeparator),
     diary.imageUris.join(","),
     diary.videoUris.join(","),
     diary.audioUris.join(","),
@@ -1296,6 +1307,7 @@ function saveDiary(db, payload, diaryId = null) {
     normalized.body ||
     normalized.weather ||
     normalized.mood ||
+    normalized.answers.some(Boolean) ||
     normalized.imageUris.length ||
     normalized.videoUris.length ||
     normalized.audioUris.length;
@@ -1604,6 +1616,9 @@ function normalizeDiary(diary) {
     // 서버는 값을 검사하지 않는다. 앱이 선택지를 늘려도 서버를 같이 고칠 필요가 없게 하려는 것이다.
     weather: text(diary.weather),
     mood: text(diary.mood),
+    // 종류도 앱의 DiaryKind 이름이다. 옛 기기가 보낸 일기에는 없어서 자유 일기로 본다.
+    kind: text(diary.kind) || "FREE",
+    answers: normalizeAnswers(diary.answers),
     // 첨부는 URI 문자열만 오간다. 파일 자체는 기기에 있고 서버로 올라오지 않는다.
     imageUris: stringList(diary.imageUris),
     videoUris: stringList(diary.videoUris),
@@ -1749,6 +1764,19 @@ function text(value) {
 
 function stringList(value) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+}
+
+/**
+ * 일기 물음의 답. [stringList]와 달리 빈칸을 버리지 않는다.
+ *
+ * 답은 물음과 자리를 맞춰 둔 목록이라, 가운데 빈칸을 버리면 뒤의 답이 다른 물음의 답이 된다.
+ * 뒤쪽 빈칸만 떼어 낸다. 앱 DiaryAnswers.normalize와 같은 규칙이어야 지문이 어긋나지 않는다.
+ */
+function normalizeAnswers(value) {
+  if (!Array.isArray(value)) return [];
+  const answers = value.map(text);
+  while (answers.length && !answers[answers.length - 1]) answers.pop();
+  return answers;
 }
 
 function integer(value, fallback) {

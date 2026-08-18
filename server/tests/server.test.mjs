@@ -1329,6 +1329,131 @@ describe("일기와 할 일 병합", () => {
     assert.equal(merged.diaries[0].weather, "AURORA");
   });
 
+  it("감사·반성 일기의 종류와 답이 기기 사이를 오간다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-gratitude",
+              updatedAt: 1000,
+              entryDate: "2026-08-18",
+              kind: "GRATITUDE",
+              // 가운데 빈칸. 자리를 잃으면 마지막 답이 첫 물음의 답이 된다.
+              answers: ["따뜻한 커피", "", "비 그친 하늘"],
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries[0].kind, "GRATITUDE");
+    assert.deepEqual(merged.diaries[0].answers, ["따뜻한 커피", "", "비 그친 하늘"]);
+  });
+
+  it("종류가 없던 시절의 일기는 자유 일기가 된다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [{ syncId: "diary-old", updatedAt: 1000, entryDate: "2026-08-17", body: "예전 일기", createdAt: 1000 }],
+        }),
+      })
+    ).json();
+
+    // 빈 값으로 두면 앱에서 아무 종류도 고르지 않은 일기가 된다.
+    assert.equal(merged.diaries[0].kind, "FREE");
+    assert.deepEqual(merged.diaries[0].answers, []);
+  });
+
+  it("서버가 모르는 일기 종류도 지우지 않고 그대로 둔다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-future-kind",
+              updatedAt: 1000,
+              entryDate: "2026-08-17",
+              kind: "MORNING_PAGE",
+              answers: ["새 앱이 보낸 답"],
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries[0].kind, "MORNING_PAGE");
+  });
+
+  it("같은 날 쓴 감사 일기와 반성 일기는 합쳐지지 않는다", async () => {
+    await resetServer();
+
+    // 앱 SyncDeduplicator와 같은 기준이어야 한다. 종류를 안 보면 한쪽이 사라진다.
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          diaries: [
+            {
+              syncId: "diary-g",
+              updatedAt: 1000,
+              entryDate: "2026-08-18",
+              kind: "GRATITUDE",
+              answers: ["커피"],
+              createdAt: 1000,
+            },
+            {
+              syncId: "diary-r",
+              updatedAt: 2000,
+              entryDate: "2026-08-18",
+              kind: "REFLECTION",
+              answers: ["커피"],
+              createdAt: 2000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.diaries.length, 2);
+  });
+
+  it("답만 적은 일기도 저장한다", async () => {
+    await resetServer();
+
+    // 감사 일기는 본문 없이 답만 적는 날이 흔하다. 앱의 hasSomethingToSave와 같은 기준이어야 한다.
+    const created = await (
+      await api("/api/diaries", {
+        method: "POST",
+        body: { entryDate: "2026-08-18", kind: "GRATITUDE", answers: ["", "고마운 사람"] },
+      })
+    ).json();
+
+    assert.deepEqual(created.answers, ["", "고마운 사람"]);
+  });
+
+  it("답이 모두 비어 있으면 저장하지 않는다", async () => {
+    await resetServer();
+
+    const response = await api("/api/diaries", {
+      method: "POST",
+      body: { entryDate: "2026-08-18", kind: "GRATITUDE", answers: ["", "  "] },
+    });
+
+    assert.equal(response.status, 400);
+  });
+
   it("날짜가 없는 일기는 놓을 자리가 없어 버린다", async () => {
     await resetServer();
 

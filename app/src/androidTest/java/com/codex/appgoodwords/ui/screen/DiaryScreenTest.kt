@@ -7,8 +7,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.DiaryKind
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.DiaryWeather
 import java.time.LocalDate
@@ -127,6 +129,113 @@ class DiaryScreenTest {
         // 본문만 고치려고 열었다가 날씨가 지워지면 사용자는 알아채지 못합니다.
         assertEquals(DiaryWeather.SUNNY, saved?.weatherOption)
         assertEquals(DiaryMood.ANGRY, saved?.moodOption)
+    }
+
+    @Test
+    fun choosingGratitudeAsksItsQuestions() {
+        var saved: DiaryDraft? = null
+        compose.setContent { diaryScreen(diaries = emptyList(), onSaveDiary = { saved = it }) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performScrollTo().performClick()
+        // 물음이 보여야 무엇을 적을지 알 수 있습니다. 칸만 셋 나오면 자유 일기와 다를 바 없습니다.
+        compose.onNodeWithTag(diaryAnswerTag(0)).performScrollTo()
+        compose.onNodeWithText(DiaryKind.GRATITUDE.prompts.first()).assertIsDisplayed()
+        compose.onNodeWithTag(diaryAnswerTag(0)).performTextInput("따뜻한 커피")
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+
+        assertEquals(DiaryKind.GRATITUDE, saved?.kindOption)
+        assertEquals("따뜻한 커피", saved?.answers?.firstOrNull())
+    }
+
+    @Test
+    fun anAnswerAloneCanBeSaved() {
+        compose.setContent { diaryScreen(diaries = emptyList()) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.REFLECTION)).performScrollTo().performClick()
+        // 본문 없이 답만 적는 날이 흔합니다. 여기서 막히면 물음이 있어도 저장할 수 없습니다.
+        compose.onNodeWithTag(diarySaveButtonTag).assertIsNotEnabled()
+        compose.onNodeWithTag(diaryAnswerTag(1)).performScrollTo().performTextInput("늦게 잔 것")
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+    }
+
+    @Test
+    fun theLastAnswerStaysWithItsOwnQuestion() {
+        var saved: DiaryDraft? = null
+        compose.setContent { diaryScreen(diaries = emptyList(), onSaveDiary = { saved = it }) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performScrollTo().performClick()
+        compose.onNodeWithTag(diaryAnswerTag(2)).performScrollTo().performTextInput("비 그친 하늘")
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+
+        // 앞의 빈칸이 사라지면 마지막 답이 첫 물음의 답이 됩니다.
+        assertEquals(listOf("", "", "비 그친 하늘"), saved?.answers)
+    }
+
+    @Test
+    fun switchingKindKeepsWhatWasWritten() {
+        var saved: DiaryDraft? = null
+        compose.setContent { diaryScreen(diaries = emptyList(), onSaveDiary = { saved = it }) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performScrollTo().performClick()
+        compose.onNodeWithTag(diaryAnswerTag(0)).performScrollTo().performTextInput("커피")
+        // 잘못 눌러 종류가 바뀌었을 때 적어 둔 답이 날아가면 되돌릴 방법이 없습니다.
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.REFLECTION)).performScrollTo().performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performClick()
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+
+        assertEquals("커피", saved?.answers?.firstOrNull())
+    }
+
+    @Test
+    fun theListShowsTheQuestionWithItsAnswer() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        // 제목을 비워 두면 첫 답이 제목 자리에도 나와 같은 글이 두 번 잡힙니다.
+                        title = "오늘",
+                        kind = DiaryKind.GRATITUDE.name,
+                        answers = listOf("", "", "비 그친 하늘")
+                    )
+                )
+            )
+        }
+
+        // 답만 있으면 무엇에 답한 것인지 알 수 없습니다.
+        compose.onNodeWithText(DiaryKind.GRATITUDE.prompts[2]).assertIsDisplayed()
+        compose.onNodeWithText("비 그친 하늘").assertIsDisplayed()
+    }
+
+    @Test
+    fun editingAGuidedDiaryKeepsItsAnswers() {
+        var saved: DiaryDraft? = null
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        kind = DiaryKind.REFLECTION.name,
+                        answers = listOf("일찍 일어남", "", "물 마시기")
+                    )
+                ),
+                onSaveDiary = { saved = it }
+            )
+        }
+
+        compose.onNodeWithText("수정").performClick()
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+
+        assertEquals(DiaryKind.REFLECTION, saved?.kindOption)
+        assertEquals(listOf("일찍 일어남", "", "물 마시기"), saved?.answers)
     }
 
     @androidx.compose.runtime.Composable

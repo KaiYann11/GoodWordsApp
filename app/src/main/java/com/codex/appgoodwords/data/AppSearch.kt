@@ -84,15 +84,26 @@ object AppSearch {
             addAll(
                 diaries.matching(
                     terms = terms,
-                    fields = { diary -> listOf(diary.title, diary.body, diary.entryDate) }
+                    // 감사·반성 일기는 본문이 비고 답에만 적히므로 답도 함께 봅니다.
+                    fields = { diary ->
+                        listOf(diary.title, diary.body, diary.entryDate) + diary.answers
+                    }
                 ) { diary ->
                     SearchHit(
                         kind = SearchKind.DIARY,
                         id = diary.id,
                         title = diary.displayTitle.ifBlank { diary.entryDate },
-                        snippet = snippetOf(diary.body, terms),
+                        snippet = snippetOf(
+                            diary.body.ifBlank {
+                                diary.filledAnswers.joinToString(" · ") { (prompt, answer) ->
+                                    "$prompt: $answer"
+                                }
+                            },
+                            terms
+                        ),
                         meta = listOfNotNull(
                             diary.entryDate,
+                            diary.kindOption.takeIf { it.isGuided }?.label,
                             diary.weatherOption?.let { "${it.emoji} ${it.label}" },
                             diary.moodOption?.let { "${it.emoji} ${it.label}" }
                         ).joinToString(" · ")

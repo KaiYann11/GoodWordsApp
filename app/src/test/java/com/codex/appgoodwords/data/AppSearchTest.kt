@@ -134,6 +134,24 @@ class AppSearchTest {
     }
 
     @Test
+    fun aGuidedDiaryIsFoundByItsAnswer() {
+        // 감사·반성 일기는 본문이 비고 답에만 적힙니다. 답을 안 보면 영영 못 찾습니다.
+        val gratitude = DiaryEntity(
+            id = 12,
+            syncId = "d12",
+            entryDate = "2026-08-18",
+            kind = DiaryKind.GRATITUDE.name,
+            answers = listOf("따뜻한 커피", "", "비 그친 하늘")
+        )
+
+        val hit = AppSearch.search(query = "커피", diaries = listOf(gratitude)).hits.single()
+
+        assertEquals(SearchKind.DIARY, hit.kind)
+        assertTrue("어느 물음의 답인지 알 수 없습니다: ${hit.snippet}", hit.snippet.contains("오늘 감사한 일"))
+        assertTrue("어떤 일기인지 알 수 없습니다: ${hit.meta}", hit.meta.contains("감사"))
+    }
+
+    @Test
     fun aFinishedTodoSaysSo() {
         val done = todo.copy(id = 11, syncId = "t11", doneAt = 5_000L)
 

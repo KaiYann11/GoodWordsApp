@@ -10,6 +10,14 @@ const state = {
   quotingBookId: null,
   /** 편집 중인 일기의 첨부. 저장 전까지는 화면에만 있습니다. */
   diaryUris: { imageUris: [], videoUris: [], audioUris: [] },
+  /**
+   * 편집 중인 일기의 종류와 물음에 대한 답.
+   *
+   * 폼 전체를 다시 그리면 쓰던 글이 날아가서, 종류를 바꿀 때 물음 칸만 갈아 끼웁니다.
+   * 그러려면 적어 둔 답을 화면 밖에도 들고 있어야 합니다.
+   */
+  diaryKind: "FREE",
+  diaryAnswers: [],
   query: "",
   typeFilter: "ALL",
   categoryFilter: "",
@@ -42,6 +50,18 @@ const attachmentScheme = "appgoodwords://attachment/";
  */
 const attachmentBlobs = new Map();
 
+/**
+ * 일기의 종류와 물음.
+ *
+ * 앱의 DiaryKind와 코드·물음·순서가 같아야 합니다. 답은 물음 순서에 맞춰 저장하므로,
+ * 한쪽만 물음을 늘리거나 순서를 바꾸면 다른 쪽에서 답이 엉뚱한 물음에 붙습니다.
+ */
+const diaryKinds = [
+  { code: "FREE", label: "자유", prompts: [] },
+  { code: "GRATITUDE", label: "감사", prompts: ["오늘 감사한 일", "고마운 사람", "당연하지 않았던 것"] },
+  { code: "REFLECTION", label: "반성", prompts: ["잘한 것", "아쉬운 것", "내일 바꿀 것"] },
+];
+
 const moodOptions = [
   { code: "GREAT", emoji: "😄", label: "아주 좋음" },
   { code: "GOOD", emoji: "🙂", label: "좋음" },
@@ -67,6 +87,8 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
     state.editingBookId = null;
     state.quotingBookId = null;
     state.diaryUris = emptyDiaryUris();
+    state.diaryKind = "FREE";
+    state.diaryAnswers = [];
     syncTabs();
     render();
   });
@@ -88,6 +110,15 @@ app.addEventListener("input", (event) => {
   if (target.id === "categoryFilter") {
     state.categoryFilter = target.value;
     renderLibraryListOnly();
+  }
+  if (target.id === "diaryKind") {
+    state.diaryKind = target.value;
+    // 물음 칸만 갈아 끼웁니다. 폼을 다시 그리면 쓰던 본문이 날아갑니다.
+    renderDiaryPromptsOnly();
+  }
+  // 답은 화면 밖에도 들고 있어야 종류를 바꿔도 남습니다.
+  if (target.dataset && target.dataset.answerIndex !== undefined) {
+    state.diaryAnswers[Number(target.dataset.answerIndex)] = target.value;
   }
 });
 
@@ -167,10 +198,14 @@ app.addEventListener("click", async (event) => {
         videoUris: [...(diary?.videoUris || [])],
         audioUris: [...(diary?.audioUris || [])],
       };
+      state.diaryKind = diary?.kind || "FREE";
+      state.diaryAnswers = [...(diary?.answers || [])];
       render();
     } else if (action === "cancel-diary") {
       state.editingDiaryId = null;
       state.diaryUris = emptyDiaryUris();
+      state.diaryKind = "FREE";
+      state.diaryAnswers = [];
       render();
     } else if (action === "drop-attachment") {
       const kind = button.dataset.kind;
@@ -672,8 +707,15 @@ function renderDiaries() {
               ${moodOptions.map((item) => option(item.code, `${item.emoji} ${item.label}`, editing.mood)).join("")}
             </select>
           </div>
+          <div class="field">
+            <label for="diaryKind">일기 종류</label>
+            <select id="diaryKind" name="kind">
+              ${diaryKinds.map((item) => option(item.code, item.label, state.diaryKind)).join("")}
+            </select>
+          </div>
+          <div id="diaryPrompts" class="field full"></div>
           <div class="field full">
-            <label for="diaryBody">오늘 있었던 일</label>
+            <label for="diaryBody">${diaryPromptsOf(state.diaryKind).length ? "더 적고 싶은 말 (선택)" : "오늘 있었던 일"}</label>
             <textarea id="diaryBody" name="body">${escapeHtml(editing.body)}</textarea>
           </div>
           <div class="field full">
@@ -696,8 +738,38 @@ function renderDiaries() {
       </section>
     </section>
   `;
+  renderDiaryPromptsOnly();
   renderDiaryAttachmentsOnly();
   hydrateAttachments();
+}
+
+function diaryPromptsOf(kind) {
+  return diaryKinds.find((item) => item.code === kind)?.prompts || [];
+}
+
+/**
+ * 물음 칸만 다시 그립니다.
+ *
+ * 종류를 바꿀 때 폼 전체를 다시 그리면 쓰던 본문과 고른 날씨가 날아갑니다.
+ * 적어 둔 답은 지우지 않습니다. 잘못 눌렀을 때 되돌릴 방법이 없어지기 때문입니다.
+ */
+function renderDiaryPromptsOnly() {
+  const box = document.querySelector("#diaryPrompts");
+  if (!box) return;
+  const prompts = diaryPromptsOf(state.diaryKind);
+  // 물음이 있는 날은 본문을 비워 두는 일이 흔해서, 안 적어도 된다고 알려 줍니다.
+  const bodyLabel = document.querySelector('label[for="diaryBody"]');
+  if (bodyLabel) bodyLabel.textContent = prompts.length ? "더 적고 싶은 말 (선택)" : "오늘 있었던 일";
+  box.innerHTML = prompts
+    .map(
+      (prompt, index) => `
+        <label for="diaryAnswer${index}">${escapeHtml(prompt)}</label>
+        <textarea id="diaryAnswer${index}" data-answer-index="${index}" rows="2">${escapeHtml(
+          state.diaryAnswers[index] || "",
+        )}</textarea>
+      `,
+    )
+    .join("");
 }
 
 function renderDiaryAttachmentsOnly() {
@@ -750,19 +822,22 @@ function diaryCard(diary) {
   const weather = findOption(weatherOptions, diary.weather);
   const mood = findOption(moodOptions, diary.mood);
   const attachments = attachmentSummary(diary);
+  const kind = diaryKinds.find((item) => item.code === diary.kind);
   return `
     <article class="item">
       <div class="itemHeader">
         <div>
-          <h3>${escapeHtml(diary.title || diary.entryDate)}</h3>
+          <h3>${escapeHtml(diary.title || diaryDisplayTitle(diary))}</h3>
           <div class="meta">
             <span class="chip">${escapeHtml(diary.entryDate)}</span>
+            ${kind && kind.prompts.length ? `<span class="chip">${escapeHtml(kind.label)} 일기</span>` : ""}
             ${weather ? `<span class="chip">${weather.emoji} ${escapeHtml(weather.label)}</span>` : ""}
             ${mood ? `<span class="chip">${mood.emoji} ${escapeHtml(mood.label)}</span>` : ""}
             ${attachments ? `<span class="chip">${escapeHtml(attachments)}</span>` : ""}
           </div>
         </div>
       </div>
+      ${diaryAnswerList(diary)}
       ${diary.body ? `<p>${escapeHtml(diary.body)}</p>` : ""}
       ${attachmentGallery(diary)}
       <div class="actions">
@@ -770,6 +845,30 @@ function diaryCard(diary) {
         <button class="danger" type="button" data-action="delete-diary" data-id="${diary.id}">삭제</button>
       </div>
     </article>
+  `;
+}
+
+/** 제목이 없으면 첫 줄이나 첫 답을 대신 보여 줍니다. 앱 displayTitle과 같은 기준입니다. */
+function diaryDisplayTitle(diary) {
+  const firstLine = String(diary.body || "").split("\n")[0].trim();
+  if (firstLine) return firstLine.slice(0, 30);
+  const firstAnswer = (diary.answers || []).map((answer) => String(answer).trim()).find(Boolean);
+  return firstAnswer ? firstAnswer.slice(0, 30) : diary.entryDate;
+}
+
+/** 물음과 답을 함께 보여 줍니다. 답만 있으면 무엇에 답한 것인지 알 수 없습니다. */
+function diaryAnswerList(diary) {
+  const prompts = diaryPromptsOf(diary.kind);
+  const rows = prompts
+    .map((prompt, index) => [prompt, String((diary.answers || [])[index] || "").trim()])
+    .filter(([, answer]) => answer);
+  if (!rows.length) return "";
+  return `
+    <dl class="answerList">
+      ${rows
+        .map(([prompt, answer]) => `<dt>${escapeHtml(prompt)}</dt><dd>${escapeHtml(answer)}</dd>`)
+        .join("")}
+    </dl>
   `;
 }
 
@@ -1048,12 +1147,16 @@ async function submitMemo(form) {
 
 async function submitDiary(form) {
   const data = new FormData(form);
+  const kind = data.get("kind") || "FREE";
   const payload = {
     entryDate: data.get("entryDate"),
     title: data.get("title"),
     body: data.get("body"),
     weather: data.get("weather"),
     mood: data.get("mood"),
+    kind,
+    // 고른 종류의 물음 수만큼만 보냅니다. 물음이 없어진 답까지 보내면 화면에 없는 글이 남습니다.
+    answers: diaryPromptsOf(kind).map((_, index) => state.diaryAnswers[index] || ""),
     ...state.diaryUris,
   };
   const id = state.editingDiaryId;
@@ -1063,6 +1166,8 @@ async function submitDiary(form) {
   });
   state.editingDiaryId = null;
   state.diaryUris = emptyDiaryUris();
+  state.diaryKind = "FREE";
+  state.diaryAnswers = [];
   showToast(id ? "일기를 수정했습니다." : "일기를 저장했습니다.");
   await loadSnapshot(false);
 }

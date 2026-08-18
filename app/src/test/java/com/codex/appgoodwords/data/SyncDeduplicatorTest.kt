@@ -185,6 +185,89 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun aGratitudeAndAReflectionOnTheSameDayAreKept() {
+        // 같은 날 감사와 반성을 하나씩 쓰는 것이 이 기능의 보통 쓰임입니다.
+        // 종류를 안 보면 답이 없는 두 일기가 같은 것으로 보여 한쪽이 사라집니다.
+        val merged = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "d1",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("커피"),
+                    updatedAt = 1_000L
+                ),
+                DiaryEntity(
+                    syncId = "d2",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.REFLECTION.name,
+                    answers = listOf("커피"),
+                    updatedAt = 2_000L
+                )
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(2, result.diaries.size)
+    }
+
+    @Test
+    fun theSameGuidedDiaryFromTwoDevicesBecomesOne() {
+        val merged = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "d1",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("커피", "", "비 그친 하늘"),
+                    updatedAt = 1_000L
+                ),
+                DiaryEntity(
+                    syncId = "d2",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    // 뒤쪽 빈칸만 다릅니다. 다듬고 나면 같은 답이라 같은 일기여야 합니다.
+                    answers = listOf("커피", "", "비 그친 하늘", ""),
+                    updatedAt = 2_000L
+                )
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(1, result.diaries.size)
+        assertEquals("나중에 고친 쪽이 남아야 합니다.", "d2", result.diaries.single().syncId)
+    }
+
+    @Test
+    fun answersInDifferentPlacesAreDifferentDiaries() {
+        // 빈칸을 무시하고 이으면 두 일기의 지문이 같아져 한쪽이 사라집니다.
+        val merged = snapshotOf(
+            diaries = listOf(
+                DiaryEntity(
+                    syncId = "d1",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("커피", ""),
+                    updatedAt = 1_000L
+                ),
+                DiaryEntity(
+                    syncId = "d2",
+                    entryDate = "2026-08-12",
+                    kind = DiaryKind.GRATITUDE.name,
+                    answers = listOf("", "커피"),
+                    updatedAt = 2_000L
+                )
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(2, result.diaries.size)
+    }
+
+    @Test
     fun theSameTodoOnTheSameDayBecomesOne() {
         val merged = snapshotOf(
             todos = listOf(

@@ -254,6 +254,28 @@ button.ghost {
   line-height: 1.5;
 }
 
+/* 감사·반성 일기의 물음과 답. 물음이 답보다 작고 흐려야 답이 먼저 읽힌다. */
+.answerList {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.answerList dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.answerList dd {
+  margin: 0 0 6px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.answerList dd:last-child {
+  margin-bottom: 0;
+}
+
 /* 독서 진도. 전체 쪽수를 아는 책에만 그린다. */
 .bookBar {
   height: 6px;
@@ -362,6 +384,21 @@ button.ghost {
 .field textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+/* 물음 칸은 여러 개가 줄지어 서므로 본문보다 낮게 잡는다. */
+#diaryPrompts textarea {
+  min-height: 64px;
+  margin-bottom: 6px;
+}
+
+#diaryPrompts textarea:last-child {
+  margin-bottom: 0;
+}
+
+/* 자유 일기에는 물음이 없다. 빈 칸이 남으면 격자에 헛된 줄이 생긴다. */
+#diaryPrompts:empty {
+  display: none;
 }
 
 .toolbar {

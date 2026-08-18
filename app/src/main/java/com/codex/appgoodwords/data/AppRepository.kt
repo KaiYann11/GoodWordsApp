@@ -318,6 +318,8 @@ class AppRepository(
                 body = draft.body.trim(),
                 weather = draft.weather.trim(),
                 mood = draft.mood.trim(),
+                kind = draft.kind.trim().ifBlank { DiaryKind.FREE.name },
+                answers = DiaryAnswers.normalize(draft.answers),
                 imageUris = draft.imageUris.distinct(),
                 videoUris = draft.videoUris.distinct(),
                 audioUris = draft.audioUris.distinct(),
