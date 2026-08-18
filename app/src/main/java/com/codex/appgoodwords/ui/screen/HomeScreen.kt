@@ -69,6 +69,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ComboLevel
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.DailyProgress
+import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ReadingCombo
 import com.codex.appgoodwords.data.ReminderSettings
 import kotlin.random.Random
@@ -101,7 +103,11 @@ fun HomeScreen(
     onToggleFavorite: (ContentItemEntity) -> Unit,
     onConfirmItem: (ContentItemEntity) -> Unit,
     onOpenItem: (ContentItemEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 오늘의 세 걸음. null이면 카드를 두지 않습니다. */
+    dailyLoop: DailyProgress? = null,
+    /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
+    onOpenStep: (DailyStep) -> Unit = {}
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeReadTab.UNREAD.name) }
     var shuffleSeed by rememberSaveable { mutableLongStateOf(0L) }
@@ -167,6 +173,13 @@ fun HomeScreen(
                         shuffleSeed = SystemClock.elapsedRealtimeNanos()
                     }
                 )
+            }
+
+            // 앱을 열면 가장 먼저 보이는 자리입니다. 오늘 무엇부터 할지 여기서 정해집니다.
+            dailyLoop?.let { progress ->
+                item {
+                    DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
+                }
             }
 
             item {

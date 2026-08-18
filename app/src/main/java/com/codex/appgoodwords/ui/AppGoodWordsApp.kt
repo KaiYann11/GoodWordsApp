@@ -60,6 +60,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
@@ -127,6 +128,7 @@ fun AppGoodWordsApp(
     val serverSyncSettings by viewModel.serverSyncSettings.collectAsStateWithLifecycle()
     val sharedText by viewModel.sharedText.collectAsStateWithLifecycle()
     val openItemRequest by viewModel.openItemRequest.collectAsStateWithLifecycle()
+    val dailyLoop by viewModel.dailyLoop.collectAsStateWithLifecycle()
     val confirmedTodayIds by viewModel.confirmedTodayIds.collectAsStateWithLifecycle()
     val routines by viewModel.routines.collectAsStateWithLifecycle()
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
@@ -406,6 +408,15 @@ fun AppGoodWordsApp(
                             todayItems = allItems,
                             settings = settings,
                             confirmedTodayIds = confirmedTodayIds,
+                            dailyLoop = dailyLoop,
+                            // 글귀는 이 화면에 이미 있어서 옮기지 않습니다. 나머지 둘만 데려다줍니다.
+                            onOpenStep = { step ->
+                                when (step) {
+                                    DailyStep.QUOTE -> Unit
+                                    DailyStep.ROUTINE -> pushRoute(tabRoute(AppTab.TODAY))
+                                    DailyStep.DIARY -> pushRoute(tabRoute(AppTab.DIARY))
+                                }
+                            },
                             onToggleFavorite = { item ->
                                 viewModel.toggleFavorite(item.id, !item.isFavorite)
                             },

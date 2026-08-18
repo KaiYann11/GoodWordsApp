@@ -18,6 +18,7 @@ import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
+import com.codex.appgoodwords.data.DailyLoopCalculator
 import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
@@ -88,6 +89,30 @@ class MainViewModel(
             events = emptyList(),
             items = emptyList(),
             routineChecks = emptyList(),
+            today = LocalDate.now()
+        )
+    )
+
+    /**
+     * 오늘의 세 걸음. 홈 맨 위에 둡니다.
+     *
+     * 따로 저장하지 않고 이미 있는 기록에서 셉니다. "오늘 했는지"를 어딘가에 또 적어 두면
+     * 이력을 지웠을 때 두 값이 어긋납니다.
+     */
+    val dailyLoop = combine(historyEvents, routineChecks, diaries) { events, checks, diaryList ->
+        DailyLoopCalculator.build(
+            events = events,
+            routineChecks = checks,
+            diaries = diaryList,
+            today = LocalDate.now()
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        DailyLoopCalculator.build(
+            events = emptyList(),
+            routineChecks = emptyList(),
+            diaries = emptyList(),
             today = LocalDate.now()
         )
     )
