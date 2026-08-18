@@ -123,6 +123,7 @@ class DiaryScreenTest {
             )
         }
 
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
         compose.onNodeWithText("수정").performClick()
         compose.onNodeWithTag(diarySaveButtonTag).performClick()
 
@@ -207,7 +208,7 @@ class DiaryScreenTest {
                 )
             )
         }
-
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
         // 답만 있으면 무엇에 답한 것인지 알 수 없습니다.
         compose.onNodeWithText(DiaryKind.GRATITUDE.prompts[2]).assertIsDisplayed()
         compose.onNodeWithText("비 그친 하늘").assertIsDisplayed()
@@ -231,6 +232,7 @@ class DiaryScreenTest {
             )
         }
 
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
         compose.onNodeWithText("수정").performClick()
         compose.onNodeWithTag(diarySaveButtonTag).performClick()
 
@@ -238,16 +240,147 @@ class DiaryScreenTest {
         assertEquals(listOf("일찍 일어남", "", "물 마시기"), saved?.answers)
     }
 
+    @Test
+    fun theListShowsOnlyTitlesUntilOneIsTapped() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        title = "바다에 다녀왔다",
+                        body = "오래 걸었고 마음이 놓였다."
+                    )
+                )
+            )
+        }
+
+        // 일기는 길어서 다 펼쳐 두면 어제 것을 보려고도 한참 굴려야 합니다.
+        compose.onNodeWithText("바다에 다녀왔다").assertIsDisplayed()
+        compose.onNodeWithText("오래 걸었고 마음이 놓였다.").assertDoesNotExist()
+
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+
+        compose.onNodeWithText("오래 걸었고 마음이 놓였다.").assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingAgainFoldsItBack() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(id = 1, syncId = "diary-1", entryDate = "2026-08-17", title = "제목", body = "본문")
+                )
+            )
+        }
+
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+        compose.onNodeWithText("본문").assertIsDisplayed()
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+
+        compose.onNodeWithText("본문").assertDoesNotExist()
+    }
+
+    @Test
+    fun editAndDeleteAppearOnlyWhenOpened() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(id = 1, syncId = "diary-1", entryDate = "2026-08-17", title = "제목", body = "본문")
+                )
+            )
+        }
+
+        // 접힌 목록에 버튼이 줄지어 있으면 훑어보다가 잘못 누르기 쉽습니다.
+        compose.onNodeWithText("수정").assertDoesNotExist()
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+        compose.onNodeWithText("수정").assertIsDisplayed()
+    }
+
+    @Test
+    fun aFoldedDiarySaysWhatIsInsideIt() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        title = "제목",
+                        imageUris = listOf("content://a", "content://b")
+                    )
+                )
+            )
+        }
+
+        // 접혀 있어도 첨부가 있다는 것은 알려 줘야 열어 볼지 정할 수 있습니다.
+        compose.onNodeWithText("2026-08-17  ·  사진 2").assertIsDisplayed()
+    }
+
+    @Test
+    fun theDiaryFoundBySearchOpensItself() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 7,
+                        syncId = "diary-7",
+                        entryDate = "2026-08-17",
+                        title = "찾던 일기",
+                        body = "여기에 찾던 말이 있다"
+                    )
+                ),
+                focusId = 7
+            )
+        }
+
+        // 데려다 놓고 접어 두면 찾던 말을 못 보여 주는 셈입니다.
+        compose.onNodeWithText("여기에 찾던 말이 있다").assertIsDisplayed()
+    }
+
+    @Test
+    fun aGuidedDiaryAsksNoWeatherOrMood() {
+        compose.setContent { diaryScreen(diaries = emptyList()) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryMoodChipTag(DiaryMood.GOOD)).assertExists()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performScrollTo().performClick()
+
+        // 답하는 자리에 고를 것이 늘어날수록 손이 무거워집니다.
+        compose.onNodeWithTag(diaryMoodChipTag(DiaryMood.GOOD)).assertDoesNotExist()
+        compose.onNodeWithTag(diaryWeatherChipTag(DiaryWeather.RAIN)).assertDoesNotExist()
+    }
+
+    @Test
+    fun aMoodChosenBeforeSwitchingIsNotSavedButNotLost() {
+        var saved: DiaryDraft? = null
+        compose.setContent { diaryScreen(diaries = emptyList(), onSaveDiary = { saved = it }) }
+
+        compose.onNodeWithTag(diaryWriteButtonTag).performClick()
+        compose.onNodeWithTag(diaryMoodChipTag(DiaryMood.GOOD)).performScrollTo().performClick()
+        compose.onNodeWithTag(diaryKindChipTag(DiaryKind.GRATITUDE)).performScrollTo().performClick()
+        compose.onNodeWithTag(diaryAnswerTag(0)).performScrollTo().performTextInput("커피")
+        compose.onNodeWithTag(diarySaveButtonTag).performClick()
+
+        // 화면에 없는 값을 저장하면 돌아보기의 기분 집계에 안 보이는 기분이 섞입니다.
+        assertEquals("", saved?.effectiveMood)
+        // 고른 값 자체는 남아 있어야 자유로 되돌렸을 때 다시 보입니다.
+        assertEquals(DiaryMood.GOOD.name, saved?.mood)
+    }
+
     @androidx.compose.runtime.Composable
     private fun diaryScreen(
         diaries: List<DiaryEntity>,
-        onSaveDiary: (DiaryDraft) -> Unit = {}
+        onSaveDiary: (DiaryDraft) -> Unit = {},
+        focusId: Long? = null
     ) {
         DiaryScreen(
             diaries = diaries,
             today = today,
             onSaveDiary = onSaveDiary,
-            onDeleteDiary = {}
+            onDeleteDiary = {},
+            focusId = focusId
         )
     }
 }

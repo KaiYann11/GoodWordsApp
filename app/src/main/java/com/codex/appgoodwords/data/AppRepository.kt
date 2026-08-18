@@ -316,8 +316,10 @@ class AppRepository(
                 entryDate = draft.entryDate.toString(),
                 title = draft.title.trim(),
                 body = draft.body.trim(),
-                weather = draft.weather.trim(),
-                mood = draft.mood.trim(),
+                // 물음이 있는 일기는 날씨·기분을 비웁니다. 화면에 없는 값을 저장하면
+                // 돌아보기의 기분 집계에 안 보이는 기분이 섞입니다.
+                weather = draft.effectiveWeather,
+                mood = draft.effectiveMood,
                 kind = draft.kind.trim().ifBlank { DiaryKind.FREE.name },
                 answers = DiaryAnswers.normalize(draft.answers),
                 imageUris = draft.imageUris.distinct(),

@@ -83,6 +83,46 @@ class DiaryKindTest {
     }
 
     @Test
+    fun aGuidedDiaryKeepsNoWeatherOrMood() {
+        // 자유로 쓰다 종류를 바꾼 경우. 화면에서 칩이 사라지므로 저장도 하면 안 됩니다.
+        val draft = DiaryDraft(
+            weather = DiaryWeather.RAIN.name,
+            mood = DiaryMood.GOOD.name,
+            kind = DiaryKind.GRATITUDE.name,
+            answers = listOf("커피")
+        )
+
+        assertEquals("", draft.effectiveWeather)
+        assertEquals("", draft.effectiveMood)
+    }
+
+    @Test
+    fun aFreeDiaryStillKeepsWeatherAndMood() {
+        val draft = DiaryDraft(weather = DiaryWeather.RAIN.name, mood = DiaryMood.GOOD.name)
+
+        assertEquals(DiaryWeather.RAIN.name, draft.effectiveWeather)
+        assertEquals(DiaryMood.GOOD.name, draft.effectiveMood)
+    }
+
+    @Test
+    fun switchingKindBackBringsTheChoiceReturns() {
+        // 고른 값 자체는 지우지 않습니다. 잘못 눌렀을 때 되돌릴 방법이 없어집니다.
+        val guided = DiaryDraft(mood = DiaryMood.GOOD.name, kind = DiaryKind.REFLECTION.name)
+
+        val backToFree = guided.copy(kind = DiaryKind.FREE.name)
+
+        assertEquals(DiaryMood.GOOD, backToFree.moodOption)
+    }
+
+    @Test
+    fun aGuidedDiaryWithOnlyAHiddenMoodIsNotWorthSaving() {
+        // 안 보이는 값으로 저장 버튼이 켜지면 아무것도 안 적은 일기가 저장됩니다.
+        val draft = DiaryDraft(mood = DiaryMood.TIRED.name, kind = DiaryKind.GRATITUDE.name)
+
+        assertFalse(draft.hasSomethingToSave)
+    }
+
+    @Test
     fun writingOneAnswerLeavesTheOthersAlone() {
         val draft = DiaryDraft(kind = DiaryKind.REFLECTION.name).withAnswer(2, "일찍 자기")
 

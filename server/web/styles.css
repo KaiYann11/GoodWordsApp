@@ -363,6 +363,14 @@ button.ghost {
   grid-column: 1 / -1;
 }
 
+/*
+  `.field`의 display:grid가 브라우저 기본 `[hidden] { display: none }`를 덮어씁니다.
+  이것이 없으면 숨긴 칸이 그대로 보입니다.
+*/
+.field[hidden] {
+  display: none;
+}
+
 .field label {
   color: var(--muted);
   font-size: 0.82rem;

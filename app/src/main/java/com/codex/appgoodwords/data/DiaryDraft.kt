@@ -28,12 +28,31 @@ data class DiaryDraft(
         get() = DiaryKind.fromCode(kind) ?: DiaryKind.FREE
 
     /**
+     * 물음이 있는 일기에는 날씨·기분을 붙이지 않습니다.
+     *
+     * 감사·반성은 물음에 답하는 자리라 고를 것이 늘어날수록 손이 무거워집니다. 그날의 날씨와
+     * 기분은 자유 일기에서 남기면 됩니다.
+     *
+     * 자유 일기로 쓰다 종류를 바꾸면 이미 고른 값이 [weather]·[mood]에 남아 있는데,
+     * 저장할 때는 이 값을 씁니다. **화면에 없는 값을 저장하면 안 됩니다.**
+     * 원래 값은 그대로 두어서 종류를 되돌리면 고른 것이 다시 보입니다.
+     */
+    val effectiveWeather: String
+        get() = if (kindOption.isGuided) "" else weather.trim()
+
+    val effectiveMood: String
+        get() = if (kindOption.isGuided) "" else mood.trim()
+
+    /**
      * 사진만 넣거나 날씨·기분만 남기는 날도 있으므로 본문만 보고 판단하지 않습니다.
      * 감사·반성 일기는 본문 없이 답만 적는 날이 흔해서 답도 함께 봅니다.
+     *
+     * 날씨·기분은 [effectiveWeather]로 봅니다. 화면에 안 보이는 값으로 저장 버튼이 켜지면
+     * 아무것도 안 적은 일기가 저장됩니다.
      */
     val hasSomethingToSave: Boolean
         get() = title.isNotBlank() || body.isNotBlank() ||
-            weather.isNotBlank() || mood.isNotBlank() ||
+            effectiveWeather.isNotBlank() || effectiveMood.isNotBlank() ||
             answers.any { it.isNotBlank() } ||
             imageUris.isNotEmpty() || videoUris.isNotEmpty() || audioUris.isNotEmpty()
 

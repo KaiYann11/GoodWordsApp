@@ -693,14 +693,14 @@ function renderDiaries() {
             <label for="diaryTitle">제목 (선택)</label>
             <input id="diaryTitle" name="title" value="${attr(editing.title)}">
           </div>
-          <div class="field">
+          <div class="field" id="diaryWeatherField">
             <label for="diaryWeather">오늘의 날씨</label>
             <select id="diaryWeather" name="weather">
               ${option("", "고르지 않음", editing.weather)}
               ${weatherOptions.map((item) => option(item.code, `${item.emoji} ${item.label}`, editing.weather)).join("")}
             </select>
           </div>
-          <div class="field">
+          <div class="field" id="diaryMoodField">
             <label for="diaryMood">오늘의 기분</label>
             <select id="diaryMood" name="mood">
               ${option("", "고르지 않음", editing.mood)}
@@ -760,6 +760,13 @@ function renderDiaryPromptsOnly() {
   // 물음이 있는 날은 본문을 비워 두는 일이 흔해서, 안 적어도 된다고 알려 줍니다.
   const bodyLabel = document.querySelector('label[for="diaryBody"]');
   if (bodyLabel) bodyLabel.textContent = prompts.length ? "더 적고 싶은 말 (선택)" : "오늘 있었던 일";
+
+  // 물음이 있는 일기에는 날씨·기분을 두지 않습니다. 앱과 같은 기준이어야 합니다.
+  // 고른 값은 지우지 않아서 자유로 되돌리면 다시 보입니다.
+  ["diaryWeatherField", "diaryMoodField"].forEach((id) => {
+    const field = document.querySelector(`#${id}`);
+    if (field) field.hidden = prompts.length > 0;
+  });
   box.innerHTML = prompts
     .map(
       (prompt, index) => `
@@ -1148,12 +1155,15 @@ async function submitMemo(form) {
 async function submitDiary(form) {
   const data = new FormData(form);
   const kind = data.get("kind") || "FREE";
+  const guided = diaryPromptsOf(kind).length > 0;
   const payload = {
     entryDate: data.get("entryDate"),
     title: data.get("title"),
     body: data.get("body"),
-    weather: data.get("weather"),
-    mood: data.get("mood"),
+    // 물음이 있는 일기는 날씨·기분을 비웁니다. 숨긴 칸의 값을 그대로 보내면
+    // 화면에 없는 기분이 저장되어 앱의 기분 집계에 섞입니다.
+    weather: guided ? "" : data.get("weather"),
+    mood: guided ? "" : data.get("mood"),
     kind,
     // 고른 종류의 물음 수만큼만 보냅니다. 물음이 없어진 답까지 보내면 화면에 없는 글이 남습니다.
     answers: diaryPromptsOf(kind).map((_, index) => state.diaryAnswers[index] || ""),

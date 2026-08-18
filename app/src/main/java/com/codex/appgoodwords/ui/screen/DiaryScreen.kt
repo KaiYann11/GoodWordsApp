@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -24,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -36,9 +39,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +74,9 @@ internal fun diaryMoodChipTag(mood: DiaryMood) = "diary_mood_${mood.name}"
 
 internal fun diaryKindChipTag(kind: DiaryKind) = "diary_kind_${kind.name}"
 
+/** 목록의 일기 하나. 누르면 펼쳐집니다. */
+internal fun diaryCardTag(id: Long) = "diary_card_$id"
+
 /** 물음 칸도 순서대로 태그를 답니다. */
 internal fun diaryAnswerTag(index: Int) = "diary_answer_$index"
 
@@ -93,6 +101,14 @@ fun DiaryScreen(
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
+    /**
+     * 펼쳐 둔 일기.
+     *
+     * 목록은 제목만 보여 주고 누르면 펼칩니다. 일기는 길어서 다 펼쳐 두면 어제 것을 보려고도
+     * 한참 굴려야 합니다. 여럿을 함께 펼칠 수 있게 집합으로 들고 있습니다. 하나만 열리게 하면
+     * 두 날을 나란히 볼 수 없습니다.
+     */
+    var expandedIds by rememberSaveable { mutableStateOf(emptySet<Long>()) }
 
     val listState = rememberLazyListState()
     // 맨 위 안내 카드 하나를 지나야 목록이 시작합니다.
@@ -100,6 +116,12 @@ fun DiaryScreen(
         diaries.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(1)
     }
     ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
+
+    // 검색에서 찾아온 일기는 펼쳐 둡니다. 찾던 말이 본문 안에 있는데 접혀 있으면
+    // 데려다 놓고도 못 보여 주는 셈입니다.
+    LaunchedEffect(focusId) {
+        focusId?.let { expandedIds = expandedIds + it }
+    }
 
     LazyColumn(
         state = listState,
@@ -144,6 +166,7 @@ fun DiaryScreen(
         }
 
         items(diaries, key = { it.id }) { diary ->
+            val expanded = diary.id in expandedIds
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -153,14 +176,25 @@ fun DiaryScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        // 제목 줄 전체가 펼치기 버튼입니다. 화살표만 누르게 하면 과녁이 너무 작습니다.
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expandedIds = if (expanded) expandedIds - diary.id else expandedIds + diary.id
+                            }
+                            .testTag(diaryCardTag(diary.id))
+                    ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = listOfNotNull(
                                     diary.entryDate,
                                     diary.kindOption.takeIf { it.isGuided }?.let { "${it.label} 일기" },
                                     diary.weatherOption?.let { "${it.emoji} ${it.label}" },
-                                    diary.moodOption?.let { "${it.emoji} ${it.label}" }
+                                    diary.moodOption?.let { "${it.emoji} ${it.label}" },
+                                    // 접혀 있어도 안에 무엇이 있는지는 알려 줍니다. 안 그러면 열어 봐야 압니다.
+                                    attachmentSummary(diary).takeIf { !expanded && it.isNotBlank() }
                                 ).joinToString("  ·  "),
                                 style = MaterialTheme.typography.labelMedium
                             )
@@ -168,36 +202,48 @@ fun DiaryScreen(
                                 Text(diary.displayTitle, style = MaterialTheme.typography.titleSmall)
                             }
                         }
-                        TextButton(onClick = { editing = DiaryDraft.from(diary) }) { Text("수정") }
-                        IconButton(onClick = { pendingDelete = diary }) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "지우기")
-                        }
+                        Icon(
+                            imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = if (expanded) "접기" else "펼치기",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    // 물음과 답을 함께 보여 줍니다. 답만 있으면 무엇에 답한 것인지 알 수 없습니다.
-                    diary.filledAnswers.forEach { (prompt, answer) ->
-                        Column {
+
+                    if (expanded) {
+                        // 물음과 답을 함께 보여 줍니다. 답만 있으면 무엇에 답한 것인지 알 수 없습니다.
+                        diary.filledAnswers.forEach { (prompt, answer) ->
+                            Column {
+                                Text(
+                                    text = prompt,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(answer, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        if (diary.body.isNotBlank()) {
+                            Text(diary.body, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (diary.hasAttachments) {
                             Text(
-                                text = prompt,
-                                style = MaterialTheme.typography.labelSmall,
+                                text = attachmentSummary(diary),
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(answer, style = MaterialTheme.typography.bodyMedium)
+                            AttachmentThumbnails(
+                                uris = diary.imageUris + diary.videoUris,
+                                serverUrl = serverUrl,
+                                apiKey = apiKey
+                            )
                         }
-                    }
-                    if (diary.body.isNotBlank()) {
-                        Text(diary.body, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    if (diary.hasAttachments) {
-                        Text(
-                            text = attachmentSummary(diary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        AttachmentThumbnails(
-                            uris = diary.imageUris + diary.videoUris,
-                            serverUrl = serverUrl,
-                            apiKey = apiKey
-                        )
+                        // 고치기와 지우기는 펼쳤을 때만 둡니다. 접힌 목록에 버튼이 줄지어 있으면
+                        // 훑어보다가 잘못 누르기 쉽습니다.
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { editing = DiaryDraft.from(diary) }) { Text("수정") }
+                            IconButton(onClick = { pendingDelete = diary }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = "지우기")
+                            }
+                        }
                     }
                 }
             }
@@ -371,41 +417,45 @@ private fun DiaryEditDialog(
                     }
                 }
 
-                // 같은 칩을 다시 누르면 선택이 풀립니다. 잘못 골랐을 때 되돌릴 방법이 달리 없습니다.
-                // 개수가 몇 개뿐이라 LazyRow를 쓰지 않습니다. 화면 밖 칩도 만들어 두어야 스크롤로 닿습니다.
-                Text("오늘의 날씨", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    DiaryWeather.entries.forEach { weather ->
-                        val selected = current.weather == weather.name
-                        FilterChip(
-                            selected = selected,
-                            onClick = {
-                                current = current.copy(weather = if (selected) "" else weather.name)
-                            },
-                            label = { Text("${weather.emoji} ${weather.label}") },
-                            modifier = Modifier.testTag(diaryWeatherChipTag(weather))
-                        )
+                // 물음이 있는 일기에는 날씨·기분을 두지 않습니다. 답하는 자리에 고를 것이 늘어날수록
+                // 손이 무거워집니다. 고른 값은 지우지 않아서 자유로 되돌리면 다시 보입니다.
+                if (!current.kindOption.isGuided) {
+                    // 같은 칩을 다시 누르면 선택이 풀립니다. 잘못 골랐을 때 되돌릴 방법이 달리 없습니다.
+                    // 개수가 몇 개뿐이라 LazyRow를 쓰지 않습니다. 화면 밖 칩도 만들어 두어야 스크롤로 닿습니다.
+                    Text("오늘의 날씨", style = MaterialTheme.typography.labelLarge)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        DiaryWeather.entries.forEach { weather ->
+                            val selected = current.weather == weather.name
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    current = current.copy(weather = if (selected) "" else weather.name)
+                                },
+                                label = { Text("${weather.emoji} ${weather.label}") },
+                                modifier = Modifier.testTag(diaryWeatherChipTag(weather))
+                            )
+                        }
                     }
-                }
 
-                Text("오늘의 기분", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    DiaryMood.entries.forEach { mood ->
-                        val selected = current.mood == mood.name
-                        FilterChip(
-                            selected = selected,
-                            onClick = {
-                                current = current.copy(mood = if (selected) "" else mood.name)
-                            },
-                            label = { Text("${mood.emoji} ${mood.label}") },
-                            modifier = Modifier.testTag(diaryMoodChipTag(mood))
-                        )
+                    Text("오늘의 기분", style = MaterialTheme.typography.labelLarge)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        DiaryMood.entries.forEach { mood ->
+                            val selected = current.mood == mood.name
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    current = current.copy(mood = if (selected) "" else mood.name)
+                                },
+                                label = { Text("${mood.emoji} ${mood.label}") },
+                                modifier = Modifier.testTag(diaryMoodChipTag(mood))
+                            )
+                        }
                     }
                 }
 
