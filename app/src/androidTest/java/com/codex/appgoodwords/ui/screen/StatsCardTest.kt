@@ -8,6 +8,8 @@ import com.codex.appgoodwords.data.DailyCount
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.DiarySummary
 import com.codex.appgoodwords.data.MoodCount
+import com.codex.appgoodwords.data.MoodPoint
+import com.codex.appgoodwords.data.MoodTrend
 import com.codex.appgoodwords.data.ReadingSummary
 import com.codex.appgoodwords.data.StatsSummary
 import com.codex.appgoodwords.data.TodoSummary
@@ -91,6 +93,71 @@ class StatsCardTest {
     }
 
     @Test
+    fun theMoodTrendIsDrawnOnceThereIsAShape() {
+        compose.setContent {
+            StatsCard(
+                summary = summary(
+                    diary = DiarySummary(
+                        totalCount = 4,
+                        daysThisMonth = 4,
+                        topMoods = listOf(MoodCount(DiaryMood.GOOD, 2)),
+                        moodTrend = trend(
+                            MoodPoint(LocalDate.of(2026, 8, 12), DiaryMood.SAD),
+                            MoodPoint(LocalDate.of(2026, 8, 18), DiaryMood.GOOD)
+                        )
+                    )
+                )
+            )
+        }
+
+        compose.onNodeWithText("기분 흐름").assertIsDisplayed()
+        // 어느 구간인지 알려면 시작 날짜가 보여야 합니다. 끝 날짜(8/18)는 위 막대 그래프에도
+        // 있어서 여기서 세지 않습니다. 14일 전은 막대 그래프의 7일 밖이라 이 그래프에만 있습니다.
+        compose.onNodeWithText("8/5").assertIsDisplayed()
+    }
+
+    @Test
+    fun oneMoodAloneDrawsNoTrend() {
+        compose.setContent {
+            StatsCard(
+                summary = summary(
+                    diary = DiarySummary(
+                        totalCount = 1,
+                        daysThisMonth = 1,
+                        topMoods = listOf(MoodCount(DiaryMood.GOOD, 1)),
+                        moodTrend = trend(MoodPoint(LocalDate.of(2026, 8, 18), DiaryMood.GOOD))
+                    )
+                )
+            )
+        }
+
+        // 점 하나는 오르내림이 없습니다. 빈 그래프를 그리면 자리만 차지합니다.
+        compose.onNodeWithText("기분 흐름").assertDoesNotExist()
+        // 그래도 일기 요약 자체는 남아야 합니다.
+        compose.onNodeWithText("🙂 좋음 1").assertIsDisplayed()
+    }
+
+    @Test
+    fun aDiaryWithoutAnyMoodDrawsNoTrend() {
+        compose.setContent {
+            StatsCard(
+                summary = summary(
+                    diary = DiarySummary(
+                        totalCount = 3,
+                        daysThisMonth = 3,
+                        topMoods = emptyList(),
+                        moodTrend = trend()
+                    )
+                )
+            )
+        }
+
+        // 기분을 한 번도 안 고른 사람에게 빈 격자를 보여 주지 않습니다.
+        compose.onNodeWithText("기분 흐름").assertDoesNotExist()
+        compose.onNodeWithText("이번 달 3일 · 전체 3편").assertIsDisplayed()
+    }
+
+    @Test
     fun noOverdueLineWhenNothingIsLate() {
         compose.setContent {
             StatsCard(summary = summary(todo = TodoSummary(doneCount = 3, openCount = 1, overdueCount = 0)))
@@ -98,6 +165,13 @@ class StatsCardTest {
 
         compose.onNodeWithText("지난 일 0개").assertDoesNotExist()
     }
+
+    /** 오늘을 2026-08-18로 두고 14일 창을 만듭니다. StatsCalculator가 만드는 것과 같은 모양입니다. */
+    private fun trend(vararg points: MoodPoint) = MoodTrend(
+        from = LocalDate.of(2026, 8, 18).minusDays(13),
+        to = LocalDate.of(2026, 8, 18),
+        points = points.toList()
+    )
 
     private fun summary(
         reading: ReadingSummary = ReadingSummary(0, 0, 0, 0, 0),

@@ -25,7 +25,12 @@ enum class DiaryWeather(val emoji: String, val label: String) {
     }
 }
 
-/** 일기에 붙이는 그날의 기분. 저장 방식은 [DiaryWeather]와 같습니다. */
+/**
+ * 일기에 붙이는 그날의 기분. 저장 방식은 [DiaryWeather]와 같습니다.
+ *
+ * **적어 둔 차례가 좋은 것에서 나쁜 것 순입니다.** 기분 추이 그래프가 이 차례를 세로 자리로 씁니다
+ * ([rank]). 차례를 바꾸면 그래프의 오르내림이 뒤집히므로 `DiaryMoodRankTest`가 이를 붙잡아 둡니다.
+ */
 enum class DiaryMood(val emoji: String, val label: String) {
     GREAT("😄", "아주 좋음"),
     GOOD("🙂", "좋음"),
@@ -35,7 +40,20 @@ enum class DiaryMood(val emoji: String, val label: String) {
     SAD("😢", "슬픔"),
     BAD("🙁", "나쁨");
 
+    /**
+     * 그래프에서 위에서부터 몇 번째 줄에 놓을지. 0이 가장 좋은 기분입니다.
+     *
+     * 점수가 아니라 차례입니다. 지침·화남·슬픔 사이의 거리를 잰 것이 아니라 늘어놓은 것뿐이라,
+     * "평균 기분" 같은 계산에 쓰면 안 됩니다.
+     */
+    val rank: Int
+        get() = ordinal
+
     companion object {
+        /** 그래프가 그릴 줄 수. */
+        val rankCount: Int
+            get() = entries.size
+
         fun fromCode(code: String?): DiaryMood? {
             val trimmed = code?.trim().orEmpty()
             if (trimmed.isBlank()) return null

@@ -1,5 +1,6 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,10 +18,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.DiaryMood
+import com.codex.appgoodwords.data.MoodTrend
 import com.codex.appgoodwords.data.StatsSummary
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 private val dayLabelFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("M/d")
 
@@ -120,6 +127,11 @@ fun StatsCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                // 점 하나뿐이면 그리지 않습니다. 오르내림이 없는 그래프는 자리만 차지합니다.
+                summary.diary.moodTrend?.takeIf { it.hasShape }?.let { trend ->
+                    Text("기분 흐름", style = MaterialTheme.typography.titleSmall)
+                    MoodTrendChart(trend)
                 }
             }
 
@@ -235,3 +247,109 @@ private fun WeeklyBars(summary: StatsSummary) {
 
 private const val MIN_BAR_HEIGHT = 4
 private const val MAX_BAR_HEIGHT = 56
+
+/** 기분 한 줄의 높이. 왼쪽 이모지가 눌리지 않을 만큼입니다. */
+private val moodRowHeight = 15.dp
+
+/** 점 반지름. 좁은 칸에서도 서로 붙어 보이지 않을 만큼만 키웁니다. */
+private const val MOOD_DOT_RADIUS = 3.5f
+
+/**
+ * 기분 추이.
+ *
+ * 세로는 기분이고 위가 좋은 쪽입니다([DiaryMood.rank]). 왼쪽 이모지가 눈금이라 점만 봐도
+ * 어떤 기분이었는지 읽힙니다. 가로는 날짜입니다.
+ *
+ * **일기를 안 쓴 날은 점이 없습니다.** 안 쓴 날을 "보통"으로 채우면 그래프가 실제보다 평평해집니다.
+ * 대신 점 사이를 잇는 선으로 흐름을 보여 주고, 하루라도 건너뛴 구간은 점선으로 그립니다.
+ * 실선으로 이으면 안 쓴 날도 그 사이 어딘가였다고 말하는 셈이 됩니다.
+ *
+ * 그림 라이브러리를 새로 넣지 않고 Canvas로 그립니다. 이 카드의 막대 그래프와 같은 이유입니다.
+ */
+@Composable
+private fun MoodTrendChart(trend: MoodTrend) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    val guideColor = MaterialTheme.colorScheme.surfaceVariant
+    val chartHeight = moodRowHeight * DiaryMood.rankCount
+
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            DiaryMood.entries.forEach { mood ->
+                Box(
+                    modifier = Modifier.height(moodRowHeight),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(text = mood.emoji, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 6.dp)
+                .height(chartHeight)
+        ) {
+            val rowHeight = size.height / DiaryMood.rankCount
+            val dotRadius = MOOD_DOT_RADIUS.dp.toPx()
+            fun y(mood: DiaryMood) = rowHeight * (mood.rank + 0.5f)
+            // 첫날과 마지막 날의 점이 반만 그려지지 않도록 반지름만큼 안으로 들여 놓습니다.
+            fun x(column: Int): Float {
+                if (trend.dayCount <= 1) return size.width / 2f
+                val usable = (size.width - dotRadius * 2).coerceAtLeast(0f)
+                return dotRadius + usable * column / (trend.dayCount - 1)
+            }
+
+            // 보통 자리에 눈금 하나. 이 선 위인지 아래인지가 한눈에 보입니다.
+            val neutralY = y(DiaryMood.NEUTRAL)
+            drawLine(
+                color = guideColor,
+                start = Offset(0f, neutralY),
+                end = Offset(size.width, neutralY),
+                strokeWidth = 1.dp.toPx()
+            )
+
+            for (index in 1 until trend.points.size) {
+                val previous = trend.points[index - 1]
+                val next = trend.points[index]
+                val skipped = ChronoUnit.DAYS.between(previous.date, next.date) > 1
+                drawLine(
+                    color = lineColor.copy(alpha = if (skipped) 0.35f else 0.7f),
+                    start = Offset(x(trend.columnOf(previous)), y(previous.mood)),
+                    end = Offset(x(trend.columnOf(next)), y(next.mood)),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    // 건너뛴 날이 있으면 점선. 실선은 그 사이도 이랬다는 말이 됩니다.
+                    pathEffect = if (skipped) {
+                        PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))
+                    } else {
+                        null
+                    }
+                )
+            }
+
+            trend.points.forEach { point ->
+                drawCircle(
+                    color = lineColor,
+                    radius = MOOD_DOT_RADIUS.dp.toPx(),
+                    center = Offset(x(trend.columnOf(point)), y(point.mood))
+                )
+            }
+        }
+    }
+
+    Row(modifier = Modifier.fillMaxWidth()) {
+        // 날짜를 열마다 적으면 2주 치가 겹칩니다. 양 끝만 있으면 어느 구간인지 압니다.
+        Text(
+            text = trend.from.format(dayLabelFormatter),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = trend.to.format(dayLabelFormatter),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
