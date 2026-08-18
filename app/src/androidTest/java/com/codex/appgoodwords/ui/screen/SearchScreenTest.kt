@@ -11,6 +11,8 @@ import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.SearchHit
+import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.data.TodoEntity
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -63,17 +65,48 @@ class SearchScreenTest {
 
     @Test
     fun tappingAQuoteOpensIt() {
-        var opened: Long? = null
-        compose.setContent { searchScreen(onOpenQuote = { opened = it }) }
+        var opened: SearchHit? = null
+        compose.setContent { searchScreen(onOpenHit = { opened = it }) }
 
         compose.onNodeWithTag(searchInputTag).performTextInput("행동")
         compose.onNodeWithText("행동에 대하여").performClick()
 
-        assertEquals(1L, opened)
+        assertEquals(1L, opened?.id)
+        assertEquals(SearchKind.QUOTE, opened?.kind)
+    }
+
+    // 예전에는 글귀만 눌러서 갈 수 있었습니다. 나머지는 찾아 놓고도 다시 손으로 뒤져야 했습니다.
+
+    @Test
+    fun aDiaryCanBeOpened() =
+        assertOpens(query = "여름", label = "바다", kind = SearchKind.DIARY, id = 2L)
+
+    @Test
+    fun aTodoCanBeOpened() =
+        assertOpens(query = "약", label = "아침 약 먹기", kind = SearchKind.TODO, id = 3L)
+
+    @Test
+    fun aBookCanBeOpened() =
+        assertOpens(query = "몰입의", label = "몰입의 즐거움", kind = SearchKind.BOOK, id = 4L)
+
+    @Test
+    fun aRoutineCanBeOpened() =
+        assertOpens(query = "산책", label = "아침 산책", kind = SearchKind.ROUTINE, id = 5L)
+
+    /** 검색어와 결과 제목이 똑같으면 검색창까지 함께 걸려서 어느 것을 누를지 정할 수 없습니다. */
+    private fun assertOpens(query: String, label: String, kind: SearchKind, id: Long) {
+        var opened: SearchHit? = null
+        compose.setContent { searchScreen(onOpenHit = { opened = it }) }
+
+        compose.onNodeWithTag(searchInputTag).performTextInput(query)
+        compose.onNodeWithText(label).performClick()
+
+        assertEquals("$label 을(를) 눌러도 갈 곳이 없습니다.", kind, opened?.kind)
+        assertEquals(id, opened?.id)
     }
 
     @androidx.compose.runtime.Composable
-    private fun searchScreen(onOpenQuote: (Long) -> Unit = {}) {
+    private fun searchScreen(onOpenHit: (SearchHit) -> Unit = {}) {
         SearchScreen(
             items = listOf(
                 ContentItemEntity(
@@ -92,7 +125,7 @@ class SearchScreenTest {
             ),
             books = listOf(BookEntity(id = 4, syncId = "b1", title = "몰입의 즐거움", author = "칙센트미하이")),
             routines = listOf(RoutineEntity(id = 5, syncId = "r1", title = "아침 산책")),
-            onOpenQuote = onOpenQuote
+            onOpenHit = onOpenHit
         )
     }
 }

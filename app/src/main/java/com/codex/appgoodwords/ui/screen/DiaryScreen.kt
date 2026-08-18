@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -79,12 +80,22 @@ fun DiaryScreen(
     modifier: Modifier = Modifier,
     /** 서버가 보관하는 첨부를 받아올 주소. 서버를 안 쓰면 비어 있고, 그 첨부는 자리만 보입니다. */
     serverUrl: String = "",
-    apiKey: String = ""
+    apiKey: String = "",
+    /** 검색에서 고른 일기. 그 자리로 굴려 주고 잠깐 강조합니다. */
+    focusId: Long? = null
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
 
+    val listState = rememberLazyListState()
+    // 맨 위 안내 카드 하나를 지나야 목록이 시작합니다.
+    val focusIndex = remember(focusId, diaries) {
+        diaries.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(1)
+    }
+    ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -125,7 +136,11 @@ fun DiaryScreen(
         }
 
         items(diaries, key = { it.id }) { diary ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusHighlight(focused = diary.id == focusId, key = focusId)
+            ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)

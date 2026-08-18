@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -34,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,7 +64,9 @@ fun RoutineScreen(
     onSaveMemo: (RoutineEntity, String) -> Unit,
     onDeleteMemo: (RoutineMemoEntity) -> Unit,
     onCheckRoutine: (RoutineEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 검색에서 고른 루틴. 그 자리로 굴려 주고 잠깐 강조합니다. */
+    focusId: Long? = null
 ) {
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDeleteRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -122,7 +126,15 @@ fun RoutineScreen(
         )
     }
 
+    val listState = rememberLazyListState()
+    // 추가 버튼 1 + 달력 카드 1을 지나야 루틴 목록이 시작합니다.
+    val focusIndex = remember(focusId, sortedRoutines) {
+        sortedRoutines.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(2)
+    }
+    ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -179,6 +191,8 @@ fun RoutineScreen(
             items(sortedRoutines, key = { it.id }) { routine ->
                 RoutineCard(
                     routine = routine,
+                    focused = routine.id == focusId,
+                    focusKey = focusId,
                     todayCount = todayCounts[routine.id] ?: 0,
                     memoCount = memosByRoutine[routine.id]?.size ?: 0,
                     latestMemo = memosByRoutine[routine.id]?.maxByOrNull { it.createdAt },
@@ -440,11 +454,15 @@ private fun RoutineCard(
     onOpenMemos: () -> Unit,
     onCheckRoutine: (RoutineEntity) -> Unit,
     onEditRoutine: () -> Unit,
-    onDeleteRoutine: () -> Unit
+    onDeleteRoutine: () -> Unit,
+    focused: Boolean = false,
+    focusKey: Any? = null
 ) {
     val checkedToday = todayCount > 0
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusHighlight(focused = focused, key = focusKey),
         colors = CardDefaults.cardColors(
             containerColor = if (checkedToday) {
                 MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.62f)

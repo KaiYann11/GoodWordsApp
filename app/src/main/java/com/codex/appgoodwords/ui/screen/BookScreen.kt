@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -65,7 +66,9 @@ fun BookScreen(
     onExtractQuote: (Long, String, Int) -> Unit,
     modifier: Modifier = Modifier,
     /** 책마다 그 책에서 뽑은 글귀가 몇 개인지. syncId로 셉니다. */
-    quoteCountBySyncId: Map<String, Int> = emptyMap()
+    quoteCountBySyncId: Map<String, Int> = emptyMap(),
+    /** 검색에서 고른 책. 그 자리로 굴려 주고 잠깐 강조합니다. */
+    focusId: Long? = null
 ) {
     var editing by remember { mutableStateOf<BookDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<BookEntity?>(null) }
@@ -75,7 +78,22 @@ fun BookScreen(
     val reading = books.filterNot { it.isFinished }
     val finished = books.filter { it.isFinished }
 
+    val listState = rememberLazyListState()
+    // 안내 카드 1 + (읽는 중 제목 1 + 읽는 중 책들) + (읽은 책 제목 1 + 읽은 책들) 순서입니다.
+    val focusIndex = remember(focusId, reading, finished) {
+        val inReading = reading.indexOfFirst { it.id == focusId }
+        if (inReading >= 0) return@remember 2 + inReading
+
+        val inFinished = finished.indexOfFirst { it.id == focusId }
+        if (inFinished < 0) return@remember null
+        // 읽는 중이 없으면 그 묶음(제목 + 책들)이 통째로 빠집니다.
+        val readingBlock = if (reading.isEmpty()) 0 else 1 + reading.size
+        2 + readingBlock + inFinished
+    }
+    ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -119,6 +137,8 @@ fun BookScreen(
             items(reading, key = { it.id }) { book ->
                 BookCard(
                     book = book,
+                    focused = book.id == focusId,
+                    focusKey = focusId,
                     quoteCount = quoteCountBySyncId[book.syncId] ?: 0,
                     onEdit = { editing = BookDraft.from(book) },
                     onProgress = { progressTarget = book },
@@ -134,6 +154,8 @@ fun BookScreen(
             items(finished, key = { it.id }) { book ->
                 BookCard(
                     book = book,
+                    focused = book.id == focusId,
+                    focusKey = focusId,
                     quoteCount = quoteCountBySyncId[book.syncId] ?: 0,
                     onEdit = { editing = BookDraft.from(book) },
                     onProgress = { progressTarget = book },
@@ -213,9 +235,15 @@ private fun BookCard(
     onProgress: () -> Unit,
     onToggleFinished: () -> Unit,
     onExtract: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    focused: Boolean = false,
+    focusKey: Any? = null
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusHighlight(focused = focused, key = focusKey)
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
@@ -62,7 +63,9 @@ fun TodoScreen(
     onToggleDone: (Long) -> Unit,
     onDeleteTodo: (Long) -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 검색에서 고른 할 일. 그 자리로 굴려 주고 잠깐 강조합니다. */
+    focusId: Long? = null
 ) {
     var editing by remember { mutableStateOf<TodoDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<TodoEntity?>(null) }
@@ -72,7 +75,21 @@ fun TodoScreen(
     val todayList = todos.filter { it.dueDate == today.toString() }
     val remaining = todayList.count { !it.isDone }
 
+    val listState = rememberLazyListState()
+    // 안내 카드 1 + (지난 일 제목 1 + 지난 일들) + 오늘 제목 1 + 오늘 일들 순서입니다.
+    val focusIndex = remember(focusId, overdue, todayList) {
+        val inOverdue = overdue.indexOfFirst { it.id == focusId }
+        if (inOverdue >= 0) return@remember 2 + inOverdue
+
+        val inToday = todayList.indexOfFirst { it.id == focusId }
+        if (inToday < 0) return@remember null
+        val overdueBlock = if (overdue.isEmpty()) 0 else 1 + overdue.size
+        2 + overdueBlock + inToday
+    }
+    ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -136,6 +153,8 @@ fun TodoScreen(
             items(overdue, key = { "overdue-${it.id}" }) { todo ->
                 TodoRow(
                     todo = todo,
+                    focused = todo.id == focusId,
+                    focusKey = focusId,
                     isOverdue = true,
                     onToggleDone = { onToggleDone(todo.id) },
                     onEdit = { editing = TodoDraft.from(todo) },
@@ -161,6 +180,8 @@ fun TodoScreen(
         items(todayList, key = { "today-${it.id}" }) { todo ->
             TodoRow(
                 todo = todo,
+                focused = todo.id == focusId,
+                focusKey = focusId,
                 isOverdue = false,
                 onToggleDone = { onToggleDone(todo.id) },
                 onEdit = { editing = TodoDraft.from(todo) },
@@ -206,9 +227,15 @@ private fun TodoRow(
     isOverdue: Boolean,
     onToggleDone: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    focused: Boolean = false,
+    focusKey: Any? = null
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusHighlight(focused = focused, key = focusKey)
+    ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically

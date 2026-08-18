@@ -6,6 +6,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,10 +27,18 @@ internal const val libraryBookTabTag = "library_tab_book"
 fun LibraryTabsScreen(
     quoteContent: @Composable () -> Unit,
     bookContent: @Composable () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 검색에서 넘어올 때 어느 쪽을 열지. null이면 보던 쪽 그대로입니다. */
+    requestedTab: Int? = null,
+    requestKey: Any? = null
 ) {
     // 화면을 돌려도 보던 쪽이 유지되어야 합니다.
     var selected by rememberSaveable { mutableIntStateOf(0) }
+
+    // 검색에서 책을 골랐는데 글귀 쪽이 열려 있으면 찾던 것이 안 보입니다.
+    LaunchedEffect(requestKey, requestedTab) {
+        if (requestedTab != null) selected = requestedTab
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selected) {

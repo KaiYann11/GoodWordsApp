@@ -48,7 +48,7 @@ fun SearchScreen(
     todos: List<TodoEntity>,
     books: List<BookEntity>,
     routines: List<RoutineEntity>,
-    onOpenQuote: (Long) -> Unit,
+    onOpenHit: (SearchHit) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -102,26 +102,19 @@ fun SearchScreen(
                 )
             }
             items(hits, key = { "${kind.name}-${it.id}" }) { hit ->
-                HitCard(
-                    hit = hit,
-                    // 글귀만 열 곳이 있습니다. 나머지는 각 탭에서 봐야 해서 눌러도 갈 곳이 없습니다.
-                    onClick = if (hit.kind == SearchKind.QUOTE) {
-                        { onOpenQuote(hit.id) }
-                    } else {
-                        null
-                    }
-                )
+                // 어느 종류든 눌러서 갈 수 있습니다. 찾아 놓고 다시 손으로 뒤지게 하면 안 됩니다.
+                HitCard(hit = hit, onClick = { onOpenHit(hit) })
             }
         }
     }
 }
 
 @Composable
-private fun HitCard(hit: SearchHit, onClick: (() -> Unit)?) {
+private fun HitCard(hit: SearchHit, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .clickable(onClick = onClick)
     ) {
         Column(
             modifier = Modifier.padding(14.dp),

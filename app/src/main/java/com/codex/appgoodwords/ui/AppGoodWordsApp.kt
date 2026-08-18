@@ -64,6 +64,7 @@ import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
+import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DetailScreen
@@ -104,7 +105,14 @@ private data class AppDestination(
     val tab: AppTab,
     val selectedItemId: Long? = null,
     val editingItemId: Long? = null,
-    val returnTabAfterEdit: AppTab = AppTab.HOME
+    val returnTabAfterEdit: AppTab = AppTab.HOME,
+    /**
+     * 검색에서 고른 기록. 그 탭으로 가서 해당 항목까지 데려다줍니다.
+     *
+     * 탭만 바꿔 놓으면 찾아 놓고도 사용자가 다시 손으로 뒤져야 합니다.
+     */
+    val focusKind: SearchKind? = null,
+    val focusId: Long? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -411,9 +419,13 @@ fun AppGoodWordsApp(
 
                         AppTab.LIBRARY -> LibraryTabsScreen(
                             modifier = Modifier.padding(innerPadding),
+                            // 검색에서 책을 골라 왔으면 독서 쪽을 열어 줍니다.
+                            requestedTab = if (destination.focusKind == SearchKind.BOOK) 1 else null,
+                            requestKey = destination.focusId,
                             bookContent = {
                                 BookScreen(
                                     books = books,
+                                    focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.BOOK },
                                     // 책마다 그 책에서 뽑은 글귀가 몇 개인지 세어 카드에 보여 줍니다.
                                     quoteCountBySyncId = remember(allItems) {
                                         allItems
@@ -499,8 +511,12 @@ fun AppGoodWordsApp(
 
                         AppTab.TODAY -> TodayScreen(
                             modifier = Modifier.padding(innerPadding),
+                            // 검색에서 할 일을 골라 왔으면 할 일 쪽을 열어 줍니다.
+                            requestedTab = if (destination.focusKind == SearchKind.TODO) 1 else null,
+                            requestKey = destination.focusId,
                             routineContent = {
                                 RoutineScreen(
+                            focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
                             routines = routines,
                             todayCounts = routineTodayCounts,
                             checks = routineChecks,
@@ -565,6 +581,7 @@ fun AppGoodWordsApp(
                             todoContent = {
                                 TodoScreen(
                                     todos = todos,
+                                    focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.TODO },
                                     today = LocalDate.now(),
                                     canScheduleExactAlarms = canScheduleExactAlarms,
                                     onSaveTodo = { draft ->
@@ -601,6 +618,7 @@ fun AppGoodWordsApp(
                         AppTab.DIARY -> DiaryScreen(
                             modifier = Modifier.padding(innerPadding),
                             diaries = diaries,
+                            focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.DIARY },
                             today = LocalDate.now(),
                             // 서버가 보관하는 첨부를 받아오려면 주소와 키가 필요합니다.
                             serverUrl = serverSyncSettings.serverUrl,
@@ -636,7 +654,14 @@ fun AppGoodWordsApp(
                             todos = todos,
                             books = books,
                             routines = routines,
-                            onOpenQuote = { itemId -> openItemDetail(AppTab.SEARCH, itemId) }
+                            onOpenHit = { hit ->
+                                if (hit.kind == SearchKind.QUOTE) {
+                                    openItemDetail(AppTab.SEARCH, hit.id)
+                                } else {
+                                    // 나머지는 각자 사는 탭으로 데려가 그 항목을 짚어 줍니다.
+                                    pushRoute(focusRoute(hit.kind, hit.id))
+                                }
+                            }
                         )
 
                         AppTab.HISTORY -> HistoryScreen(
@@ -944,11 +969,31 @@ private fun detailRoute(tab: AppTab, itemId: Long): String = "detail:${tab.name}
 
 private fun editRoute(returnTab: AppTab, itemId: Long): String = "edit:${returnTab.name}:$itemId"
 
+/** 검색 결과로 가는 길. 어느 탭인지는 종류가 정합니다. */
+private fun focusRoute(kind: SearchKind, id: Long): String = "focus:${kind.name}:$id"
+
+/** 그 종류를 어디서 보는지. 할 일과 루틴은 같은 탭 안에서 나뉩니다. */
+private fun tabOf(kind: SearchKind): AppTab = when (kind) {
+    SearchKind.QUOTE -> AppTab.LIBRARY
+    SearchKind.BOOK -> AppTab.LIBRARY
+    SearchKind.DIARY -> AppTab.DIARY
+    SearchKind.TODO -> AppTab.TODAY
+    SearchKind.ROUTINE -> AppTab.TODAY
+}
+
 private fun parseRoute(route: String): AppDestination {
     val parts = route.split(":")
     return when (parts.firstOrNull()) {
         "tab" -> AppDestination(tab = AppTab.valueOf(parts[1]))
         "add" -> AppDestination(tab = AppTab.ADD)
+        "focus" -> {
+            val kind = SearchKind.valueOf(parts[1])
+            AppDestination(
+                tab = tabOf(kind),
+                focusKind = kind,
+                focusId = parts.getOrNull(2)?.toLongOrNull()
+            )
+        }
         "detail" -> AppDestination(
             tab = AppTab.valueOf(parts[1]),
             selectedItemId = parts.getOrNull(2)?.toLongOrNull()
