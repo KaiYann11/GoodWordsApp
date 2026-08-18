@@ -1,38 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  테마 아이콘(안드로이드 13+). 시스템이 배경화면 색으로 물들이므로 한 가지 색으로만 그립니다.
+  앞면(ic_launcher_foreground)과 같은 모양이어야 두 아이콘이 같은 앱으로 보입니다.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
     <path
         android:fillColor="#000000"
-        android:pathData="M79,18C85.1,18 90,22.9 90,29C90,35.1 85.1,40 79,40C72.9,40 68,35.1 68,29C68,22.9 72.9,18 79,18Z" />
-    <path
-        android:strokeColor="#000000"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M79,10V14M79,44V48M62,29H66M92,29H96M67,17L70,20M88,38L91,41M91,17L88,20M70,38L67,41" />
+        android:pathData="M31.5,45a9.5,9.5 0 1,0 19,0a9.5,9.5 0 1,0 -19,0Z" />
     <path
         android:fillColor="#000000"
-        android:fillAlpha="0.62"
-        android:pathData="M30,27C24.5,27 20,31.5 20,37V77C20,82.5 24.5,87 30,87H71C76.5,87 81,82.5 81,77V37C81,31.5 76.5,27 71,27H30Z" />
+        android:pathData="M50.5,46C50.5,58 44.5,64 38,67L34,58C40,56 43.5,52 43.5,46Z" />
+
     <path
         android:fillColor="#000000"
-        android:pathData="M25,21C19.5,21 15,25.5 15,31V70C15,75.5 19.5,80 25,80H45L54,90L63,80H83C88.5,80 93,75.5 93,70V31C93,25.5 88.5,21 83,21H25Z" />
+        android:pathData="M57.5,45a9.5,9.5 0 1,0 19,0a9.5,9.5 0 1,0 -19,0Z" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M72,21H84C87.3,21 90,23.7 90,27V58L81,52L72,58V21Z" />
+        android:fillColor="#000000"
+        android:pathData="M76.5,46C76.5,58 70.5,64 64,67L60,58C66,56 69.5,52 69.5,46Z" />
+
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M32,39C32,34.6 35.6,31 40,31H47V38H43C41.3,38 40,39.3 40,41V45H49V53C49,59.1 44.1,64 38,64H32V56H38C39.7,56 41,54.7 41,53V51H32V39Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53,39C53,34.6 56.6,31 61,31H68V38H64C62.3,38 61,39.3 61,41V45H70V53C70,59.1 65.1,64 59,64H53V56H59C60.7,56 62,54.7 62,53V51H53V39Z" />
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M34,69H71M38,74H63" />
+        android:fillColor="#000000"
+        android:fillAlpha="0.5"
+        android:pathData="M40.5,74h27a2.5,2.5 0 0,1 0,5h-27a2.5,2.5 0 0,1 0,-5Z" />
 </vector>
