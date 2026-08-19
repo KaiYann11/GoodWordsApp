@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.History
@@ -77,6 +78,7 @@ import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
+import com.codex.appgoodwords.ui.screen.StatsScreen
 import com.codex.appgoodwords.ui.screen.TodayScreen
 import com.codex.appgoodwords.ui.screen.TodoScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
@@ -97,6 +99,8 @@ private enum class AppTab(
     ADD("추가"),
     /** 이력은 매일 볼 화면이 아니라 설정 안으로 옮겼습니다. 하단 바에는 없습니다. */
     HISTORY("이력"),
+    /** 통계도 설정의 버튼으로 엽니다. 하단 바에는 없습니다. */
+    STATS("통계"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
     SETTINGS("설정")
@@ -343,6 +347,7 @@ fun AppGoodWordsApp(
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
+                                                AppTab.STATS -> Icons.Outlined.BarChart
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
                                             },
@@ -528,7 +533,6 @@ fun AppGoodWordsApp(
                             focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
                             routines = routines,
                             todayCounts = routineTodayCounts,
-                            checks = routineChecks,
                             memos = routineMemos,
                             onSaveRoutine = { draft ->
                                 coroutineScope.launch {
@@ -556,7 +560,7 @@ fun AppGoodWordsApp(
                                 coroutineScope.launch {
                                     val result = viewModel.saveRoutineMemo(routine.id, body)
                                     val message = if (result.isSuccess) {
-                                        "메모를 저장했습니다."
+                                        "메모를 저장하고 수행 처리했습니다."
                                     } else {
                                         result.exceptionOrNull()?.message ?: "메모를 저장하지 못했습니다."
                                     }
@@ -676,7 +680,6 @@ fun AppGoodWordsApp(
                         AppTab.HISTORY -> HistoryScreen(
                             modifier = Modifier.padding(innerPadding),
                             events = historyEvents,
-                            stats = stats,
                             onOpenItem = { itemId ->
                                 openItemDetail(AppTab.HISTORY, itemId)
                             },
@@ -692,6 +695,13 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             }
+                        )
+
+                        AppTab.STATS -> StatsScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            summary = stats,
+                            routines = routines,
+                            checks = routineChecks
                         )
 
                         AppTab.ADD -> AddContentScreen(
@@ -765,6 +775,7 @@ fun AppGoodWordsApp(
                             syncBackupDirectory = syncBackupDirectory,
                             notificationsBlocked = notificationsBlocked,
                             onSettingsChanged = viewModel::updateSettings,
+                            onOpenStats = { pushRoute(tabRoute(AppTab.STATS)) },
                             onOpenHistory = { pushRoute(tabRoute(AppTab.HISTORY)) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {

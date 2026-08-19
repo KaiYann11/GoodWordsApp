@@ -1,10 +1,12 @@
 package com.codex.appgoodwords.data
 
+import androidx.room.withTransaction
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 
 class AppRepository(
+    private val database: AppDatabase,
     private val contentItemDao: ContentItemDao,
     private val exposureEventDao: ExposureEventDao,
     private val routineDao: RoutineDao,
@@ -262,31 +264,38 @@ class AppRepository(
 
     suspend fun markRoutineDone(routineId: Long): Int {
         val routine = routineDao.getById(routineId) ?: return 0
-        val checkedAt = System.currentTimeMillis()
+        insertRoutineCheck(routine)
+        val (start, end) = todayRange()
+        return routineCheckDao.countForRange(routine.id, start, end)
+    }
+
+    private suspend fun insertRoutineCheck(routine: RoutineEntity) {
         routineCheckDao.insert(
             RoutineCheckEntity(
                 routineId = routine.id,
                 routineSyncId = routine.syncId,
                 routineTitle = routine.title,
-                checkedAt = checkedAt
+                checkedAt = System.currentTimeMillis()
             )
         )
-        val (start, end) = todayRange()
-        return routineCheckDao.countForRange(routine.id, start, end)
     }
 
     suspend fun saveRoutineMemo(routineId: Long, body: String): Long {
-        val routine = routineDao.getById(routineId) ?: error("루틴을 찾을 수 없습니다.")
         val normalized = body.trim()
-        require(normalized.isNotBlank()) { "메모 내용을 입력해 주세요." }
-        return routineMemoDao.insert(
-            RoutineMemoEntity(
-                routineId = routine.id,
-                routineSyncId = routine.syncId,
-                routineTitle = routine.title,
-                body = normalized
+        return database.withTransaction {
+            val routine = routineDao.getById(routineId) ?: error("루틴을 찾을 수 없습니다.")
+            require(normalized.isNotBlank()) { "메모 내용을 입력해 주세요." }
+            val memoId = routineMemoDao.insert(
+                RoutineMemoEntity(
+                    routineId = routine.id,
+                    routineSyncId = routine.syncId,
+                    routineTitle = routine.title,
+                    body = normalized
+                )
             )
-        )
+            insertRoutineCheck(routine)
+            memoId
+        }
     }
 
     suspend fun deleteRoutineMemo(id: Long): Int {

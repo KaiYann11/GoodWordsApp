@@ -435,11 +435,17 @@ async function routeRoutineMember(method, parts, request, response) {
     const payload = await readJson(request);
     const memo = await withDb((db) => {
       const routine = requireRoutine(db, routineId);
-      return saveRoutineMemo(db, {
+      const savedMemo = saveRoutineMemo(db, {
         ...payload,
         routineId: routine.id,
         routineTitle: routine.title,
       });
+      saveRoutineCheck(db, {
+        routineId: routine.id,
+        routineTitle: routine.title,
+        checkedAt: nowMs(),
+      });
+      return savedMemo;
     });
     sendJson(response, 201, memo);
     return;

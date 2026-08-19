@@ -131,6 +131,22 @@ class AutoSyncSettingsTest {
         compose.onNodeWithText("마지막 동기화: 없음").assertIsDisplayed()
     }
 
+    @Test
+    fun statisticsButtonOpensStatistics() {
+        var opened = false
+        compose.setContent {
+            settingsScreen(
+                serverSyncSettings = ServerSyncSettings(),
+                onOpenStats = { opened = true }
+            )
+        }
+
+        scrollTo(hasTestTag(statsButtonTag))
+        compose.onNodeWithTag(statsButtonTag).performClick()
+
+        assertEquals(true, opened)
+    }
+
     /** 화면에는 가로로 굴러가는 칩 목록도 있어서, 세로 목록만 골라야 한다. */
     private fun scrollTo(matcher: SemanticsMatcher) {
         compose.onNode(
@@ -142,7 +158,8 @@ class AutoSyncSettingsTest {
     private fun settingsScreen(
         serverSyncSettings: ServerSyncSettings,
         syncStatus: SyncStatus = SyncStatus(),
-        onServerSyncSettingsChanged: (ServerSyncSettings) -> Unit = {}
+        onServerSyncSettingsChanged: (ServerSyncSettings) -> Unit = {},
+        onOpenStats: () -> Unit = {}
     ) {
         SettingsScreen(
             settings = ReminderSettings(),
@@ -162,7 +179,8 @@ class AutoSyncSettingsTest {
             onUploadToServer = {},
             onDownloadFromServer = {},
             onRestoreBackup = {},
-            onDeleteCategory = {}
+            onDeleteCategory = {},
+            onOpenStats = onOpenStats
         )
     }
 }
