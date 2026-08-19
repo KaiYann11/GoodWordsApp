@@ -325,18 +325,15 @@ fun AppGoodWordsApp(
             bottomBar = {
                 if (selectedItem == null) {
                     NavigationBar {
-                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.TODAY, AppTab.DIARY, AppTab.ADD, AppTab.SETTINGS)
+                        // 담기(+)는 하단 바에 두지 않습니다. 하단 바는 "어디로 갈지"만 담아야
+                        // 읽기 쉬운데, +만 혼자 "무엇을 할지"여서 성격이 달랐습니다.
+                        // 지금은 보관함의 글귀 화면 안에 있습니다.
+                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.TODAY, AppTab.DIARY, AppTab.SETTINGS)
                             .forEach { tab ->
                                 val selected = currentTab == tab
                                 NavigationBarItem(
                                     selected = selected,
-                                    onClick = {
-                                        if (tab == AppTab.ADD) {
-                                            openFreshAddForm()
-                                        } else {
-                                            pushRoute(tabRoute(tab))
-                                        }
-                                    },
+                                    onClick = { pushRoute(tabRoute(tab)) },
                                     icon = {
                                         Icon(
                                             imageVector = when (tab) {
@@ -500,6 +497,7 @@ fun AppGoodWordsApp(
                             onOpenItem = { item ->
                                 openItemDetail(AppTab.LIBRARY, item.id)
                             },
+                            onAddContent = { openFreshAddForm() },
                             onResetTodayConfirmed = {
                                 coroutineScope.launch {
                                     val result = viewModel.resetTodayConfirmed()
