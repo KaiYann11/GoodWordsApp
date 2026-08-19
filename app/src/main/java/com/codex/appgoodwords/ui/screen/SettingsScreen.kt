@@ -54,6 +54,9 @@ internal const val autoSyncSwitchTag = "auto_sync_switch"
 /** 이력은 하단 바에서 빠졌으므로 여기로 들어가는 길이 있는지 확인해야 한다. */
 internal const val historyButtonTag = "history_button"
 
+/** 통계도 하단 바에서 빠졌으므로 설정에서 여는 버튼을 따로 둔다. */
+internal const val statsButtonTag = "stats_button"
+
 /** 교체와 병합은 결과가 정반대라 버튼을 헷갈리면 안 된다. */
 internal const val fileMergeButtonTag = "file_merge_button"
 
@@ -87,6 +90,7 @@ fun SettingsScreen(
     onDownloadFromServer: () -> Unit,
     onRestoreBackup: (SyncBackup) -> Unit,
     onDeleteCategory: (String) -> Unit,
+    onOpenStats: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -659,7 +663,18 @@ fun SettingsScreen(
             }
         }
 
-        // 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기로 옮겼습니다.
+        // 통계와 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기에서 엽니다.
+        item {
+            OutlinedButton(
+                onClick = onOpenStats,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(statsButtonTag)
+            ) {
+                Text("통계 보기")
+            }
+        }
+
         item {
             OutlinedButton(
                 onClick = onOpenHistory,

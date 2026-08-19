@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
-import com.codex.appgoodwords.data.StatsSummary
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -53,7 +52,6 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun HistoryScreen(
     events: List<ExposureEventEntity>,
-    stats: StatsSummary,
     onOpenItem: (Long) -> Unit,
     onDeleteEvents: (Set<Long>, () -> Unit) -> Unit,
     modifier: Modifier = Modifier
@@ -123,10 +121,6 @@ fun HistoryScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            StatsCard(summary = stats)
-        }
-
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(

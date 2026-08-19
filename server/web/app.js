@@ -1148,7 +1148,7 @@ async function submitMemo(form) {
     method: "POST",
     body: { body: data.get("body") },
   });
-  showToast("메모를 저장했습니다.");
+  showToast("메모를 저장하고 수행 처리했습니다.");
   await loadSnapshot(false);
 }
 

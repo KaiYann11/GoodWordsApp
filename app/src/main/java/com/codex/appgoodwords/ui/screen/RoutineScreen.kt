@@ -57,7 +57,6 @@ import java.time.format.DateTimeFormatter
 fun RoutineScreen(
     routines: List<RoutineEntity>,
     todayCounts: Map<Long, Int>,
-    checks: List<RoutineCheckEntity>,
     memos: List<RoutineMemoEntity>,
     onSaveRoutine: (RoutineDraft) -> Unit,
     onDeleteRoutine: (RoutineEntity) -> Unit,
@@ -71,8 +70,6 @@ fun RoutineScreen(
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDeleteRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var memoRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
-    var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
     val editingRoutine = routines.firstOrNull { it.id == editingRoutineId }
     val deletingRoutine = routines.firstOrNull { it.id == showDeleteRoutineId }
     val memoRoutine = routines.firstOrNull { it.id == memoRoutineId }
@@ -127,9 +124,9 @@ fun RoutineScreen(
     }
 
     val listState = rememberLazyListState()
-    // 추가 버튼 1 + 달력 카드 1을 지나야 루틴 목록이 시작합니다.
+    // 추가 버튼을 지나야 루틴 목록이 시작합니다.
     val focusIndex = remember(focusId, sortedRoutines) {
-        sortedRoutines.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(2)
+        sortedRoutines.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(1)
     }
     ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
 
@@ -150,22 +147,6 @@ fun RoutineScreen(
                 )
                 Text("루틴 추가")
             }
-        }
-
-        item {
-            RoutineCalendarCard(
-                routines = routines,
-                checks = checks,
-                selectedMonthText = selectedMonthText,
-                selectedDateText = selectedDateText,
-                onMonthChanged = { month, date ->
-                    selectedMonthText = month.toString()
-                    selectedDateText = date.toString()
-                },
-                onDateSelected = { date ->
-                    selectedDateText = date.toString()
-                }
-            )
         }
 
         if (routines.isEmpty()) {
@@ -207,7 +188,7 @@ fun RoutineScreen(
 }
 
 @Composable
-private fun RoutineCalendarCard(
+internal fun RoutineCalendarCard(
     routines: List<RoutineEntity>,
     checks: List<RoutineCheckEntity>,
     selectedMonthText: String,

@@ -27,6 +27,7 @@ class ContentRotationTest {
             .allowMainThreadQueries()
             .build()
         repository = AppRepository(
+            database = database,
             contentItemDao = database.contentItemDao(),
             exposureEventDao = database.exposureEventDao(),
             routineDao = database.routineDao(),

@@ -511,6 +511,52 @@ describe("콘텐츠 API", () => {
   });
 });
 
+describe("루틴 API", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  it("메모를 저장하면 수행도 한 번 기록한다", async () => {
+    await resetServer();
+    const routine = await (
+      await api("/api/routines", { method: "POST", body: { title: "물 마시기" } })
+    ).json();
+
+    const response = await api(`/api/routines/${routine.id}/memos`, {
+      method: "POST",
+      body: { body: "한 컵 마심" },
+    });
+    const memo = await response.json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(response.status, 201);
+    assert.equal(memo.body, "한 컵 마심");
+    assert.equal(stored.routineMemos.length, 1);
+    assert.equal(stored.routineChecks.length, 1);
+    assert.equal(stored.routineMemos[0].routineId, routine.id);
+    assert.equal(stored.routineChecks[0].routineId, routine.id);
+    assert.equal(stored.routineChecks[0].routineSyncId, routine.syncId);
+    assert.equal(stored.routineChecks[0].routineTitle, routine.title);
+  });
+
+  it("빈 메모는 메모도 수행도 기록하지 않는다", async () => {
+    await resetServer();
+    const routine = await (
+      await api("/api/routines", { method: "POST", body: { title: "물 마시기" } })
+    ).json();
+
+    const response = await api(`/api/routines/${routine.id}/memos`, {
+      method: "POST",
+      body: { body: "   " },
+    });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(response.status, 400);
+    assert.equal(stored.routineMemos.length, 0);
+    assert.equal(stored.routineChecks.length, 0);
+  });
+});
+
 describe("일기와 할 일 API", () => {
   async function resetServer() {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });

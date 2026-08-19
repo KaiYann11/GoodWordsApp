@@ -50,6 +50,7 @@ class AppContainer(
 
     val repository: AppRepository by lazy {
         AppRepository(
+            database = database,
             contentItemDao = database.contentItemDao(),
             exposureEventDao = database.exposureEventDao(),
             routineDao = database.routineDao(),
