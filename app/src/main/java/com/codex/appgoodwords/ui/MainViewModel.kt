@@ -1,6 +1,7 @@
 package com.codex.appgoodwords.ui
 
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AppContainer
@@ -150,6 +151,19 @@ class MainViewModel(
     private val _syncBackupDirectory = MutableStateFlow("")
     val syncBackupDirectory: StateFlow<String> = _syncBackupDirectory.asStateFlow()
 
+    /**
+     * 홈 목록을 섞는 씨앗. 앱을 켤 때마다 새로 정해집니다.
+     *
+     * 보는 동안에는 그대로여서 목록이 발밑에서 움직이지 않습니다. 잠깐 다른 앱에 다녀오는 것과
+     * 다시 켜는 것은 [RESHUFFLE_AFTER_MS]로 가릅니다. 사진을 고르러 나갔다 돌아왔을 뿐인데
+     * 읽던 자리가 사라지면 곤란하기 때문입니다.
+     */
+    private val _shuffleSeed = MutableStateFlow(newShuffleSeed())
+    val shuffleSeed: StateFlow<Long> = _shuffleSeed.asStateFlow()
+
+    /** 앱이 화면에서 물러난 시각. 아직 한 번도 물러난 적이 없으면 0입니다. */
+    private var leftAtMillis = 0L
+
     private val routineDayRange = MutableStateFlow(container.repository.todayRangeMillis())
     val routineTodayCounts = combine(routineChecks, routineDayRange) { checks, range ->
         val (start, end) = range
@@ -237,6 +251,33 @@ class MainViewModel(
 
     fun refreshRoutineToday() {
         routineDayRange.value = container.repository.todayRangeMillis()
+    }
+
+    /** 지금 바로 다시 섞습니다. 홈의 섞기 버튼이 씁니다. */
+    fun reshuffleContent() {
+        _shuffleSeed.value = newShuffleSeed()
+    }
+
+    fun onAppBackgrounded() {
+        leftAtMillis = SystemClock.elapsedRealtime()
+    }
+
+    /**
+     * 앱이 화면 앞으로 돌아왔습니다. 오래 비웠으면 "다시 켠 것"으로 보고 새로 섞습니다.
+     *
+     * 화면을 돌릴 때도 여기를 지나지만, 나갔다 온 시간이 0에 가까워 섞이지 않습니다.
+     */
+    fun onAppForegrounded() {
+        val awayMillis = SystemClock.elapsedRealtime() - leftAtMillis
+        if (leftAtMillis != 0L && awayMillis >= RESHUFFLE_AFTER_MS) {
+            reshuffleContent()
+        }
+        leftAtMillis = 0L
+    }
+
+    /** 0은 "섞지 않음"이라 씨앗으로 쓰지 않습니다([ContentShuffle]). */
+    private fun newShuffleSeed(): Long {
+        return generateSequence { Random.nextLong() }.first { it != 0L }
     }
 
     fun refreshFeatured() {
@@ -633,4 +674,14 @@ class MainViewModel(
     }
 
     private suspend fun currentSnapshot(): AppDataSnapshot = container.syncCoordinator.currentSnapshot()
+
+    private companion object {
+        /**
+         * 이만큼 넘게 앱을 떠나 있었으면 다시 켠 것으로 봅니다.
+         *
+         * 짧게 잡으면 링크를 열어 보고 돌아올 때마다 읽던 자리가 사라지고,
+         * 길게 잡으면 아침에 열어도 어제와 같은 차례가 나옵니다.
+         */
+        const val RESHUFFLE_AFTER_MS = 10 * 60 * 1000L
+    }
 }

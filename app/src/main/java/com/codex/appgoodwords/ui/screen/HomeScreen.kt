@@ -49,7 +49,6 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,11 +68,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ComboLevel
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.ContentShuffle
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ReadingCombo
 import com.codex.appgoodwords.data.ReminderSettings
-import kotlin.random.Random
 import kotlinx.coroutines.delay
 
 private enum class HomeReadTab(
@@ -107,10 +106,16 @@ fun HomeScreen(
     /** 오늘의 세 걸음. null이면 카드를 두지 않습니다. */
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
-    onOpenStep: (DailyStep) -> Unit = {}
+    onOpenStep: (DailyStep) -> Unit = {},
+    /**
+     * 목록을 섞는 씨앗. 앱을 켤 때마다 달라집니다([ContentShuffle]).
+     * 0이면 담은 차례 그대로입니다.
+     */
+    shuffleSeed: Long = 0L,
+    /** 지금 바로 다시 섞습니다. */
+    onShuffle: () -> Unit = {}
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeReadTab.UNREAD.name) }
-    var shuffleSeed by rememberSaveable { mutableLongStateOf(0L) }
     var comboFeedback by remember { mutableStateOf<ComboFeedback?>(null) }
 
     val currentTab = HomeReadTab.valueOf(selectedTab)
@@ -124,7 +129,7 @@ fun HomeScreen(
             HomeReadTab.UNREAD -> todayItems.filterNot { it.id in confirmedTodayIds }
             HomeReadTab.READ -> todayItems.filter { it.id in confirmedTodayIds }
         }
-        if (shuffleSeed == 0L) baseItems else baseItems.shuffled(Random(shuffleSeed))
+        ContentShuffle.ordered(baseItems, shuffleSeed)
     }
     val haptic = LocalHapticFeedback.current
     val view = LocalView.current
@@ -169,9 +174,7 @@ fun HomeScreen(
                     totalCount = todayItems.size,
                     unreadCount = unreadCount,
                     readCount = readCount,
-                    onShuffle = {
-                        shuffleSeed = SystemClock.elapsedRealtimeNanos()
-                    }
+                    onShuffle = onShuffle
                 )
             }
 
@@ -405,7 +408,8 @@ private fun HomeHeroCard(
                         imageVector = Icons.Outlined.Refresh,
                         contentDescription = null
                     )
-                    Text("오늘의 글귀 보기")
+                    // 켤 때마다 저절로 섞이므로, 이 버튼은 "지금 한 번 더"입니다.
+                    Text("다시 섞기")
                 }
             }
         }

@@ -145,6 +145,7 @@ fun AppGoodWordsApp(
     val diaries by viewModel.diaries.collectAsStateWithLifecycle()
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val books by viewModel.books.collectAsStateWithLifecycle()
+    val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
 
     // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
     val context = LocalContext.current
@@ -411,6 +412,8 @@ fun AppGoodWordsApp(
                             settings = settings,
                             confirmedTodayIds = confirmedTodayIds,
                             dailyLoop = dailyLoop,
+                            shuffleSeed = shuffleSeed,
+                            onShuffle = { viewModel.reshuffleContent() },
                             // 글귀는 이 화면에 이미 있어서 옮기지 않습니다. 나머지 둘만 데려다줍니다.
                             onOpenStep = { step ->
                                 when (step) {

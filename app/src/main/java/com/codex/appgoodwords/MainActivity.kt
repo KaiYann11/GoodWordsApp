@@ -41,10 +41,22 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        // 오래 비웠다 돌아오면 글귀를 새로 섞습니다. 화면을 돌린 것과 가르려고 onResume이 아니라
+        // onStart에서 봅니다. 잠깐 뜨는 권한 창은 onStop까지 가지 않습니다.
+        viewModel.onAppForegrounded()
+    }
+
     override fun onResume() {
         super.onResume()
         viewModel.refreshConfirmedToday()
         viewModel.refreshRoutineToday()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.onAppBackgrounded()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
