@@ -263,6 +263,8 @@ class AppDataJsonTest {
                 title = "아침 스트레칭",
                 note = "10분",
                 category = "건강",
+                // 기본값을 쓰면 차례가 빠져도 왕복 시험이 통과해 버린다.
+                orderIndex = 2,
                 reminderEnabled = false,
                 createdAt = 1_700_000_700_000L
             )

@@ -36,7 +36,7 @@ data class AppDataSnapshot(
 )
 
 object AppDataJson {
-    const val schemaVersion: Int = 13
+    const val schemaVersion: Int = 14
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -350,6 +350,7 @@ object AppDataJson {
         .put("title", title)
         .put("note", note)
         .put("category", category)
+        .put("orderIndex", orderIndex)
         .put("reminderEnabled", reminderEnabled)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
@@ -466,6 +467,8 @@ object AppDataJson {
                         title = routine.optString("title"),
                         note = routine.optString("note"),
                         category = routine.optString("category"),
+                        // 순서를 모르던 시절의 백업에는 없다. 0으로 두면 만든 순서대로 줄을 선다.
+                        orderIndex = routine.optInt("orderIndex", 0).coerceAtLeast(0),
                         reminderEnabled = routine.optBoolean("reminderEnabled", true),
                         createdAt = routine.optLong("createdAt", System.currentTimeMillis())
                     )

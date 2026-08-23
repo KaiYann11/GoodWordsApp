@@ -327,6 +327,7 @@ GET  /api/routines
 POST /api/routines
 PUT  /api/routines/{id}
 POST /api/routines/{id}/check
+POST /api/routines/{id}/move
 POST /api/routines/{id}/memos
 GET  /api/diaries
 POST /api/diaries
@@ -345,6 +346,29 @@ POST /api/books/{id}/quotes
 GET  /api/events
 DELETE /api/events?ids=1,2,3
 ```
+
+### 루틴에는 하루에 밟는 차례가 있습니다
+
+루틴은 할 일과 달리 순서가 있습니다(일어나서 물 → 스트레칭 → 책 한 쪽). 그 차례는 `orderIndex`에
+담고, 작을수록 먼저입니다. 새로 만든 루틴은 맨 뒤에 붙고, 이름을 고쳐도 차례는 그대로입니다.
+
+`POST /api/routines/{id}/move`로 옮깁니다.
+
+```text
+{"direction":"up"}      한 칸 앞으로
+{"direction":"down"}    한 칸 뒤로
+{"direction":"top"}     맨 위로
+{"direction":"bottom"}  맨 아래로
+{"position":3}          세 번째 자리로 (화면에 적힌 번호 그대로, 1부터)
+```
+
+`position`을 주면 `direction`은 보지 않습니다. 줄 밖을 가리키면 맨 위·맨 아래로 당겨 붙이므로,
+개수를 세지 않고도 큰 수 하나로 "맨 아래"를 부를 수 있습니다.
+
+늘어놓는 규칙과 옮기는 규칙은 앱 `RoutineOrder`, 서버 `sortedRoutines`·`moveRoutineTo`,
+웹 `sortedRoutines` 세 곳이 같아야 합니다. 한쪽만 다르게 옮기면 두 기기가 병합할 때마다 서로의
+차례를 고쳐 끝나지 않습니다. 옮긴 뒤에는 0부터 빈틈없이 번호를 다시 매기되, 차례가 실제로 달라진
+루틴만 손댑니다. 안 바뀐 것까지 `updatedAt`을 올리면 증분 동기화가 매번 루틴 전부를 실어 나릅니다.
 
 ### 웹에서 고치고 지우는 것도 병합에 참여합니다
 

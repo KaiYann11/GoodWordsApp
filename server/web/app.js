@@ -187,6 +187,12 @@ app.addEventListener("click", async (event) => {
       const result = await api(`/api/routines/${id}/check`, { method: "POST" });
       showToast(`오늘 ${result.todayCount}회`);
       await loadSnapshot(false);
+    } else if (action.startsWith("move-routine-")) {
+      await api(`/api/routines/${id}/move`, {
+        method: "POST",
+        body: { direction: action.slice("move-routine-".length) },
+      });
+      await loadSnapshot(false);
     } else if (action === "delete-memo") {
       await api(`/api/routine-memos/${id}`, { method: "DELETE" });
       await loadSnapshot(false);
@@ -541,6 +547,8 @@ function renderRoutines() {
   const editing = findById(state.snapshot.routines, state.editingRoutineId) || {};
   const checksByRoutine = groupBy(state.snapshot.routineChecks, "routineId");
   const memosByRoutine = groupBy(state.snapshot.routineMemos, "routineId");
+  // 루틴은 하루에 밟는 차례가 있습니다. 앱과 같은 줄로 보여야 해서 여기서도 같은 규칙으로 세웁니다.
+  const routines = sortedRoutines(state.snapshot.routines);
   app.innerHTML = `
     <section class="grid two">
       <form class="panel" data-form="routine">
@@ -572,10 +580,14 @@ function renderRoutines() {
         </div>
       </form>
       <section>
-        <h2 class="sectionTitle">루틴 ${state.snapshot.routines.length}개</h2>
+        <h2 class="sectionTitle">루틴 ${routines.length}개</h2>
         <div class="itemList">
-          ${state.snapshot.routines.length
-            ? state.snapshot.routines.map((routine) => routineCard(routine, checksByRoutine, memosByRoutine)).join("")
+          ${routines.length
+            ? routines
+                .map((routine, index) =>
+                  routineCard(routine, checksByRoutine, memosByRoutine, index, routines.length),
+                )
+                .join("")
             : empty("저장된 루틴이 없습니다.")}
         </div>
       </section>
@@ -1259,7 +1271,7 @@ function contentCard(item) {
   `;
 }
 
-function routineCard(routine, checksByRoutine, memosByRoutine) {
+function routineCard(routine, checksByRoutine, memosByRoutine, index, total) {
   const checks = checksByRoutine.get(routine.id) || [];
   const memos = memosByRoutine.get(routine.id) || [];
   const todayCount = checks.filter((check) => isToday(check.checkedAt)).length;
@@ -1267,14 +1279,24 @@ function routineCard(routine, checksByRoutine, memosByRoutine) {
     <article class="item">
       <div class="itemHeader">
         <div>
-          <h3>${escapeHtml(routine.title)}</h3>
+          <h3>${index + 1}. ${escapeHtml(routine.title)}</h3>
           <div class="meta">
             ${routine.category ? `<span class="chip">${escapeHtml(routine.category)}</span>` : ""}
             <span class="chip">오늘 ${todayCount}회</span>
             <span class="chip">전체 ${checks.length}회</span>
           </div>
         </div>
-        <button type="button" data-action="check-routine" data-id="${routine.id}">체크</button>
+        <div class="actions">
+          <button type="button" data-action="move-routine-top" data-id="${routine.id}"
+            title="맨 위로" ${index === 0 ? "disabled" : ""}>⤒</button>
+          <button type="button" data-action="move-routine-up" data-id="${routine.id}"
+            title="앞으로" ${index === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" data-action="move-routine-down" data-id="${routine.id}"
+            title="뒤로" ${index === total - 1 ? "disabled" : ""}>↓</button>
+          <button type="button" data-action="move-routine-bottom" data-id="${routine.id}"
+            title="맨 아래로" ${index === total - 1 ? "disabled" : ""}>⤓</button>
+          <button type="button" data-action="check-routine" data-id="${routine.id}">체크</button>
+        </div>
       </div>
       ${routine.note ? `<p>${escapeHtml(routine.note)}</p>` : ""}
       <form class="formGrid" data-form="memo">
@@ -1376,6 +1398,28 @@ function filteredItems() {
 function categoryOptions() {
   return [...new Set(state.snapshot.items.map((item) => item.category).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b),
+  );
+}
+
+/**
+ * 루틴을 하루에 밟는 차례대로 늘어놓습니다.
+ *
+ * 서버 `sortedRoutines`·앱 `RoutineOrder.sorted`와 같은 줄이어야 합니다.
+ * 번호가 겹치면(두 기기에서 각각 만든 루틴이 만난 경우) 만든 지 오래된 쪽이 앞입니다.
+ */
+function sortedRoutines(routines) {
+  // syncId는 글자 코드 그대로 견줍니다. 지역 규칙(localeCompare)을 쓰면 앞의 두 곳과 줄이 어긋납니다.
+  const compareText = (a, b) => {
+    const left = String(a || "");
+    const right = String(b || "");
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  };
+  return [...(routines || [])].sort(
+    (a, b) =>
+      (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0) ||
+      (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) ||
+      compareText(a.syncId, b.syncId),
   );
 }
 

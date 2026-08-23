@@ -241,10 +241,41 @@ class AppRepository(
                 title = draft.title.trim(),
                 note = draft.note.trim(),
                 category = draft.category.trim(),
+                // 새 루틴은 맨 뒤에 붙는다. 이름을 고칠 때 차례가 움직이면 하루 흐름이 흐트러진다.
+                orderIndex = existing?.orderIndex ?: RoutineOrder.nextIndex(routineDao.maxOrderIndex()),
                 reminderEnabled = draft.reminderEnabled,
                 createdAt = existing?.createdAt ?: System.currentTimeMillis()
             )
         )
+    }
+
+    /** 루틴을 한 칸 위/아래로 옮깁니다. 옮길 곳이 없으면 아무것도 하지 않고 false. */
+    suspend fun moveRoutine(routineId: Long, up: Boolean): Boolean {
+        return applyRoutineOrder { routines -> RoutineOrder.moved(routines, routineId, up) }
+    }
+
+    /**
+     * 루틴을 [targetIndex] 자리로 한 번에 옮깁니다. 자리는 0부터 셉니다.
+     *
+     * 서른 개가 넘어가면 한 칸씩 올려서는 맨 위까지 가기 어렵습니다.
+     */
+    suspend fun moveRoutineTo(routineId: Long, targetIndex: Int): Boolean {
+        return applyRoutineOrder { routines -> RoutineOrder.movedTo(routines, routineId, targetIndex) }
+    }
+
+    /**
+     * 차례가 실제로 달라진 루틴만 저장합니다. 안 바뀐 것까지 `updatedAt`을 올리면
+     * 서버가 새 리비전을 붙여 증분 동기화가 매번 루틴 전부를 실어 나릅니다.
+     */
+    private suspend fun applyRoutineOrder(
+        compute: (List<RoutineEntity>) -> List<RoutineEntity>
+    ): Boolean {
+        return database.withTransaction {
+            val changed = compute(routineDao.getAll())
+            val now = System.currentTimeMillis()
+            changed.forEach { routine -> routineDao.updateOrder(routine.id, routine.orderIndex, now) }
+            changed.isNotEmpty()
+        }
     }
 
     suspend fun deleteRoutine(id: Long) {

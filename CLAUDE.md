@@ -36,7 +36,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 13입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 14입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -65,6 +65,14 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 **웹에서 저장·삭제할 때는 `updatedAt`을 올리고 삭제 표식을 남깁니다.** 둘 중 하나라도 빠지면
 기기가 다음 병합에서 옛 사본을 다시 올려 주어 웹에서 한 일이 조용히 되돌아갑니다.
 서버의 `deleteWithTombstone()`을 쓰고, `save*()`에서 `updatedAt: nowMs()`를 넣습니다.
+
+**루틴을 늘어놓고 옮기는 규칙은 세 곳이 같아야 합니다.** 루틴에는 하루에 밟는 차례(`orderIndex`)가
+있습니다. 앱 `RoutineOrder`(`sorted`·`movedTo`·`moved`) · 서버 `sortedRoutines`·`moveRoutineTo`·
+`moveRoutine` · 웹 `server/web/app.js`의 `sortedRoutines`. 번호가 겹치면 만든 지 오래된 쪽이 앞이고,
+옮긴 뒤에는 0부터 빈틈없이 다시 매깁니다. 자리는 앱·서버 안에서 0부터 세고, 화면과 REST의
+`position`만 1부터입니다. 줄 밖을 가리키면 맨 위/맨 아래로 당겨 붙입니다. 한쪽만 다르게 옮기면 두 기기가 병합할 때마다 서로의 차례를 고쳐
+끝나지 않습니다. **차례가 실제로 달라진 루틴만 저장합니다.** 안 바뀐 것까지 `updatedAt`을 올리면
+서버가 새 리비전을 붙여 증분 동기화가 매번 루틴 전부를 실어 나릅니다.
 
 **`SyncDeduplicator`(앱)와 서버 `deduplicate()`는 규칙이 같아야 합니다.** 판정 기준과 승자 선택
 (최신 `updatedAt`, 같으면 큰 `syncId`)이 어긋나면 두 기기가 병합할 때마다 서로를 고쳐 끝나지 않습니다.

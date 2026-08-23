@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 13;
+const schemaVersion = 14;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -215,7 +215,7 @@ async function route(request, response) {
     return;
   }
   if (method === "GET" && url.pathname === "/api/routines") {
-    sendJson(response, 200, { routines: sortDesc((await loadDb()).routines, "createdAt") });
+    sendJson(response, 200, { routines: sortedRoutines((await loadDb()).routines) });
     return;
   }
   if (method === "POST" && url.pathname === "/api/routines") {
@@ -429,6 +429,28 @@ async function routeRoutineMember(method, parts, request, response) {
       return { check, todayCount };
     });
     sendJson(response, 201, result);
+    return;
+  }
+  if (method === "POST" && action === "move") {
+    const payload = await readJson(request);
+    // position은 사람이 보는 1부터의 자리입니다. 화면에 적힌 번호를 그대로 보낼 수 있게요.
+    const position = payload.position === undefined || payload.position === null ? null : integer(payload.position, NaN);
+    if (position !== null) {
+      if (!Number.isFinite(position) || position < 1) {
+        sendJson(response, 400, { error: "position은 1 이상의 자리여야 합니다." });
+        return;
+      }
+      const result = await withDb((db) => moveRoutineTo(db, routineId, position - 1));
+      sendJson(response, 200, result);
+      return;
+    }
+    const direction = text(payload.direction);
+    if (!["up", "down", "top", "bottom"].includes(direction)) {
+      sendJson(response, 400, { error: "direction은 up, down, top, bottom 중 하나여야 합니다." });
+      return;
+    }
+    const result = await withDb((db) => moveRoutine(db, routineId, direction));
+    sendJson(response, 200, result);
     return;
   }
   if (method === "POST" && action === "memos") {
@@ -869,7 +891,8 @@ function snapshot(db, since = 0, epoch = null) {
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
     exposureEvents: only(sortDesc(normalized.exposureEvents, "occurredAt")),
-    routines: only(sortDesc(normalized.routines, "createdAt")),
+    // 루틴만 오름차순입니다. 하루에 밟는 차례가 곧 목록의 줄이라 뒤집으면 뜻이 달라집니다.
+    routines: only(sortedRoutines(normalized.routines)),
     routineChecks: only(sortDesc(normalized.routineChecks, "checkedAt")),
     routineMemos: only(sortDesc(normalized.routineMemos, "createdAt")),
     deletions: only(sortDesc(normalized.deletions, "deletedAt")),
@@ -1284,11 +1307,85 @@ function saveRoutine(db, payload, routineId = null) {
     ...payload,
     id: routineId || payload.id || nextId(db.routines),
     updatedAt: nowMs(),
+    // 새 루틴은 하루의 맨 뒤에 붙습니다. 이름을 고칠 때 차례가 움직이면 하루 흐름이 흐트러집니다.
+    orderIndex: payload.orderIndex ?? existing?.orderIndex ?? nextOrderIndex(db.routines),
     createdAt: payload.createdAt || existing?.createdAt || nowMs(),
   });
   if (!normalized.title) throw new HttpError(400, "루틴 이름을 입력해 주세요.");
   upsert(db.routines, normalized);
   return normalized;
+}
+
+/** 새 루틴이 받을 차례. 앱 `RoutineOrder.nextIndex`와 같은 규칙입니다. */
+function nextOrderIndex(routines) {
+  return routines.reduce((max, routine) => Math.max(max, positiveInt(routine.orderIndex)), -1) + 1;
+}
+
+/**
+ * 하루에 밟는 차례대로 늘어놓습니다. 앱 `RoutineOrder.sorted`와 같은 줄이어야 합니다.
+ *
+ * 번호가 겹치면(두 기기에서 각각 만든 루틴이 만난 경우) 만든 지 오래된 쪽이 앞입니다.
+ * 그래야 어느 기기에서나 같은 줄로 보입니다.
+ */
+function sortedRoutines(routines) {
+  return [...routines].sort(
+    (a, b) =>
+      positiveInt(a.orderIndex) - positiveInt(b.orderIndex) ||
+      integer(a.createdAt, 0) - integer(b.createdAt, 0) ||
+      compareText(a.syncId, b.syncId),
+  );
+}
+
+function compareText(a, b) {
+  const left = String(a || "");
+  const right = String(b || "");
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+/**
+ * 루틴을 `targetIndex` 자리(0부터)로 옮깁니다. 앱 `RoutineOrder.movedTo`와 같은 규칙입니다.
+ *
+ * 차례가 실제로 달라진 루틴만 손댑니다. 안 바뀐 것까지 `updatedAt`을 올리면 서버가 새 리비전을
+ * 붙여, 증분 동기화가 바뀐 것 없이도 매번 루틴 전부를 실어 나릅니다.
+ * 옮긴 뒤에는 0부터 빈틈없이 번호를 다시 매겨, 겹치거나 비어 있던 번호가 저절로 반듯해집니다.
+ * 줄 밖을 가리키면 맨 위·맨 아래로 당겨 붙입니다.
+ */
+function moveRoutineTo(db, routineId, targetIndex) {
+  const ordered = sortedRoutines(db.routines);
+  const from = ordered.findIndex((routine) => routine.id === routineId);
+  if (from < 0) throw new HttpError(404, "루틴을 찾을 수 없습니다.");
+  const to = Math.min(Math.max(targetIndex, 0), ordered.length - 1);
+  if (to === from) return { moved: false, routines: ordered };
+
+  const moved = [...ordered];
+  moved.splice(to, 0, moved.splice(from, 1)[0]);
+  const now = nowMs();
+  let changed = 0;
+  moved.forEach((routine, index) => {
+    if (positiveInt(routine.orderIndex) === index) return;
+    upsert(db.routines, { ...routine, orderIndex: index, updatedAt: now });
+    changed += 1;
+  });
+  return { moved: changed > 0, routines: sortedRoutines(db.routines) };
+}
+
+/**
+ * `direction`이 가리키는 자리를 셈합니다. 앱 `RoutineOrder.moved`와 같은 규칙입니다.
+ *
+ * up·down은 한 칸, top·bottom은 줄 끝입니다. 한 칸씩만 있으면 서른 번째 루틴을 맨 위로
+ * 올리는 데 스물아홉 번을 불러야 합니다.
+ */
+function moveRoutine(db, routineId, direction) {
+  const from = sortedRoutines(db.routines).findIndex((routine) => routine.id === routineId);
+  if (from < 0) throw new HttpError(404, "루틴을 찾을 수 없습니다.");
+  const target = {
+    up: from - 1,
+    down: from + 1,
+    top: 0,
+    bottom: db.routines.length - 1,
+  }[direction];
+  return moveRoutineTo(db, routineId, target);
 }
 
 /**
@@ -1575,6 +1672,8 @@ function normalizeRoutine(routine) {
     title: text(routine.title),
     note: text(routine.note),
     category: text(routine.category),
+    // 하루에 밟는 차례. 작을수록 먼저다. 순서를 모르던 시절의 기기는 보내지 않으므로 0이 된다.
+    orderIndex: positiveInt(routine.orderIndex),
     reminderEnabled: routine.reminderEnabled !== false,
     createdAt: integer(routine.createdAt, nowMs()),
   };

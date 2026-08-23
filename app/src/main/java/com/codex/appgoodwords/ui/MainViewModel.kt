@@ -482,6 +482,16 @@ class MainViewModel(
         container.repository.deleteRoutine(routineId)
     }
 
+    /** 루틴을 한 칸 위/아래로 옮깁니다. 이미 끝이라 옮기지 못했으면 false. */
+    suspend fun moveRoutine(routineId: Long, up: Boolean): Result<Boolean> = runCatching {
+        container.repository.moveRoutine(routineId, up)
+    }
+
+    /** 루틴을 [targetIndex](0부터) 자리로 한 번에 옮깁니다. */
+    suspend fun moveRoutineTo(routineId: Long, targetIndex: Int): Result<Boolean> = runCatching {
+        container.repository.moveRoutineTo(routineId, targetIndex)
+    }
+
     suspend fun checkRoutine(routineId: Long): Result<Int> = runCatching {
         container.repository.markRoutineDone(routineId)
     }

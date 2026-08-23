@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TodoEntity::class,
         BookEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -348,6 +348,20 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE diaries ADD COLUMN kind TEXT NOT NULL DEFAULT 'FREE'")
                 database.execSQL("ALTER TABLE diaries ADD COLUMN answers TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE routines ADD COLUMN orderIndex INTEGER NOT NULL DEFAULT 0")
+                // 전부 0으로 두면 차례가 뒤죽박죽으로 보인다. 지금까지 보이던 줄(새 루틴이 위)을
+                // 그대로 번호로 굳혀서, 사용자가 앱을 열었을 때 어제와 같은 순서를 본다.
+                database.execSQL(
+                    "UPDATE routines SET orderIndex = (" +
+                        "SELECT COUNT(*) FROM routines AS newer " +
+                        "WHERE newer.createdAt > routines.createdAt " +
+                        "OR (newer.createdAt = routines.createdAt AND newer.id > routines.id))"
+                )
             }
         }
     }

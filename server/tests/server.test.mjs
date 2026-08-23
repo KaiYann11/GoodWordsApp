@@ -516,6 +516,182 @@ describe("루틴 API", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
   }
 
+  async function createRoutine(title) {
+    return (await api("/api/routines", { method: "POST", body: { title } })).json();
+  }
+
+  function titlesOf(routines) {
+    return routines.map((routine) => routine.title);
+  }
+
+  it("새 루틴은 하루의 맨 뒤에 붙는다", async () => {
+    await resetServer();
+    await createRoutine("기상 후 물 한 컵");
+    await createRoutine("스트레칭");
+    await createRoutine("책 한 쪽");
+
+    const listed = await (await api("/api/routines")).json();
+
+    assert.deepEqual(titlesOf(listed.routines), ["기상 후 물 한 컵", "스트레칭", "책 한 쪽"]);
+    assert.deepEqual(listed.routines.map((routine) => routine.orderIndex), [0, 1, 2]);
+  });
+
+  it("한 칸 위로 옮기면 앞 루틴과 자리를 바꾼다", async () => {
+    await resetServer();
+    await createRoutine("가");
+    await createRoutine("나");
+    const third = await createRoutine("다");
+
+    const moved = await (
+      await api(`/api/routines/${third.id}/move`, { method: "POST", body: { direction: "up" } })
+    ).json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(moved.moved, true);
+    assert.deepEqual(titlesOf(moved.routines), ["가", "다", "나"]);
+    // 스냅샷도 같은 줄이어야 기기가 같은 차례를 받는다.
+    assert.deepEqual(titlesOf(stored.routines), ["가", "다", "나"]);
+    assert.deepEqual(stored.routines.map((routine) => routine.orderIndex), [0, 1, 2]);
+  });
+
+  it("맨 위에서 더 올려도 줄이 흐트러지지 않는다", async () => {
+    await resetServer();
+    const first = await createRoutine("가");
+    await createRoutine("나");
+
+    const response = await api(`/api/routines/${first.id}/move`, {
+      method: "POST",
+      body: { direction: "up" },
+    });
+    const moved = await response.json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(response.status, 200);
+    assert.equal(moved.moved, false);
+    assert.deepEqual(titlesOf(stored.routines), ["가", "나"]);
+  });
+
+  it("차례가 그대로인 루틴은 새 리비전을 받지 않는다", async () => {
+    // 안 바뀐 것까지 번호가 오르면 증분 동기화가 매번 루틴 전부를 실어 나른다.
+    await resetServer();
+    await createRoutine("가");
+    await createRoutine("나");
+    await createRoutine("다");
+    const fourth = await createRoutine("라");
+    const before = await (await api("/api/snapshot")).json();
+    const revOf = (snapshot, title) => snapshot.routines.find((routine) => routine.title === title).rev;
+
+    await api(`/api/routines/${fourth.id}/move`, { method: "POST", body: { direction: "up" } });
+    const after = await (await api("/api/snapshot")).json();
+
+    assert.equal(revOf(after, "가"), revOf(before, "가"));
+    assert.equal(revOf(after, "나"), revOf(before, "나"));
+    assert.ok(revOf(after, "다") > revOf(before, "다"));
+    assert.ok(revOf(after, "라") > revOf(before, "라"));
+  });
+
+  it("루틴 이름을 고쳐도 차례는 그대로다", async () => {
+    await resetServer();
+    await createRoutine("가");
+    const second = await createRoutine("나");
+
+    await api(`/api/routines/${second.id}`, { method: "PUT", body: { title: "나(고침)" } });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.deepEqual(titlesOf(stored.routines), ["가", "나(고침)"]);
+    assert.equal(stored.routines[1].orderIndex, 1);
+  });
+
+  it("맨 위로는 한 번에 첫 자리로 올린다", async () => {
+    // 한 칸씩만 되면 서른 번째 루틴을 맨 위로 올리는 데 스물아홉 번을 불러야 한다.
+    await resetServer();
+    await createRoutine("가");
+    await createRoutine("나");
+    await createRoutine("다");
+    const fourth = await createRoutine("라");
+
+    const moved = await (
+      await api(`/api/routines/${fourth.id}/move`, { method: "POST", body: { direction: "top" } })
+    ).json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(moved.moved, true);
+    assert.deepEqual(titlesOf(stored.routines), ["라", "가", "나", "다"]);
+    assert.deepEqual(stored.routines.map((routine) => routine.orderIndex), [0, 1, 2, 3]);
+  });
+
+  it("맨 아래로는 한 번에 끝자리로 내린다", async () => {
+    await resetServer();
+    const first = await createRoutine("가");
+    await createRoutine("나");
+    await createRoutine("다");
+
+    await api(`/api/routines/${first.id}/move`, { method: "POST", body: { direction: "bottom" } });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.deepEqual(titlesOf(stored.routines), ["나", "다", "가"]);
+  });
+
+  it("position으로 화면에 적힌 자리를 그대로 부를 수 있다", async () => {
+    await resetServer();
+    await createRoutine("가");
+    await createRoutine("나");
+    await createRoutine("다");
+    const fourth = await createRoutine("라");
+
+    // 1부터 세는 자리다. 2를 부르면 두 번째가 된다.
+    await api(`/api/routines/${fourth.id}/move`, { method: "POST", body: { position: 2 } });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.deepEqual(titlesOf(stored.routines), ["가", "라", "나", "다"]);
+  });
+
+  it("줄 밖의 자리는 끝으로 당겨 붙인다", async () => {
+    await resetServer();
+    const first = await createRoutine("가");
+    await createRoutine("나");
+
+    await api(`/api/routines/${first.id}/move`, { method: "POST", body: { position: 999 } });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.deepEqual(titlesOf(stored.routines), ["나", "가"]);
+  });
+
+  it("맨 위 루틴을 맨 위로 올려도 리비전이 오르지 않는다", async () => {
+    await resetServer();
+    const first = await createRoutine("가");
+    await createRoutine("나");
+    const before = await (await api("/api/snapshot")).json();
+
+    const moved = await (
+      await api(`/api/routines/${first.id}/move`, { method: "POST", body: { direction: "top" } })
+    ).json();
+    const after = await (await api("/api/snapshot")).json();
+
+    assert.equal(moved.moved, false);
+    assert.deepEqual(
+      after.routines.map((routine) => routine.rev),
+      before.routines.map((routine) => routine.rev),
+    );
+  });
+
+  it("direction이 없거나 모르는 값이면 옮기지 않는다", async () => {
+    await resetServer();
+    const routine = await createRoutine("가");
+
+    const missing = await api(`/api/routines/${routine.id}/move`, { method: "POST", body: {} });
+    const unknown = await api(`/api/routines/${routine.id}/move`, {
+      method: "POST",
+      body: { direction: "sideways" },
+    });
+    const zero = await api(`/api/routines/${routine.id}/move`, { method: "POST", body: { position: 0 } });
+
+    assert.equal(missing.status, 400);
+    assert.equal(unknown.status, 400);
+    // 자리는 1부터 센다. 0을 조용히 첫 자리로 받아 주면 앱과 셈이 어긋난다.
+    assert.equal(zero.status, 400);
+  });
+
   it("메모를 저장하면 수행도 한 번 기록한다", async () => {
     await resetServer();
     const routine = await (

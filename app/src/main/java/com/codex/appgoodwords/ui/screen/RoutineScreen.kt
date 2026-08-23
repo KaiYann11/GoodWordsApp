@@ -12,14 +12,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -29,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,18 +46,26 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineMemoEntity
+import com.codex.appgoodwords.data.RoutineOrder
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+/** 차례 옮기기 대화상자에서 [step]번째 자리를 가리키는 줄. 카드에도 같은 이름이 있어 태그로 짚습니다. */
+internal fun routineMoveTargetTag(step: Int): String = "routine_move_target_$step"
 
 @Composable
 fun RoutineScreen(
@@ -63,6 +77,10 @@ fun RoutineScreen(
     onSaveMemo: (RoutineEntity, String) -> Unit,
     onDeleteMemo: (RoutineMemoEntity) -> Unit,
     onCheckRoutine: (RoutineEntity) -> Unit,
+    /** 루틴을 한 칸 위(up=true)나 아래로 옮깁니다. */
+    onMoveRoutine: (RoutineEntity, Boolean) -> Unit,
+    /** 루틴을 그 자리(0부터)로 한 번에 옮깁니다. */
+    onMoveRoutineTo: (RoutineEntity, Int) -> Unit,
     modifier: Modifier = Modifier,
     /** 검색에서 고른 루틴. 그 자리로 굴려 주고 잠깐 강조합니다. */
     focusId: Long? = null
@@ -70,14 +88,17 @@ fun RoutineScreen(
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDeleteRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var memoRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var movingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     val editingRoutine = routines.firstOrNull { it.id == editingRoutineId }
     val deletingRoutine = routines.firstOrNull { it.id == showDeleteRoutineId }
     val memoRoutine = routines.firstOrNull { it.id == memoRoutineId }
+    val movingRoutine = routines.firstOrNull { it.id == movingRoutineId }
     val memosByRoutine = memos.groupBy { it.routineId }
-    val sortedRoutines = routines.sortedWith(
-        compareBy<RoutineEntity> { (todayCounts[it.id] ?: 0) > 0 }
-            .thenByDescending { it.createdAt }
-    )
+    // 하루를 밟는 차례입니다. 수행한 것을 아래로 내리지 않습니다. 자리가 움직이면 어디까지 했는지
+    // 눈으로 짚기 어렵고, 사용자가 정한 순서라는 약속도 깨집니다.
+    val sortedRoutines = RoutineOrder.sorted(routines)
+    // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다.
+    val nextRoutineId = sortedRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }?.id
 
     if (editingRoutineId != null) {
         RoutineEditorDialog(
@@ -109,6 +130,18 @@ fun RoutineScreen(
                 TextButton(onClick = { showDeleteRoutineId = null }) {
                     Text("취소")
                 }
+            }
+        )
+    }
+
+    if (movingRoutine != null) {
+        RoutineMoveDialog(
+            routine = movingRoutine,
+            ordered = sortedRoutines,
+            onDismiss = { movingRoutineId = null },
+            onMoveTo = { targetIndex ->
+                onMoveRoutineTo(movingRoutine, targetIndex)
+                movingRoutineId = null
             }
         )
     }
@@ -161,7 +194,8 @@ fun RoutineScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            text = "반복해서 수행할 일을 추가하면 오늘 수행 횟수를 누적할 수 있습니다.",
+                            text = "반복해서 수행할 일을 추가하면 오늘 수행 횟수를 누적할 수 있습니다. " +
+                                "추가한 순서대로 위에서 아래로 밟고, 화살표로 차례를 바꿀 수 있습니다.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -169,9 +203,13 @@ fun RoutineScreen(
                 }
             }
         } else {
-            items(sortedRoutines, key = { it.id }) { routine ->
+            itemsIndexed(sortedRoutines, key = { _, routine -> routine.id }) { index, routine ->
                 RoutineCard(
                     routine = routine,
+                    step = index + 1,
+                    isNext = routine.id == nextRoutineId,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < sortedRoutines.lastIndex,
                     focused = routine.id == focusId,
                     focusKey = focusId,
                     todayCount = todayCounts[routine.id] ?: 0,
@@ -179,6 +217,8 @@ fun RoutineScreen(
                     latestMemo = memosByRoutine[routine.id]?.maxByOrNull { it.createdAt },
                     onOpenMemos = { memoRoutineId = routine.id },
                     onCheckRoutine = onCheckRoutine,
+                    onMoveRoutine = onMoveRoutine,
+                    onOpenMove = { movingRoutineId = routine.id },
                     onEditRoutine = { editingRoutineId = routine.id },
                     onDeleteRoutine = { showDeleteRoutineId = routine.id }
                 )
@@ -429,11 +469,20 @@ private fun RoutineSelectedDayHistory(
 @Composable
 private fun RoutineCard(
     routine: RoutineEntity,
+    /** 화면에 보이는 차례. 1부터 셉니다. */
+    step: Int,
+    /** 오늘 아직 하지 않은 것 중 맨 위인지. */
+    isNext: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     todayCount: Int,
     memoCount: Int,
     latestMemo: RoutineMemoEntity?,
     onOpenMemos: () -> Unit,
     onCheckRoutine: (RoutineEntity) -> Unit,
+    onMoveRoutine: (RoutineEntity, Boolean) -> Unit,
+    /** 차례를 한 번에 옮기는 대화상자를 엽니다. */
+    onOpenMove: () -> Unit,
     onEditRoutine: () -> Unit,
     onDeleteRoutine: () -> Unit,
     focused: Boolean = false,
@@ -466,10 +515,27 @@ private fun RoutineCard(
                 verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                RoutineOrderControls(
+                    step = step,
+                    canMoveUp = canMoveUp,
+                    canMoveDown = canMoveDown,
+                    onMoveUp = { onMoveRoutine(routine, true) },
+                    onMoveDown = { onMoveRoutine(routine, false) },
+                    onOpenMove = onOpenMove
+                )
+
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    if (isNext) {
+                        Text(
+                            text = "다음 차례",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Text(
                         text = routine.title,
                         style = MaterialTheme.typography.titleMedium,
@@ -560,6 +626,180 @@ private fun RoutineCard(
                     Text("수행 +1")
                 }
             }
+        }
+    }
+}
+
+/**
+ * 차례 번호와 위·아래 화살표.
+ *
+ * 번호를 화살표 사이에 두어, 어느 쪽을 누르면 몇 번째가 되는지 눈으로 바로 잡히게 합니다.
+ * 맨 위·맨 아래에서는 해당 화살표를 꺼 두어 눌러도 아무 일이 없는 상태를 만들지 않습니다.
+ *
+ * 번호 자체는 누를 수 있습니다. 화살표는 한 칸씩이라, 서른 번째를 맨 위로 올리려면
+ * 스물아홉 번을 눌러야 하기 때문입니다.
+ */
+@Composable
+private fun RoutineOrderControls(
+    step: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onOpenMove: () -> Unit
+) {
+    // 화살표와 번호를 붙여 두어야 셋이 한 덩어리로 보입니다. 사이를 벌리면 번호가 따로 떠 보입니다.
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onMoveUp,
+            enabled = canMoveUp,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.KeyboardArrowUp,
+                contentDescription = "$step 번째 루틴을 앞으로"
+            )
+        }
+        // 눌러 볼 만한 것으로 보이도록 옅은 알약을 깔았습니다. 맨 숫자는 그냥 표시로 읽힙니다.
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            contentColor = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable(onClick = onOpenMove)
+                .semantics { contentDescription = "$step 번째. 차례 옮기기" }
+        ) {
+            Text(
+                text = step.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+            )
+        }
+        IconButton(
+            onClick = onMoveDown,
+            enabled = canMoveDown,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.KeyboardArrowDown,
+                contentDescription = "$step 번째 루틴을 뒤로"
+            )
+        }
+    }
+}
+
+/**
+ * 차례를 한 번에 옮기는 대화상자.
+ *
+ * 화살표만으로는 먼 자리로 가기 어렵습니다. 맨 위·맨 아래는 버튼 하나로,
+ * 그 사이는 지금 줄에서 자리를 짚어 고릅니다. 몇 번째가 될지 이름을 보며 고를 수 있어
+ * 숫자만 적어 넣는 것보다 헷갈리지 않습니다.
+ */
+@Composable
+private fun RoutineMoveDialog(
+    routine: RoutineEntity,
+    ordered: List<RoutineEntity>,
+    onDismiss: () -> Unit,
+    onMoveTo: (Int) -> Unit
+) {
+    val currentIndex = ordered.indexOfFirst { it.id == routine.id }
+    // 지금 자리가 보이는 곳에서 목록을 엽니다. 서른 개가 넘으면 어디였는지 찾기부터 해야 합니다.
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (currentIndex - 2).coerceAtLeast(0)
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("차례 옮기기") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = routine.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { onMoveTo(0) },
+                        enabled = currentIndex > 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("맨 위로")
+                    }
+                    OutlinedButton(
+                        onClick = { onMoveTo(RoutineOrder.LAST_INDEX) },
+                        enabled = currentIndex >= 0 && currentIndex < ordered.lastIndex,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("맨 아래로")
+                    }
+                }
+                Text(
+                    text = "또는 옮길 자리를 누르세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 300.dp)
+                ) {
+                    itemsIndexed(ordered, key = { _, item -> item.id }) { index, item ->
+                        RoutineMoveTargetRow(
+                            step = index + 1,
+                            title = item.title,
+                            isCurrent = item.id == routine.id,
+                            onClick = { onMoveTo(index) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("닫기")
+            }
+        }
+    )
+}
+
+@Composable
+private fun RoutineMoveTargetRow(
+    step: Int,
+    title: String,
+    isCurrent: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(routineMoveTargetTag(step))
+            // 지금 자리를 눌러도 달라지는 것이 없어 눌리지 않게 둡니다.
+            .clickable(enabled = !isCurrent, onClick = onClick)
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = step.toString(),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (isCurrent) {
+            Text(
+                text = "지금 자리",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

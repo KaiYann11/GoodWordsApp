@@ -588,6 +588,27 @@ fun AppGoodWordsApp(
                                     }
                                     snackbarHostState.showSnackbar(message)
                                 }
+                            },
+                            onMoveRoutine = { routine, up ->
+                                coroutineScope.launch {
+                                    val result = viewModel.moveRoutine(routine.id, up)
+                                    // 성공하면 목록이 곧바로 움직여 보이므로 따로 알리지 않는다.
+                                    result.exceptionOrNull()?.let { failure ->
+                                        snackbarHostState.showSnackbar(
+                                            failure.message ?: "루틴 순서를 바꾸지 못했습니다."
+                                        )
+                                    }
+                                }
+                            },
+                            onMoveRoutineTo = { routine, targetIndex ->
+                                coroutineScope.launch {
+                                    val result = viewModel.moveRoutineTo(routine.id, targetIndex)
+                                    result.exceptionOrNull()?.let { failure ->
+                                        snackbarHostState.showSnackbar(
+                                            failure.message ?: "루틴 순서를 바꾸지 못했습니다."
+                                        )
+                                    }
+                                }
                             }
                                 )
                             },
