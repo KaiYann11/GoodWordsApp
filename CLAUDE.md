@@ -101,6 +101,14 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_KEY`)에만 두고,
 스냅샷·백업에는 넣지 않습니다.
 
+**돌아보기는 지난번에 권한 것에서 이어집니다.** 물음에 직전 `GrowthReport`의 `improvements`와
+`suggestedRoutines`를 함께 싣습니다(`GrowthPrompt.previousAdvice`). 빼면 매번 처음 만난 사람처럼
+말하고 사용자는 같은 조언을 몇 번이고 다시 받습니다. **`strengths`와 `guide`는 싣지 않습니다.**
+잘한 점은 같은 칭찬을 되풀이하게 하고, 가이드는 자유롭게 쓴 글이라 그때 읽은 일기가 묻어날 수
+있습니다. 사용자가 그 뒤로 일기 본문 보내기를 껐다면 껐다는 뜻이 지난 글을 통해 조용히
+뒤집힙니다. 지난 조언은 `isEmpty`에 세지 않습니다. 이 기간에 한 일이 없는데 조언만 들고
+다시 물으면 같은 말이 돌아옵니다.
+
 **AI 공급자를 늘리면 앱 `AiProvider`와 서버 `aiProviders`를 함께 늘립니다.** 어디에 물어볼지는
 기기가 정하고(`provider`), 서버는 그에 맞는 열쇠만 골라 씁니다. 서버 쪽을 빠뜨리면 사용자가 고른
 곳이 아닌 데로 기록이 나갑니다. 열쇠는 공급자마다 따로 둡니다(`openAiKey`·`anthropicKey`).

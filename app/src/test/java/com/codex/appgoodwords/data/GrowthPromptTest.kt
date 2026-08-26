@@ -92,6 +92,55 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun lastTimesAdviceComesBackWithTheRecords() {
+        // 이것이 없으면 매번 처음 만난 사람처럼 말합니다. 같은 조언을 몇 번이고 다시 받습니다.
+        val prompt = GrowthPrompt.userPrompt(
+            digest(previous = report(on = LocalDate.of(2026, 8, 16)), includeDiaryBody = false)
+        )
+
+        assertTrue(prompt, prompt.contains("지난번에 권한 것"))
+        assertTrue(prompt, prompt.contains("자기 전 30분 폰 내려놓기"))
+        assertTrue(prompt, prompt.contains("저녁 산책"))
+        // 언제 한 말인지 알아야 "그 뒤로 어땠는지"를 셀 수 있습니다.
+        assertTrue(prompt, prompt.contains("2026-08-16"))
+    }
+
+    @Test
+    fun whatTheAiWroteFreelyDoesNotGoOutAgain() {
+        // 가이드는 자유롭게 쓴 글이라 그때 읽은 일기가 묻어날 수 있습니다. 그 뒤로 일기 본문
+        // 보내기를 껐다면, 껐다는 뜻이 지난 글을 통해 조용히 뒤집힙니다.
+        val prompt = GrowthPrompt.userPrompt(
+            digest(previous = report(on = LocalDate.of(2026, 8, 16)), includeDiaryBody = false)
+        )
+
+        assertFalse("지난 가이드가 다시 나갔습니다.", prompt.contains("마음이 무거웠다고"))
+        // 잘한 점은 같은 칭찬을 되풀이하게 할 뿐입니다.
+        assertFalse(prompt, prompt.contains("일기를 다섯 번 썼습니다"))
+    }
+
+    @Test
+    fun adviceFromLongAgoIsNotLastTime() {
+        // 석 달 전에 권한 것을 두고 "그 뒤로 어떠셨나요"라고 물으면 이번 기간의 답이 끌려갑니다.
+        assertTrue(digest(previous = report(on = today.minusDays(90)), includeDiaryBody = false).previousAdviceLines.isNotEmpty())
+        assertTrue(digest(previous = report(on = today.minusDays(91)), includeDiaryBody = false).previousAdviceLines.isEmpty())
+    }
+
+    @Test
+    fun lastTimesAdviceAloneIsNothingToLookBackOn() {
+        // 이 기간에 한 일이 없는데 지난 조언만 들고 다시 물으면 같은 말이 돌아옵니다.
+        assertTrue(digest(previous = report(on = LocalDate.of(2026, 8, 16)), includeDiaryBody = false).isEmpty)
+    }
+
+    @Test
+    fun theRulesTellItToPickUpWhereItLeftOff() {
+        val system = GrowthPrompt.systemPrompt()
+
+        assertTrue(system, system.contains("지난번에 권한 것"))
+        // 되풀이를 막지 않으면 매주 같은 글이 옵니다.
+        assertTrue(system, system.contains("되풀이"))
+    }
+
+    @Test
     fun theBlockToPasteCarriesTheRulesAsWellAsTheRecords() {
         // 채팅창에는 붙여넣을 자리가 하나뿐입니다. 규칙을 빠뜨리면 읽어 낼 수 없는 답이 옵니다.
         val digest = digest(includeDiaryBody = false)
@@ -133,6 +182,7 @@ class GrowthPromptTest {
         routines: List<RoutineEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
+        previous: GrowthReportEntity? = null,
         includeDiaryBody: Boolean
     ) = GrowthPrompt.digest(
         period = period,
@@ -145,7 +195,28 @@ class GrowthPromptTest {
         events = emptyList(),
         books = emptyList(),
         includeDiaryBody = includeDiaryBody,
+        previousReport = previous,
         zoneId = zone
+    )
+
+    private fun millis(date: LocalDate): Long =
+        date.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+
+    private fun report(
+        on: LocalDate,
+        strengths: List<String> = listOf("일기를 다섯 번 썼습니다"),
+        improvements: List<String> = listOf("자기 전 30분 폰 내려놓기"),
+        routines: List<String> = listOf("저녁 산책"),
+        guide: String = "비가 온 날 마음이 무거웠다고 쓰셨습니다. 그런 날은 짧게 걸어 보세요."
+    ) = GrowthReportEntity(
+        period = ReportPeriod.WEEKLY.name,
+        periodStart = on.minusDays(6).toString(),
+        periodEnd = on.toString(),
+        strengths = strengths,
+        improvements = improvements,
+        suggestedRoutines = routines,
+        guide = guide,
+        createdAt = millis(on)
     )
 
     private fun check(routineId: Long, date: LocalDate) = RoutineCheckEntity(

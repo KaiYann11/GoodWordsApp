@@ -18,7 +18,17 @@ data class GrowthDigest(
     val todoLines: List<String>,
     val diaryLines: List<String>,
     val quoteLines: List<String>,
-    val bookLines: List<String>
+    val bookLines: List<String>,
+    /**
+     * 지난번에 권해 받은 것.
+     *
+     * 없으면 빈 목록입니다. **[isEmpty]에는 세지 않습니다.** 이것만 있고 이 기간에 한 일이
+     * 없으면 돌아볼 것이 없는 것입니다. 지난 조언만 들고 다시 물으면 같은 말이 돌아옵니다.
+     */
+    val previousAdviceLines: List<String> = emptyList(),
+    /** 그 조언을 받은 날. 언제 한 말인지 알아야 "그 뒤로 어땠는지"를 셀 수 있습니다. */
+    val previousAdviceOn: LocalDate? = null,
+    val previousAdvicePeriod: ReportPeriod? = null
 ) {
     /** 아무것도 없으면 물어볼 것이 없습니다. 값만 나가고 빈 글이 돌아옵니다. */
     val isEmpty: Boolean
@@ -63,6 +73,14 @@ object GrowthPrompt {
     /** 일기 본문을 실을 때의 한 편당 글자 수. */
     private const val DIARY_BODY_LIMIT = 400
 
+    /**
+     * 이보다 오래된 돌아보기는 "지난번"이라 부르지 않습니다.
+     *
+     * 석 달 전에 권한 것을 두고 "그 뒤로 어떠셨나요"라고 물으면, 이미 지나간 이야기에
+     * 이번 기간의 답이 끌려갑니다.
+     */
+    private const val PREVIOUS_ADVICE_MAX_DAYS = 90L
+
     fun digest(
         period: ReportPeriod,
         today: LocalDate,
@@ -74,6 +92,8 @@ object GrowthPrompt {
         events: List<ExposureEventEntity>,
         books: List<BookEntity>,
         includeDiaryBody: Boolean,
+        /** 바로 앞에 받은 돌아보기. 없으면 null. */
+        previousReport: GrowthReportEntity? = null,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): GrowthDigest {
         val from = today.minusDays((period.days - 1).toLong())
@@ -123,6 +143,10 @@ object GrowthPrompt {
                 "${book.title}: $state"
             }
 
+        val previousOn = previousReport
+            ?.let { toDate(it.createdAt, zoneId) }
+            ?.takeIf { it.plusDays(PREVIOUS_ADVICE_MAX_DAYS) >= today }
+
         return GrowthDigest(
             period = period,
             from = from,
@@ -131,8 +155,27 @@ object GrowthPrompt {
             todoLines = todoLines,
             diaryLines = diaryLines,
             quoteLines = quoteLines,
-            bookLines = bookLines
+            bookLines = bookLines,
+            previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
+            previousAdviceOn = previousOn,
+            previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) }
         )
+    }
+
+    /**
+     * 지난번 조언에서 다시 보낼 것.
+     *
+     * **다음 걸음과 추천 루틴만 보냅니다.** 잘한 점은 같은 칭찬을 되풀이하게 하고,
+     * 가이드는 자유롭게 쓴 글이라 그때 읽은 일기가 묻어날 수 있습니다. 사용자가 그 뒤로
+     * 일기 본문 보내기를 껐다면, 껐다는 뜻이 그 글을 통해 조용히 뒤집힙니다.
+     * 지난번에 권한 것을 짚는 데는 이 둘이면 충분합니다.
+     */
+    private fun previousAdvice(report: GrowthReportEntity?): List<String> {
+        if (report == null) return emptyList()
+        return (report.improvements + report.suggestedRoutines)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(MAX_LINES)
     }
 
     /**
@@ -162,6 +205,12 @@ object GrowthPrompt {
         appendLine("규칙:")
         appendLine("- 기록에 있는 사실만 근거로 삼습니다. 없는 일을 지어내지 않습니다.")
         appendLine("- 다그치지 않습니다. 못 한 것을 세지 말고, 다음 한 걸음을 권합니다.")
+        appendLine(
+            "- [지난번에 권한 것]이 있으면 거기서부터 시작합니다. 그 뒤로 어떻게 되었는지를 " +
+                "이번 기록에서 찾아 먼저 말합니다. 지켜졌으면 그렇다고 짚어 주고, 그러지 " +
+                "못했으면 다그치는 대신 더 작게 쪼개어 다시 권합니다."
+        )
+        appendLine("- 지난번과 똑같은 말을 그대로 되풀이하지 않습니다.")
         appendLine("- 존댓말로, 한 문장은 짧게 씁니다.")
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
         appendLine("""{"strengths":["..."],"improvements":["..."],"suggestedQuote":{"text":"...","author":"..."},"suggestedRoutines":["..."],"guide":"..."}""")
@@ -174,11 +223,25 @@ object GrowthPrompt {
     fun userPrompt(digest: GrowthDigest): String = buildString {
         appendLine("기간: ${digest.from} ~ ${digest.to} (${digest.period.label})")
         appendLine()
+        // 지난 조언을 먼저 놓습니다. 기록보다 앞에 있어야 "그 뒤로 어땠는지"를 보며 읽습니다.
+        if (digest.previousAdviceLines.isNotEmpty()) {
+            // 손으로 부른 것은 단위가 없습니다. "직접 부름 돌아보기"는 말이 되지 않습니다.
+            val label = digest.previousAdvicePeriod
+                ?.takeIf { it != ReportPeriod.MANUAL }
+                ?.let { " ${it.label} 돌아보기" }
+                .orEmpty()
+            appendLine("[지난번에 권한 것] ${digest.previousAdviceOn}$label")
+            digest.previousAdviceLines.forEach { appendLine("- $it") }
+            appendLine()
+        }
         section("루틴 수행", digest.routineLines)
         section("할 일", digest.todoLines)
         section("일기", digest.diaryLines)
         section("읽은 글귀", digest.quoteLines)
         section("독서", digest.bookLines)
+        if (digest.previousAdviceLines.isNotEmpty()) {
+            append("지난번에 권한 것이 그 뒤로 어떻게 되었는지부터 짚고, ")
+        }
         append("위 기록을 보고 형식에 맞는 JSON으로만 답해 주세요.")
     }
 
