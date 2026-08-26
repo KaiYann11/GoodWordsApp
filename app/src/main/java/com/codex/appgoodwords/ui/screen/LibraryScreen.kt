@@ -131,7 +131,9 @@ fun LibraryScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var selectedCategory by rememberSaveable { mutableStateOf("") }
     var selectedFilter by rememberSaveable { mutableStateOf(ContentFilter.ALL.name) }
-    var selectedReadFilter by rememberSaveable { mutableStateOf(ReadFilter.ALL.name) }
+    // 여는 순간에는 오늘 읽을 것부터 보입니다. 읽는 자리가 여기로 왔으므로, 이미 넘긴 것을
+    // 지나쳐 가며 읽을 것을 찾게 두지 않습니다. 한 번 바꾸면 그 고른 값이 유지됩니다.
+    var selectedReadFilter by rememberSaveable { mutableStateOf(ReadFilter.UNREAD.name) }
     var sortMode by rememberSaveable { mutableStateOf(RankSort.SHUFFLED.name) }
     // 즐겨찾기는 유형과 별개 축이라 "즐겨찾기 + 글귀"처럼 겹쳐 쓸 수 있게 별도 토글로 둔다.
     var favoritesOnly by rememberSaveable { mutableStateOf(false) }

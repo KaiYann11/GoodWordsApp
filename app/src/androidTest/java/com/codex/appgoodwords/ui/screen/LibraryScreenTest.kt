@@ -60,6 +60,16 @@ class LibraryScreenTest {
     }
 
     @Test
+    fun itOpensOnWhatIsStillUnread() {
+        // 읽는 자리가 여기로 왔습니다. 열자마자 이미 넘긴 것을 지나쳐 가며 읽을 것을
+        // 찾게 두지 않습니다.
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = setOf(1L)) }
+
+        compose.onNodeWithText("글귀 1").assertDoesNotExist()
+        compose.onNodeWithText("글귀 2").assertIsDisplayed()
+    }
+
+    @Test
     fun theUnreadFilterHidesWhatWasAlreadyReadToday() {
         // 홈에 있던 거르개가 읽는 자리를 따라 여기로 왔습니다. 이것이 없으면
         // 오늘 읽을 것만 골라 보는 방법이 앱에서 사라집니다.
