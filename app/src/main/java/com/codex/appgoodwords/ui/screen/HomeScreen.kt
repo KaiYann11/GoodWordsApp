@@ -1,21 +1,5 @@
 package com.codex.appgoodwords.ui.screen
 
-import android.os.SystemClock
-import android.view.SoundEffectConstants
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,331 +12,307 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Undo
-import androidx.compose.material.icons.outlined.DoneAll
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.codex.appgoodwords.data.ComboLevel
-import com.codex.appgoodwords.data.ContentItemEntity
-import com.codex.appgoodwords.data.ContentShuffle
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
-import com.codex.appgoodwords.data.ReadingCombo
-import com.codex.appgoodwords.data.ReminderSettings
-import kotlinx.coroutines.delay
+import com.codex.appgoodwords.data.FeedbackKind
+import com.codex.appgoodwords.data.FeedbackNote
+import com.codex.appgoodwords.data.GrowthReportEntity
+import com.codex.appgoodwords.data.MoodPracticeRow
+import com.codex.appgoodwords.data.OnThisDayMemory
+import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.StatsSummary
+import java.time.LocalDate
+import java.time.YearMonth
 
-private enum class HomeReadTab(
-    val label: String
-) {
-    ALL("전체"),
-    UNREAD("안읽은 것"),
-    READ("읽은 것")
-}
+internal const val feedbackCardTag = "home_feedback_card"
+internal const val growthTeaserTag = "home_growth_teaser"
+internal const val onThisDayCardTag = "home_on_this_day"
+internal const val moodPracticeCardTag = "home_mood_practice"
 
 /**
- * 스와이프 한 번에 대한 피드백.
+ * 돌아보는 자리.
  *
- * 개수는 여기에 담지 않습니다. 확인 결과가 DB를 거쳐 돌아오는 데 잠깐 걸려서,
- * 누를 때 세면 실제와 어긋납니다. 화면은 [ReadingCombo]로 그때그때 계산해 보여 줍니다.
+ * 예전에는 홈에도 글귀 목록이 있어서 보관함과 같은 일을 두 곳에서 했습니다. 읽는 일은
+ * 글귀가 모여 있는 보관함으로 모으고, 홈에는 "지금 어떻게 지내고 있는지"만 남겼습니다.
+ * 오늘 할 일(세 걸음), 짚어 주는 문구, 그리고 통계 순서입니다. 앞에서부터 시간의 폭이
+ * 넓어지도록 두어, 위에서 아래로 읽으면 오늘에서 지난 달까지 자연스럽게 이어집니다.
  */
-private data class ComboFeedback(
-    val token: Long,
-    val confirmed: Boolean
-)
-
 @Composable
 fun HomeScreen(
-    todayItems: List<ContentItemEntity>,
-    settings: ReminderSettings,
-    confirmedTodayIds: Set<Long>,
-    onToggleFavorite: (ContentItemEntity) -> Unit,
-    onConfirmItem: (ContentItemEntity) -> Unit,
-    onOpenItem: (ContentItemEntity) -> Unit,
+    summary: StatsSummary,
+    notes: List<FeedbackNote>,
+    routines: List<RoutineEntity>,
+    checks: List<RoutineCheckEntity>,
     modifier: Modifier = Modifier,
     /** 오늘의 세 걸음. null이면 카드를 두지 않습니다. */
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
     onOpenStep: (DailyStep) -> Unit = {},
-    /**
-     * 목록을 섞는 씨앗. 앱을 켤 때마다 달라집니다([ContentShuffle]).
-     * 0이면 담은 차례 그대로입니다.
-     */
-    shuffleSeed: Long = 0L,
-    /** 지금 바로 다시 섞습니다. */
-    onShuffle: () -> Unit = {}
+    /** 가장 최근에 AI가 써 준 돌아보기. 없으면 권하는 카드만 둡니다. */
+    latestReport: GrowthReportEntity? = null,
+    onOpenGrowth: () -> Unit = {},
+    /** 지난 이맘때 남긴 것. 없으면 카드를 두지 않습니다. */
+    memories: List<OnThisDayMemory> = emptyList(),
+    onOpenMemory: (OnThisDayMemory) -> Unit = {},
+    /** 기분별 실천. 날이 적으면 빈 목록입니다. */
+    moodPractice: List<MoodPracticeRow> = emptyList()
 ) {
-    var selectedTab by rememberSaveable { mutableStateOf(HomeReadTab.UNREAD.name) }
-    var comboFeedback by remember { mutableStateOf<ComboFeedback?>(null) }
+    var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
+    var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
 
-    val currentTab = HomeReadTab.valueOf(selectedTab)
-    val readCount = remember(todayItems, confirmedTodayIds) {
-        todayItems.count { it.id in confirmedTodayIds }
-    }
-    val unreadCount = todayItems.size - readCount
-    val filteredItems = remember(todayItems, confirmedTodayIds, currentTab, shuffleSeed) {
-        val baseItems = when (currentTab) {
-            HomeReadTab.ALL -> todayItems
-            HomeReadTab.UNREAD -> todayItems.filterNot { it.id in confirmedTodayIds }
-            HomeReadTab.READ -> todayItems.filter { it.id in confirmedTodayIds }
-        }
-        ContentShuffle.ordered(baseItems, shuffleSeed)
-    }
-    val haptic = LocalHapticFeedback.current
-    val view = LocalView.current
-
-    // 오늘 확인한 글귀 수가 곧 콤보입니다. 빨리 넘기는 것과는 상관이 없습니다.
-    val combo = remember(confirmedTodayIds.size) { ReadingCombo.of(confirmedTodayIds.size) }
-
-    LaunchedEffect(comboFeedback?.token) {
-        val token = comboFeedback?.token ?: return@LaunchedEffect
-        delay(1600)
-        if (comboFeedback?.token == token) {
-            comboFeedback = null
-        }
-    }
-
-    fun registerSwipeFeedback(nowConfirmed: Boolean) {
-        // 확인 결과가 아직 안 돌아왔으므로 이번 스와이프까지 더해 봅니다.
-        // 진동 세기를 고르는 데만 쓰고, 화면에 보이는 숫자는 실제 상태에서 가져옵니다.
-        val expected = if (nowConfirmed) confirmedTodayIds.size + 1 else confirmedTodayIds.size
-
-        view.playSoundEffect(SoundEffectConstants.CLICK)
-        // 이정표에서만 무겁게 울립니다. 매번 세게 울리면 금세 성가십니다.
-        haptic.performHapticFeedback(
-            if (nowConfirmed && ReadingCombo.of(expected).isMilestone) {
-                HapticFeedbackType.LongPress
-            } else {
-                HapticFeedbackType.TextHandleMove
-            }
-        )
-
-        comboFeedback = ComboFeedback(token = SystemClock.elapsedRealtime(), confirmed = nowConfirmed)
-    }
-
-    Box(modifier = modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // 앱을 열면 가장 먼저 보이는 자리입니다. 오늘 무엇부터 할지 여기서 정해집니다.
+        dailyLoop?.let { progress ->
             item {
-                HomeHeroCard(
-                    totalCount = todayItems.size,
-                    unreadCount = unreadCount,
-                    readCount = readCount,
-                    onShuffle = onShuffle
-                )
-            }
-
-            // 앱을 열면 가장 먼저 보이는 자리입니다. 오늘 무엇부터 할지 여기서 정해집니다.
-            dailyLoop?.let { progress ->
-                item {
-                    DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
-                }
-            }
-
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(HomeReadTab.entries) { tab ->
-                        val count = when (tab) {
-                            HomeReadTab.ALL -> todayItems.size
-                            HomeReadTab.UNREAD -> unreadCount
-                            HomeReadTab.READ -> readCount
-                        }
-                        ReadFilterPill(
-                            title = tab.label,
-                            count = count,
-                            selected = currentTab == tab,
-                            onClick = { selectedTab = tab.name }
-                        )
-                    }
-                }
-            }
-
-            if (todayItems.isEmpty()) {
-                item {
-                    EmptyCard(
-                        title = "오늘 노출된 글귀가 아직 없습니다.",
-                        body = "아직 저장된 게시글이 없습니다. 추가 버튼으로 글귀, 링크, 영상을 먼저 저장해 주세요."
-                    )
-                }
-            } else if (filteredItems.isEmpty()) {
-                item {
-                    EmptyCard(
-                        title = when (currentTab) {
-                            HomeReadTab.ALL -> "표시할 글귀가 없습니다."
-                            HomeReadTab.UNREAD -> "안읽은 글귀를 모두 정리했습니다."
-                            HomeReadTab.READ -> "아직 읽은 글귀가 없습니다."
-                        },
-                        body = when (currentTab) {
-                            HomeReadTab.ALL -> "저장된 게시글이 생기면 여기에 나타납니다."
-                            HomeReadTab.UNREAD -> "읽음으로 정리한 항목은 읽은 것 탭에서 다시 볼 수 있습니다."
-                            HomeReadTab.READ -> "글귀를 밀거나 확인 버튼을 눌러 읽음으로 바꿔보세요."
-                        }
-                    )
-                }
-            } else {
-                items(filteredItems, key = { it.id }) { item ->
-                    TodaySwipeCard(
-                        item = item,
-                        confirmedToday = item.id in confirmedTodayIds,
-                        currentTab = currentTab,
-                        onToggleFavorite = onToggleFavorite,
-                        onConfirmItem = {
-                            registerSwipeFeedback(it.id !in confirmedTodayIds)
-                            onConfirmItem(it)
-                        },
-                        onOpenItem = onOpenItem,
-                        onSwipeToggle = { swipedItem, willBeConfirmed ->
-                            registerSwipeFeedback(willBeConfirmed)
-                            onConfirmItem(swipedItem)
-                        }
-                    )
-                }
-            }
-
-            item {
-                ReminderInfoCard(settings = settings)
+                DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
             }
         }
 
-        // 잔물결은 목록 한가운데에서 번집니다. 스와이프한 카드가 있는 자리입니다.
-        comboFeedback?.let { feedback ->
-            CelebrationPulse(
-                token = feedback.token,
-                milestone = feedback.confirmed && combo.isMilestone,
-                modifier = Modifier.align(Alignment.Center)
+        item {
+            FeedbackCard(notes = notes)
+        }
+
+        // 없는 날이 대부분이라 있을 때만 자리를 냅니다. 빈 카드가 매일 있으면
+        // "오늘은 없음"을 매일 확인하게 됩니다.
+        if (memories.isNotEmpty()) {
+            item {
+                OnThisDayCard(memories = memories, onOpen = onOpenMemory)
+            }
+        }
+
+        item {
+            GrowthTeaserCard(report = latestReport, onOpen = onOpenGrowth)
+        }
+
+        item {
+            StatsCard(summary = summary)
+        }
+
+        if (moodPractice.isNotEmpty()) {
+            item {
+                MoodPracticeCard(rows = moodPractice)
+            }
+        }
+
+        item {
+            RoutineCalendarCard(
+                routines = routines,
+                checks = checks,
+                selectedMonthText = selectedMonthText,
+                selectedDateText = selectedDateText,
+                onMonthChanged = { month, date ->
+                    selectedMonthText = month.toString()
+                    selectedDateText = date.toString()
+                },
+                onDateSelected = { date ->
+                    selectedDateText = date.toString()
+                }
             )
-        }
-
-        // 알약은 스낵바 자리에 둡니다. 위에 두면 카드 제목을 가립니다.
-        AnimatedVisibility(
-            visible = comboFeedback != null,
-            enter = fadeIn(tween(220)) +
-                slideInVertically(spring(dampingRatio = 0.72f, stiffness = 420f)) { it / 2 } +
-                scaleIn(tween(220), initialScale = 0.96f),
-            exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.96f),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp)
-        ) {
-            ComboBanner(combo = combo, confirmed = comboFeedback?.confirmed ?: true)
         }
     }
 }
 
 /**
- * 오늘 몇 개째인지 알려 주는 알약.
+ * 기록을 문장으로 짚어 주는 카드.
  *
- * 숫자는 실제 상태에서 오므로, 저장이 끝나면 자연스럽게 올라갑니다.
- * 막대는 다음 이정표까지의 거리라, 콤보가 "빠르기"가 아니라 "쌓임"으로 읽힙니다.
+ * 숫자는 아래 통계 카드가 맡습니다. 여기서는 그 숫자가 무슨 뜻인지 한 줄로 옮깁니다.
+ * 못 한 것을 세지 않습니다. 짚는 말은 [FeedbackWriter]가 한 줄까지만 담아 줍니다.
  */
 @Composable
-private fun ComboBanner(combo: ComboLevel, confirmed: Boolean) {
-    val animatedCount by animateIntAsState(
-        targetValue = combo.count,
-        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-        label = "comboCount"
-    )
-    val animatedProgress by animateFloatAsState(
-        targetValue = combo.progressToNext,
-        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
-        label = "comboProgress"
-    )
-    val accent = if (combo.isMilestone) {
-        MaterialTheme.colorScheme.tertiary
-    } else {
-        MaterialTheme.colorScheme.primary
-    }
-
-    Surface(
+private fun FeedbackCard(notes: List<FeedbackNote>) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(feedbackCardTag),
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        shadowElevation = 6.dp
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(start = 18.dp, end = 22.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(accent.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
+            Text(
+                text = "요즘 이렇게 지내고 있어요",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            if (notes.isEmpty()) {
                 Text(
-                    text = animatedCount.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = accent
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = if (confirmed) combo.title else "읽음 취소",
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Text(
-                    text = combo.message,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "기록이 쌓이면 여기에 짚어 드릴 말이 생깁니다.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                // 다음 이정표까지 얼마나 왔는지. 다 지났으면 굳이 빈 막대를 두지 않습니다.
-                if (combo.nextMilestone != null) {
-                    Canvas(modifier = Modifier.size(width = 132.dp, height = 3.dp)) {
-                        drawLine(
-                            color = accent.copy(alpha = 0.18f),
-                            start = Offset(0f, size.height / 2f),
-                            end = Offset(size.width, size.height / 2f),
-                            strokeWidth = size.height,
-                            cap = StrokeCap.Round
+            } else {
+                notes.forEach { note ->
+                    FeedbackLine(note = note)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedbackLine(note: FeedbackNote) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // 점 하나로 성격을 나눕니다. 아이콘을 붙이면 세 줄이 저마다 다른 그림이 되어 시끄럽습니다.
+        Box(
+            modifier = Modifier
+                .padding(top = 6.dp)
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(note.kind.dotColor())
+        )
+        Text(
+            text = note.text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/**
+ * 짚는 말도 붉게 칠하지 않습니다.
+ *
+ * 경고 색을 쓰면 뜸해진 루틴 하나가 화면에서 사고처럼 보입니다.
+ */
+@Composable
+private fun FeedbackKind.dotColor(): Color = when (this) {
+    FeedbackKind.STREAK -> MaterialTheme.colorScheme.primary
+    FeedbackKind.PRAISE -> MaterialTheme.colorScheme.tertiary
+    FeedbackKind.NUDGE -> MaterialTheme.colorScheme.outline
+    FeedbackKind.INVITE -> MaterialTheme.colorScheme.secondary
+}
+
+/**
+ * AI가 써 준 돌아보기로 가는 문.
+ *
+ * 홈에 글 전체를 펼치지 않습니다. 잘한 점 한 줄만 보이고 나머지는 그 화면에서 봅니다.
+ * 홈은 훑는 자리이지 읽는 자리가 아닙니다.
+ */
+@Composable
+private fun GrowthTeaserCard(
+    report: GrowthReportEntity?,
+    onOpen: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(growthTeaserTag),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "AI 돌아보기",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = report?.strengths?.firstOrNull()
+                    ?: report?.guide?.takeIf { it.isNotBlank() }
+                    ?: "기록을 보고 잘한 점과 다음 걸음을 정리해 드립니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(onClick = onOpen) {
+                Text(if (report == null) "받아 보기" else "돌아보기 열기")
+            }
+        }
+    }
+}
+
+/**
+ * 지난 이맘때 남긴 것.
+ *
+ * 일기와 글귀는 쌓일수록 값이 커지는 기록인데, 지금까지 홈은 최근 이레와 이번 달만 보여
+ * 주었습니다. 오래 쓴 사람에게만 생기는 되돌림을 여기에 둡니다.
+ * 없는 날이 대부분이라 **아무것도 없으면 카드 자체를 두지 않습니다.** 빈 카드가 매일 자리를
+ * 차지하면 "오늘은 없음"을 매일 확인하게 됩니다.
+ */
+@Composable
+private fun OnThisDayCard(
+    memories: List<OnThisDayMemory>,
+    onOpen: (OnThisDayMemory) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(onThisDayCardTag),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "지난 이맘때",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            memories.forEach { memory ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpen(memory) },
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "${memory.whenText} · ${memory.kind.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = memory.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (memory.body.isNotBlank()) {
+                        Text(
+                            text = memory.body,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        if (animatedProgress > 0f) {
-                            drawLine(
-                                color = accent,
-                                start = Offset(0f, size.height / 2f),
-                                end = Offset(size.width * animatedProgress, size.height / 2f),
-                                strokeWidth = size.height,
-                                cap = StrokeCap.Round
-                            )
-                        }
                     }
                 }
             }
@@ -360,360 +320,61 @@ private fun ComboBanner(combo: ComboLevel, confirmed: Boolean) {
     }
 }
 
-@Composable
-private fun HomeHeroCard(
-    totalCount: Int,
-    unreadCount: Int,
-    readCount: Int,
-    onShuffle: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary,
-                            Color(0xFF7FC3FF),
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.85f)
-                        )
-                    )
-                )
-                .padding(20.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "오늘의 글귀",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Text(
-                    text = "밝은 온보딩 카드처럼 오늘의 글귀를 빠르게 정리할 수 있게 구성했습니다. 좌우 스와이프로 읽음 상태를 바로 바꿀 수 있습니다.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MetricPill(label = "전체", value = totalCount.toString())
-                    MetricPill(label = "안읽음", value = unreadCount.toString())
-                    MetricPill(label = "읽음", value = readCount.toString())
-                }
-                Button(onClick = onShuffle) {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = null
-                    )
-                    // 켤 때마다 저절로 섞이므로, 이 버튼은 "지금 한 번 더"입니다.
-                    Text("다시 섞기")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetricPill(
-    label: String,
-    value: String
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White.copy(alpha = 0.18f))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = "$label $value",
-            color = Color.White,
-            style = MaterialTheme.typography.labelLarge
-        )
-    }
-}
-
-@Composable
-private fun ReadFilterPill(
-    title: String,
-    count: Int,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .clip(RoundedCornerShape(22.dp))
-            .background(
-                if (selected) {
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary
-                        )
-                    )
-                } else {
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.surface
-                        )
-                    )
-                }
-            )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        Text(
-            text = "$title $count",
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun ReminderInfoCard(settings: ReminderSettings) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "반복 노출 설정",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text("반복 간격: ${formatInterval(settings.intervalMinutes)}")
-            Text(
-                text = "반복 시간대: ${formatTime(settings.preferredHour, settings.preferredMinute)} ~ " +
-                    formatTime(settings.repeatEndHour, settings.repeatEndMinute)
-            )
-            Text("카테고리 필터: ${settings.categoryFilter.ifBlank { "전체" }}")
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TodaySwipeCard(
-    item: ContentItemEntity,
-    confirmedToday: Boolean,
-    currentTab: HomeReadTab,
-    onToggleFavorite: (ContentItemEntity) -> Unit,
-    onConfirmItem: (ContentItemEntity) -> Unit,
-    onOpenItem: (ContentItemEntity) -> Unit,
-    onSwipeToggle: (ContentItemEntity, Boolean) -> Unit
-) {
-    var swipeHandled by remember(item.id) { mutableStateOf(false) }
-    val dismissState = rememberSwipeToDismissBoxState(
-        positionalThreshold = { distance -> distance * 0.28f },
-        confirmValueChange = { value ->
-            when {
-                value == SwipeToDismissBoxValue.Settled -> true
-                swipeHandled -> true
-                else -> {
-                    swipeHandled = true
-                    onSwipeToggle(item, !confirmedToday)
-                    true
-                }
-            }
-        }
-    )
-
-    LaunchedEffect(dismissState.currentValue, currentTab) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.Settled) {
-            swipeHandled = false
-            return@LaunchedEffect
-        }
-
-        if (currentTab == HomeReadTab.ALL) {
-            dismissState.reset()
-            swipeHandled = false
-        } else {
-            delay(320)
-            if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                dismissState.reset()
-                swipeHandled = false
-            }
-        }
-    }
-
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = true,
-        enableDismissFromEndToStart = true,
-        backgroundContent = {
-            SwipeStatusBackground(
-                confirmedToday = confirmedToday,
-                dismissValue = dismissState.targetValue
-            )
-        }
-    ) {
-        ContentItemCard(
-            item = item,
-            confirmedToday = confirmedToday,
-            onToggleFavorite = onToggleFavorite,
-            onConfirmItem = onConfirmItem,
-            onOpenItem = onOpenItem
-        )
-    }
-}
-
-@Composable
-private fun SwipeStatusBackground(
-    confirmedToday: Boolean,
-    dismissValue: SwipeToDismissBoxValue
-) {
-    val targetLabel = if (confirmedToday) "읽음 취소" else "읽음 완료"
-    val targetIcon = if (confirmedToday) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.DoneAll
-    val backgroundBrush = if (confirmedToday) {
-        Brush.horizontalGradient(
-            listOf(
-                MaterialTheme.colorScheme.secondaryContainer,
-                MaterialTheme.colorScheme.tertiaryContainer
-            )
-        )
-    } else {
-        Brush.horizontalGradient(
-            listOf(
-                MaterialTheme.colorScheme.primaryContainer,
-                MaterialTheme.colorScheme.secondaryContainer
-            )
-        )
-    }
-    val alignment = when (dismissValue) {
-        SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-        SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-        SwipeToDismissBoxValue.Settled -> Alignment.Center
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(28.dp))
-            .background(backgroundBrush)
-            .padding(horizontal = 20.dp),
-        contentAlignment = alignment
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = targetIcon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Text(
-                text = targetLabel,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
 /**
- * 확인했을 때 번지는 잔물결.
+ * 기분과 실천을 나란히 놓은 줄.
  *
- * 예전에는 여섯 가지 색의 폭죽이 터졌습니다. 한 번은 즐겁지만 하루에 수십 번 보면 시끄럽고,
- * 앱의 다른 화면과도 따로 놀았습니다. 지금은 테마 색으로 얇은 고리만 번지게 하고,
- * 이정표일 때만 고리를 늘려 무게를 줍니다.
+ * **인과로 말하지 않습니다.** 많이 움직여서 기분이 좋았는지 그 반대인지는 이 숫자로 알 수
+ * 없습니다. "이런 날엔 이만큼 움직였습니다"까지만 적습니다.
  */
 @Composable
-private fun CelebrationPulse(
-    token: Long,
-    milestone: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val progress = remember { Animatable(0f) }
-    val ringColor = MaterialTheme.colorScheme.primary
-    val accentColor = MaterialTheme.colorScheme.tertiary
-
-    LaunchedEffect(token) {
-        progress.snapTo(0f)
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(
-                durationMillis = if (milestone) 1_100 else 760,
-                easing = LinearOutSlowInEasing
-            )
-        )
-    }
-
-    Canvas(modifier = modifier.size(if (milestone) 260.dp else 200.dp)) {
-        val centerPoint = Offset(size.width / 2f, size.height / 2f)
-        val ringCount = if (milestone) 3 else 1
-
-        repeat(ringCount) { index ->
-            // 뒤 고리는 조금 늦게 출발해 물결처럼 번집니다.
-            val head = index * 0.16f
-            val local = ((progress.value - head) / (1f - head)).coerceIn(0f, 1f)
-            if (local <= 0f) return@repeat
-
-            val radius = size.minDimension * (0.10f + 0.40f * local)
-            val fade = (1f - local) * (1f - index * 0.22f)
-            drawCircle(
-                color = (if (index == 0) ringColor else accentColor).copy(alpha = 0.38f * fade),
-                radius = radius,
-                center = centerPoint,
-                // 번져 나가면서 선이 가늘어져야 사라지는 것처럼 보입니다.
-                style = Stroke(width = size.minDimension * (0.018f - 0.012f * local))
-            )
-        }
-
-        // 가운데에서 옅게 퍼지는 빛. 고리만 있으면 가운데가 비어 허전합니다.
-        val glowRadius = size.minDimension * (0.18f + 0.26f * progress.value)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    ringColor.copy(alpha = 0.20f * (1f - progress.value)),
-                    Color.Transparent
-                ),
-                center = centerPoint,
-                radius = glowRadius
-            ),
-            radius = glowRadius,
-            center = centerPoint
-        )
-    }
-}
-
-@Composable
-private fun EmptyCard(
-    title: String,
-    body: String
-) {
+private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(moodPracticeCardTag),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Text(text = body, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = "기분과 실천",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "그 기분으로 적은 날, 하루에 평균 몇 번 움직였는지입니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            rows.forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(text = row.mood.emoji, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = row.mood.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "%.1f회".format(row.averagePerDay),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "${row.dayCount}일",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
-    }
-}
-
-private fun formatTime(hour: Int, minute: Int): String = "%02d:%02d".format(hour, minute)
-
-private fun formatInterval(intervalMinutes: Int): String {
-    return when {
-        intervalMinutes % 60 == 0 -> "${intervalMinutes / 60}시간"
-        intervalMinutes > 60 -> "${intervalMinutes / 60}시간 ${intervalMinutes % 60}분"
-        else -> "${intervalMinutes}분"
     }
 }

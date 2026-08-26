@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 14;
+const schemaVersion = 15;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -80,9 +80,12 @@ const deletionEntityTypes = new Set([
   "DIARY",
   "TODO",
   "BOOK",
+  "GROWTH_REPORT",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
+/** 성장 피드백을 돌리는 주기. 앱 `ReportPeriod`와 같은 이름이어야 한다. */
+const reportPeriods = new Set(["DAILY", "WEEKLY", "MONTHLY", "MANUAL"]);
 /** 책에서 뽑은 글귀에 붙는 카테고리. 앱 AppRepository.BOOK_CATEGORY와 같아야 한다. */
 const bookCategory = "독서";
 
@@ -146,6 +149,7 @@ createServer((request, response) => {
   console.log(`DB file: ${config.dbPath}`);
   console.log(`Attachments: ${config.attachmentsDir}`);
   if (config.apiKey) console.log("API key protection is enabled.");
+  if (config.openAiKey) console.log("AI growth feedback is enabled (OPENAI_API_KEY).");
 });
 
 async function route(request, response) {
@@ -212,6 +216,12 @@ async function route(request, response) {
     const ids = parseIds(url.searchParams.get("ids"));
     const result = await withDb((db) => deleteWithTombstone(db, db.exposureEvents, ids, "EXPOSURE_EVENT"));
     sendJson(response, 200, { deleted: result.deleted });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/api/growth-feedback") {
+    const payload = await readJson(request);
+    const result = await askOpenAi(payload);
+    sendJson(response, 200, result);
     return;
   }
   if (method === "GET" && url.pathname === "/api/routines") {
@@ -373,6 +383,73 @@ async function routeContentMember(method, parts, request, response) {
     return;
   }
   sendJson(response, 404, { error: "엔드포인트를 찾을 수 없습니다." });
+}
+
+/**
+ * 기기 대신 AI에게 물어봐 줍니다.
+ *
+ * 열쇠를 서버 한 곳에만 두려는 것입니다. 기기를 새로 붙일 때마다 다시 넣지 않아도 되고,
+ * 폰을 잃어버려도 열쇠가 함께 나가지 않습니다.
+ *
+ * **서버는 물음을 만들지 않습니다.** 무엇이 나가는지는 기기가 정하고, 여기서는 그대로 전달만
+ * 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 "일기 본문은 빼고" 정해 둔 것이
+ * 서버 쪽에서 조용히 뒤집힐 수 있습니다.
+ */
+async function askOpenAi(payload) {
+  if (!config.openAiKey) {
+    throw new HttpError(
+      503,
+      "서버에 AI 열쇠가 없습니다. OPENAI_API_KEY를 넣고 서버를 다시 띄우거나, 앱 설정에 열쇠를 넣어 주세요.",
+    );
+  }
+  const system = text(payload?.system);
+  const user = text(payload?.user);
+  if (!user) throw new HttpError(400, "물어볼 내용이 비어 있습니다.");
+
+  const body = {
+    model: text(payload?.model) || "gpt-4o-mini",
+    messages: [
+      ...(system ? [{ role: "system", content: system }] : []),
+      { role: "user", content: user },
+    ],
+    response_format: { type: "json_object" },
+  };
+
+  let response;
+  try {
+    response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.openAiKey}`,
+      },
+      body: JSON.stringify(body),
+      // 글을 쓰는 데 시간이 걸립니다. 그래도 영영 붙들고 있지는 않습니다.
+      signal: AbortSignal.timeout(90_000),
+    });
+  } catch (error) {
+    throw new HttpError(502, `AI에 연결하지 못했습니다: ${error.message}`);
+  }
+
+  const raw = await response.text();
+  if (!response.ok) {
+    // 응답 본문을 그대로 넘기면 열쇠 조각이 섞여 나올 수 있어 message만 뽑습니다.
+    let detail = "";
+    try {
+      detail = JSON.parse(raw)?.error?.message || "";
+    } catch {
+      detail = "";
+    }
+    throw new HttpError(502, `AI 요청이 실패했습니다(${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new HttpError(502, "AI 응답을 읽지 못했습니다.");
+  }
+  return { text: parsed?.choices?.[0]?.message?.content || "" };
 }
 
 async function routeRoutineMember(method, parts, request, response) {
@@ -731,6 +808,7 @@ const revisionedCollections = [
   "diaries",
   "todos",
   "books",
+  "growthReports",
 ];
 
 async function withDb(mutator) {
@@ -811,6 +889,7 @@ function emptyDb() {
     diaries: [],
     todos: [],
     books: [],
+    growthReports: [],
   };
 }
 
@@ -831,6 +910,7 @@ function normalizeDb(db) {
     diaries: normalizeList(db?.diaries, normalizeDiary),
     todos: normalizeList(db?.todos, normalizeTodo),
     books: normalizeList(db?.books, normalizeBook),
+    growthReports: normalizeList(db?.growthReports, normalizeGrowthReport),
   };
 }
 
@@ -887,6 +967,7 @@ function snapshot(db, since = 0, epoch = null) {
     diaryCount: normalized.diaries.length,
     todoCount: normalized.todos.length,
     bookCount: normalized.books.length,
+    growthReportCount: normalized.growthReports.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -899,6 +980,7 @@ function snapshot(db, since = 0, epoch = null) {
     diaries: only(sortDesc(normalized.diaries, "createdAt")),
     todos: only(sortDesc(normalized.todos, "createdAt")),
     books: only(sortDesc(normalized.books, "updatedAt")),
+    growthReports: only(sortDesc(normalized.growthReports, "createdAt")),
   };
 }
 
@@ -922,6 +1004,7 @@ function mergeSnapshot(db, payload) {
     diaries: payload?.diaries,
     todos: payload?.todos,
     books: payload?.books,
+    growthReports: payload?.growthReports,
   });
   const current = normalizeDb(db);
 
@@ -939,6 +1022,7 @@ function mergeSnapshot(db, payload) {
   db.todos = mergeMutable(current.todos, incoming.todos, deletedAt);
   // 책도 고칠 수 있다. 읽은 쪽수는 기기마다 달라져서 나중에 넘긴 쪽이 남아야 한다.
   db.books = mergeMutable(current.books, incoming.books, deletedAt);
+  db.growthReports = mergeMutable(current.growthReports, incoming.growthReports, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -972,6 +1056,7 @@ function deduplicate(db) {
   const diaries = resolveDuplicates(db.diaries, diaryFingerprint);
   const todos = resolveDuplicates(db.todos, todoFingerprint);
   const books = resolveDuplicates(db.books, bookFingerprint);
+  const reports = resolveDuplicates(db.growthReports, reportFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   db.items = items.kept.map((item) =>
@@ -981,6 +1066,7 @@ function deduplicate(db) {
   db.diaries = diaries.kept;
   db.todos = todos.kept;
   db.books = books.kept;
+  db.growthReports = reports.kept;
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -991,6 +1077,7 @@ function deduplicate(db) {
     [diaries.movedTo, "DIARY"],
     [todos.movedTo, "TODO"],
     [books.movedTo, "BOOK"],
+    [reports.movedTo, "GROWTH_REPORT"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1085,6 +1172,17 @@ function todoFingerprint(todo) {
 }
 
 /**
+ * 같은 기간을 두고 받은 피드백은 한 편만 남긴다.
+ *
+ * 두 기기에서 같은 주를 각각 돌리면 글은 조금씩 달라도 말하는 바는 같다.
+ * 본문까지 견주면 늘 다른 것이 되어 쌓이기만 하므로 기간과 단위로만 본다.
+ * 앱의 reportFingerprint와 같아야 한다.
+ */
+function reportFingerprint(report) {
+  return [text(report.period), text(report.periodStart), text(report.periodEnd)].join("|");
+}
+
+/**
  * 같은 책은 제목과 저자로 본다.
  *
  * 읽은 쪽수는 넣지 않는다. 두 기기에서 같은 책을 각자 담으면 진도가 다른 것이 당연한데,
@@ -1155,6 +1253,7 @@ function reindex(db) {
   db.diaries = withStableIds(db.diaries);
   db.todos = withStableIds(db.todos);
   db.books = withStableIds(db.books);
+  db.growthReports = withStableIds(db.growthReports);
 
   return db;
 }
@@ -1274,6 +1373,9 @@ function replaceSnapshot(db, payload) {
   db.diaries = Array.isArray(payload.diaries) ? payload.diaries.map(normalizeDiary).filter(Boolean) : [];
   db.todos = Array.isArray(payload.todos) ? payload.todos.map(normalizeTodo).filter(Boolean) : [];
   db.books = Array.isArray(payload.books) ? payload.books.map(normalizeBook).filter(Boolean) : [];
+  db.growthReports = Array.isArray(payload.growthReports)
+    ? payload.growthReports.map(normalizeGrowthReport).filter(Boolean)
+    : [];
   return db;
 }
 
@@ -1735,8 +1837,9 @@ function normalizeDiary(diary) {
 function normalizeTodo(todo) {
   if (!todo) return null;
   const title = text(todo.title);
+  // 마감일은 없어도 된다("언젠가" 할 일). 여기서 버리면 기기에서 만든 것이 업로드에서 사라진다.
   const dueDate = text(todo.dueDate);
-  if (!title || !dueDate) return null;
+  if (!title) return null;
   return {
     id: positiveInt(todo.id),
     syncId: syncId(todo.syncId),
@@ -1774,6 +1877,39 @@ function normalizeBook(book) {
     finishedAt: nullableInteger(book.finishedAt),
     createdAt: integer(book.createdAt, nowMs()),
   };
+}
+
+/**
+ * AI가 써 준 성장 피드백 한 편.
+ *
+ * 서버는 글을 만들어 내지 않고 받아 두기만 한다. 알맹이가 하나도 없는 것은 화면에 놓아도
+ * 빈 카드만 보이므로 버린다.
+ */
+function normalizeGrowthReport(report) {
+  if (!report) return null;
+  const normalized = {
+    id: positiveInt(report.id),
+    syncId: syncId(report.syncId),
+    updatedAt: integer(report.updatedAt, integer(report.createdAt, nowMs())),
+    period: normalizeEnum(report.period, reportPeriods, "MANUAL"),
+    periodStart: text(report.periodStart),
+    periodEnd: text(report.periodEnd),
+    model: text(report.model),
+    strengths: stringList(report.strengths),
+    improvements: stringList(report.improvements),
+    suggestedQuote: text(report.suggestedQuote),
+    suggestedQuoteAuthor: text(report.suggestedQuoteAuthor),
+    suggestedRoutines: stringList(report.suggestedRoutines),
+    guide: text(report.guide),
+    createdAt: integer(report.createdAt, nowMs()),
+  };
+  const hasContent =
+    normalized.strengths.length > 0 ||
+    normalized.improvements.length > 0 ||
+    normalized.suggestedRoutines.length > 0 ||
+    normalized.suggestedQuote ||
+    normalized.guide;
+  return hasContent ? normalized : null;
 }
 
 function normalizeDeletion(deletion) {
@@ -1992,6 +2128,8 @@ function parseArgs(args) {
     port: Number(process.env.APP_GOOD_WORDS_PORT || 8765),
     dbPath: process.env.APP_GOOD_WORDS_DB || defaultDbPath,
     apiKey: process.env.APP_GOOD_WORDS_API_KEY || "",
+    // AI 열쇠는 인자로 받지 않습니다. 명령줄은 ps로 남에게 보이고 셸 기록에도 남습니다.
+    openAiKey: process.env.OPENAI_API_KEY || "",
     seed: false,
   };
   for (let index = 0; index < args.length; index += 1) {

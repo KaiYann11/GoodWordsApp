@@ -36,7 +36,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 14입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 15입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -93,6 +93,12 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 매번 전부를 보냅니다. 그래서 (1) 저장 직전에 내용을 비교하고(`stampRevisions`), (2) 멀쩡한 숫자 id는
 그대로 두고(`withStableIds`), (3) 지웠거나 합쳐서 사라진 레코드는 삭제 표식을 남깁니다.
 부분 응답(`partial`)에 없는 레코드는 지워진 것이 아니라 안 바뀐 것이라, 앱은 `applyDelta`로 얹기만 합니다.
+
+**AI 피드백에 나가는 것은 사용자가 정합니다.** 일기 본문은 설정에서 켜야만 실립니다
+(`AiFeedbackSettings.includeDiaryBody`). 기본값을 바꾸지 마세요. 한번 나가면 되돌릴 수 없습니다.
+물음은 앱 `GrowthPrompt`만 만들고, 서버 `/api/growth-feedback`은 그대로 전달만 합니다.
+서버가 기록을 다시 읽어 물음을 짜면 사용자가 앱에서 정해 둔 범위가 조용히 뒤집힙니다.
+AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`)에만 두고, 스냅샷·백업에는 넣지 않습니다.
 
 **동기화 JSON 포맷을 바꾸면 앱 `AppDataJson`과 서버를 함께 바꾸고 `schemaVersion`을 올립니다.**
 

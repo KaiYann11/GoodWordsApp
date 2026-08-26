@@ -59,15 +59,57 @@ class LibraryScreenTest {
         compose.onNodeWithTag(libraryAddButtonTag).assertIsDisplayed()
     }
 
+    @Test
+    fun theUnreadFilterHidesWhatWasAlreadyReadToday() {
+        // 홈에 있던 거르개가 읽는 자리를 따라 여기로 왔습니다. 이것이 없으면
+        // 오늘 읽을 것만 골라 보는 방법이 앱에서 사라집니다.
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = setOf(1L)) }
+
+        compose.onNodeWithTag(libraryReadFilterTag("UNREAD")).performClick()
+
+        compose.onNodeWithText("글귀 2").assertIsDisplayed()
+        compose.onNodeWithText("글귀 1").assertDoesNotExist()
+    }
+
+    @Test
+    fun theReadFilterShowsOnlyTodaysReading() {
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = setOf(1L)) }
+
+        compose.onNodeWithTag(libraryReadFilterTag("READ")).performClick()
+
+        compose.onNodeWithText("글귀 1").assertIsDisplayed()
+        compose.onNodeWithText("글귀 2").assertDoesNotExist()
+    }
+
+    @Test
+    fun anEmptyFilterSaysWhyInsteadOfShowingNothing() {
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = emptySet()) }
+
+        compose.onNodeWithTag(libraryReadFilterTag("READ")).performClick()
+
+        compose.onNodeWithText("오늘 읽은 글귀가 아직 없습니다.").assertIsDisplayed()
+    }
+
+    private val threeQuotes = (1..3).map { index ->
+        ContentItemEntity(
+            id = index.toLong(),
+            syncId = "item-$index",
+            type = ContentType.QUOTE,
+            title = "글귀 $index",
+            body = "본문 $index"
+        )
+    }
+
     @androidx.compose.runtime.Composable
     private fun libraryScreen(
         items: List<ContentItemEntity>,
+        confirmedTodayIds: Set<Long> = emptySet(),
         onAddContent: () -> Unit = {}
     ) {
         LibraryScreen(
             items = items,
             categories = emptyList(),
-            confirmedTodayIds = emptySet(),
+            confirmedTodayIds = confirmedTodayIds,
             onToggleFavorite = {},
             onConfirmItem = {},
             onOpenItem = {},

@@ -13,7 +13,8 @@ data class AppImportResult(
     val routineMemoCount: Int,
     val diaryCount: Int = 0,
     val todoCount: Int = 0,
-    val bookCount: Int = 0
+    val bookCount: Int = 0,
+    val growthReportCount: Int = 0
 )
 
 class AppDataImporter(
@@ -63,6 +64,7 @@ class AppDataImporter(
         val diaryDao = database.diaryDao()
         val todoDao = database.todoDao()
         val bookDao = database.bookDao()
+        val reportDao = database.growthReportDao()
 
         val previousReminders = database.todoDao().getPendingReminders()
         val deletedSyncIds = incoming.deletions.map { it.syncId }
@@ -79,6 +81,7 @@ class AppDataImporter(
                 diaryDao.deleteBySyncIds(deletedSyncIds)
                 todoDao.deleteBySyncIds(deletedSyncIds)
                 bookDao.deleteBySyncIds(deletedSyncIds)
+                reportDao.deleteBySyncIds(deletedSyncIds)
             }
 
             val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
@@ -132,6 +135,9 @@ class AppDataImporter(
 
             val localBookIds = bookDao.getAll().associate { it.syncId to it.id }
             bookDao.insertAll(incoming.books.map { it.copy(id = localBookIds[it.syncId] ?: 0L) })
+
+            val localReportIds = reportDao.getAll().associate { it.syncId to it.id }
+            reportDao.insertAll(incoming.growthReports.map { it.copy(id = localReportIds[it.syncId] ?: 0L) })
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
@@ -157,7 +163,8 @@ class AppDataImporter(
             routineMemoCount = incoming.routineMemos.size,
             diaryCount = incoming.diaries.size,
             todoCount = incoming.todos.size,
-            bookCount = incoming.books.size
+            bookCount = incoming.books.size,
+            growthReportCount = incoming.growthReports.size
         )
     }
 
@@ -176,6 +183,7 @@ class AppDataImporter(
         val previousReminders = database.todoDao().getPendingReminders()
 
         database.withTransaction {
+            database.growthReportDao().clearAll()
             database.bookDao().clearAll()
             database.todoDao().clearAll()
             database.diaryDao().clearAll()
@@ -218,6 +226,10 @@ class AppDataImporter(
                 database.todoDao().insertAll(snapshot.todos)
             }
 
+            if (snapshot.growthReports.isNotEmpty()) {
+                database.growthReportDao().insertAll(snapshot.growthReports)
+            }
+
             if (snapshot.books.isNotEmpty()) {
                 database.bookDao().insertAll(snapshot.books)
             }
@@ -254,7 +266,8 @@ class AppDataImporter(
             routineMemoCount = snapshot.routineMemos.size,
             diaryCount = snapshot.diaries.size,
             todoCount = snapshot.todos.size,
-            bookCount = snapshot.books.size
+            bookCount = snapshot.books.size,
+            growthReportCount = snapshot.growthReports.size
         )
     }
 }

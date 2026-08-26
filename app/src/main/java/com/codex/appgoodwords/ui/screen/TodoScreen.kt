@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -18,6 +19,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +39,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.TodoBucket
+import com.codex.appgoodwords.data.TodoBuckets
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
 import java.time.Instant
@@ -48,11 +53,33 @@ import java.util.Calendar
 internal const val todoInputTag = "todo_input"
 internal const val todoAddButtonTag = "todo_add_button"
 
+/** 새 할 일을 언제로 둘지 고르는 칩. */
+internal fun todoWhenTag(name: String): String = "todo_when_$name"
+
 /**
- * 오늘 해야 할 일.
+ * 새 할 일을 담을 날.
  *
- * 못 끝낸 지난 일은 사라지지 않고 위쪽에 따로 모입니다.
- * 오늘 새로 정한 일과 섞으면 밀린 일이 며칠 쌓였을 때 목록을 읽을 수 없게 됩니다.
+ * 대부분은 오늘 아니면 내일이라 두 번 누르지 않게 칩으로 둡니다. 그 밖의 날은 만들고 나서
+ * 고치기에서 고릅니다. 여기에 달력을 붙이면 한 줄로 적어 넣는 빠름이 사라집니다.
+ */
+private enum class NewTodoWhen(val label: String) {
+    TODAY("오늘"),
+    TOMORROW("내일"),
+    SOMEDAY("언젠가");
+
+    fun dateFrom(today: LocalDate): LocalDate? = when (this) {
+        TODAY -> today
+        TOMORROW -> today.plusDays(1)
+        SOMEDAY -> null
+    }
+}
+
+/**
+ * 할 일.
+ *
+ * 예전에는 오늘 탭 안에서 루틴과 자리를 나눠 썼고, 화면에는 지난 일과 오늘만 보였습니다.
+ * 앞일을 적어 두어도 그날이 오기 전에는 보이지 않아 적어 둘 곳이 못 되었습니다.
+ * 지금은 마감일이 없어도 되고([TodoBucket.SOMEDAY]), 앞으로의 일도 칸을 나눠 함께 보입니다.
  */
 @Composable
 fun TodoScreen(
@@ -70,21 +97,25 @@ fun TodoScreen(
     var editing by remember { mutableStateOf<TodoDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<TodoEntity?>(null) }
     var newTitle by remember { mutableStateOf("") }
+    var newWhen by rememberSaveable { mutableStateOf(NewTodoWhen.TODAY.name) }
 
-    val overdue = todos.filter { it.isOverdueOn(today) }.sortedBy { it.dueDate }
-    val todayList = todos.filter { it.dueDate == today.toString() }
-    val remaining = todayList.count { !it.isDone }
+    val selectedWhen = NewTodoWhen.valueOf(newWhen)
+    val buckets = remember(todos, today) { TodoBuckets.group(todos, today) }
+    val remainingToday = TodoBuckets.remainingCount(buckets[TodoBucket.TODAY].orEmpty())
+    val remainingOverdue = TodoBuckets.remainingCount(buckets[TodoBucket.OVERDUE].orEmpty())
 
     val listState = rememberLazyListState()
-    // 안내 카드 1 + (지난 일 제목 1 + 지난 일들) + 오늘 제목 1 + 오늘 일들 순서입니다.
-    val focusIndex = remember(focusId, overdue, todayList) {
-        val inOverdue = overdue.indexOfFirst { it.id == focusId }
-        if (inOverdue >= 0) return@remember 2 + inOverdue
-
-        val inToday = todayList.indexOfFirst { it.id == focusId }
-        if (inToday < 0) return@remember null
-        val overdueBlock = if (overdue.isEmpty()) 0 else 1 + overdue.size
-        2 + overdueBlock + inToday
+    // 안내 카드 하나를 지나고, 칸마다 제목 한 줄과 그 칸의 할 일들이 이어집니다.
+    val focusIndex = remember(focusId, buckets) {
+        if (focusId == null) return@remember null
+        var index = 1
+        for ((_, list) in buckets) {
+            index += 1
+            val found = list.indexOfFirst { it.id == focusId }
+            if (found >= 0) return@remember index + found
+            index += list.size
+        }
+        null
     }
     ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
 
@@ -101,7 +132,11 @@ fun TodoScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = if (remaining > 0) "오늘 남은 일 ${remaining}개" else "오늘 할 일을 다 끝냈습니다.",
+                        text = when {
+                            remainingOverdue > 0 -> "오늘 남은 일 ${remainingToday}개 · 지난 일 ${remainingOverdue}개"
+                            remainingToday > 0 -> "오늘 남은 일 ${remainingToday}개"
+                            else -> "오늘 할 일을 다 끝냈습니다."
+                        },
                         style = MaterialTheme.typography.titleMedium
                     )
                     Row(
@@ -120,7 +155,12 @@ fun TodoScreen(
                         Button(
                             enabled = newTitle.isNotBlank(),
                             onClick = {
-                                onSaveTodo(TodoDraft(title = newTitle, dueDate = today))
+                                onSaveTodo(
+                                    TodoDraft(
+                                        title = newTitle,
+                                        dueDate = selectedWhen.dateFrom(today)
+                                    )
+                                )
                                 newTitle = ""
                             },
                             modifier = Modifier.testTag(todoAddButtonTag)
@@ -128,6 +168,18 @@ fun TodoScreen(
                             Text("추가")
                         }
                     }
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(NewTodoWhen.entries) { choice ->
+                            FilterChip(
+                                selected = selectedWhen == choice,
+                                onClick = { newWhen = choice.name },
+                                label = { Text(choice.label) },
+                                modifier = Modifier.testTag(todoWhenTag(choice.name))
+                            )
+                        }
+                    }
+
                     if (!canScheduleExactAlarms) {
                         Text(
                             text = "정확한 알람 권한이 없어 알람이 늦게 울릴 수 있습니다.",
@@ -142,57 +194,49 @@ fun TodoScreen(
             }
         }
 
-        if (overdue.isNotEmpty()) {
+        if (todos.isEmpty()) {
             item {
-                Text(
-                    text = "지난 일 ${overdue.size}개",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.error
+                EmptyCard(
+                    title = "적어 둔 할 일이 없습니다.",
+                    body = "오늘 것도, 다음 주 것도, 날짜를 정하지 않은 것도 여기에 함께 모입니다."
                 )
             }
-            items(overdue, key = { "overdue-${it.id}" }) { todo ->
+        }
+
+        buckets.forEach { (bucket, list) ->
+            item(key = "head-${bucket.name}") {
+                val remaining = TodoBuckets.remainingCount(list)
+                Text(
+                    text = if (remaining > 0) "${bucket.label} ${remaining}개" else bucket.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    // 지난 일만 붉게 둡니다. 다 물들이면 어느 것이 급한지 알 수 없습니다.
+                    color = if (bucket == TodoBucket.OVERDUE) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    modifier = Modifier.testTag(todoBucketTag(bucket.name))
+                )
+            }
+
+            items(list, key = { "${bucket.name}-${it.id}" }) { todo ->
                 TodoRow(
                     todo = todo,
                     focused = todo.id == focusId,
                     focusKey = focusId,
-                    isOverdue = true,
+                    isOverdue = bucket == TodoBucket.OVERDUE && !todo.isDone,
                     onToggleDone = { onToggleDone(todo.id) },
                     onEdit = { editing = TodoDraft.from(todo) },
                     onDelete = { pendingDelete = todo }
                 )
             }
         }
-
-        item {
-            Text("오늘", style = MaterialTheme.typography.titleSmall)
-        }
-
-        if (todayList.isEmpty()) {
-            item {
-                Text(
-                    text = "오늘 정한 할 일이 없습니다.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        items(todayList, key = { "today-${it.id}" }) { todo ->
-            TodoRow(
-                todo = todo,
-                focused = todo.id == focusId,
-                focusKey = focusId,
-                isOverdue = false,
-                onToggleDone = { onToggleDone(todo.id) },
-                onEdit = { editing = TodoDraft.from(todo) },
-                onDelete = { pendingDelete = todo }
-            )
-        }
     }
 
     editing?.let { draft ->
         TodoEditDialog(
             draft = draft,
+            today = today,
             onDismiss = { editing = null },
             onSave = {
                 onSaveTodo(it)
@@ -221,6 +265,9 @@ fun TodoScreen(
     }
 }
 
+/** 칸 제목. 화면에는 같은 글자가 여럿이라 표식으로 짚습니다. */
+internal fun todoBucketTag(name: String): String = "todo_bucket_$name"
+
 @Composable
 private fun TodoRow(
     todo: TodoEntity,
@@ -237,41 +284,41 @@ private fun TodoRow(
             .focusHighlight(focused = focused, key = focusKey)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Checkbox(checked = todo.isDone, onCheckedChange = { onToggleDone() })
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 8.dp)
+                    .padding(horizontal = 4.dp)
             ) {
                 Text(
                     text = todo.title,
                     style = MaterialTheme.typography.bodyLarge,
-                    // 끝낸 일은 목록에 남되 한눈에 구분되어야 합니다.
-                    textDecoration = if (todo.isDone) TextDecoration.LineThrough else null
+                    textDecoration = if (todo.isDone) TextDecoration.LineThrough else null,
+                    color = if (isOverdue) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
                 )
-                val subtitle = buildList {
-                    if (isOverdue) add(todo.dueDate)
-                    todo.remindAt?.let { add("알람 ${formatTime(it)}") }
-                    if (todo.note.isNotBlank()) add(todo.note)
-                }.joinToString(" · ")
+                val subtitle = listOfNotNull(
+                    todo.dueDate.takeIf { it.isNotBlank() },
+                    todo.remindAt?.let { "알람 ${formatTime(it)}" },
+                    todo.note.takeIf { it.isNotBlank() }
+                ).joinToString(" · ")
                 if (subtitle.isNotBlank()) {
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (isOverdue) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            TextButton(onClick = onEdit) { Text("수정") }
+            TextButton(onClick = onEdit) { Text("고치기") }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Outlined.Delete, contentDescription = "지우기")
+                Icon(imageVector = Icons.Outlined.Delete, contentDescription = "할 일 지우기")
             }
         }
     }
@@ -280,6 +327,7 @@ private fun TodoRow(
 @Composable
 private fun TodoEditDialog(
     draft: TodoDraft,
+    today: LocalDate,
     onDismiss: () -> Unit,
     onSave: (TodoDraft) -> Unit
 ) {
@@ -306,7 +354,7 @@ private fun TodoEditDialog(
                 )
                 OutlinedButton(
                     onClick = {
-                        val date = current.dueDate
+                        val date = current.dueDate ?: today
                         DatePickerDialog(
                             context,
                             { _, year, month, dayOfMonth ->
@@ -319,17 +367,29 @@ private fun TodoEditDialog(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("날짜 ${current.dueDate}")
+                    Text(current.dueDate?.let { "날짜 $it" } ?: "날짜 없음 (언젠가)")
+                }
+                if (current.dueDate != null) {
+                    // 날짜를 지우면 알람도 함께 지웁니다. 붙을 날이 없는 알람은 언제 울릴지 정할 수 없습니다.
+                    TextButton(
+                        onClick = { current = current.copy(dueDate = null, remindAt = null) },
+                        modifier = Modifier.testTag(todoClearDateTag)
+                    ) {
+                        Text("날짜 지우기")
+                    }
                 }
                 OutlinedButton(
+                    // 날짜가 없으면 알람을 걸 날이 없습니다.
+                    enabled = current.dueDate != null,
                     onClick = {
+                        val dueDate = current.dueDate ?: return@OutlinedButton
                         val base = current.remindAt?.let {
                             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime()
-                        } ?: LocalDateTime.of(current.dueDate, java.time.LocalTime.of(9, 0))
+                        } ?: LocalDateTime.of(dueDate, java.time.LocalTime.of(9, 0))
                         TimePickerDialog(
                             context,
                             { _, hour, minute ->
-                                current = current.copy(remindAt = toEpochMillis(current.dueDate, hour, minute))
+                                current = current.copy(remindAt = toEpochMillis(dueDate, hour, minute))
                             },
                             base.hour,
                             base.minute,
@@ -338,7 +398,10 @@ private fun TodoEditDialog(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(current.remindAt?.let { "알람 ${formatTime(it)}" } ?: "알람 없음")
+                    Text(
+                        current.remindAt?.let { "알람 ${formatTime(it)}" }
+                            ?: if (current.dueDate == null) "날짜를 정해야 알람을 걸 수 있습니다" else "알람 없음"
+                    )
                 }
                 if (current.remindAt != null) {
                     TextButton(onClick = { current = current.copy(remindAt = null) }) {
@@ -358,6 +421,8 @@ private fun TodoEditDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )
 }
+
+internal const val todoClearDateTag = "todo_clear_date"
 
 /** 날짜를 바꾸면 알람도 그 날짜로 따라가야 합니다. 시각만 남으면 지난 날에 걸립니다. */
 private fun toEpochMillis(date: LocalDate, hour: Int, minute: Int): Long {

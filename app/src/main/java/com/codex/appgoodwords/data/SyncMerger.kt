@@ -83,6 +83,14 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            // 받아 둔 피드백은 고칠 일이 거의 없지만, 지운 것이 되살아나면 안 되므로 같은 규칙을 씁니다.
+            growthReports = mergeMutable(
+                local = local.growthReports,
+                remote = remote.growthReports,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }

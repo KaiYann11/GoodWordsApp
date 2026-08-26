@@ -98,6 +98,50 @@ class RoutineScreenTest {
     }
 
     @Test
+    fun theProgressCardCountsWhatWasSteppedToday() {
+        showRoutines(todayCounts = mapOf(1L to 2))
+
+        // 두 번 밟은 루틴도 하루에 한 몫입니다. 횟수를 세면 세 개짜리 하루가 200%가 됩니다.
+        compose.onNodeWithText("1 / 3 · 33%").assertIsDisplayed()
+        compose.onNodeWithText("다음 차례: 스트레칭").assertIsDisplayed()
+    }
+
+    @Test
+    fun filteringDoesNotRenumberTheDay() {
+        // 걸러 놓고 다시 세면 "안 한 것"만 볼 때 3번이던 루틴이 1번으로 보여,
+        // 옮기기가 엉뚱한 자리를 가리킵니다.
+        showRoutines(todayCounts = mapOf(1L to 1))
+
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).performClick()
+
+        compose.onNodeWithText("스트레칭").assertIsDisplayed()
+        compose.onNodeWithText("기상 후 물 한 컵").assertDoesNotExist()
+        compose.onNodeWithContentDescription("2 번째. 차례 옮기기").assertIsDisplayed()
+        compose.onNodeWithContentDescription("1 번째. 차례 옮기기").assertDoesNotExist()
+    }
+
+    @Test
+    fun theDoneFilterShowsOnlyWhatWasStepped() {
+        showRoutines(todayCounts = mapOf(3L to 1))
+
+        compose.onNodeWithTag(routineFilterTag("DONE")).performClick()
+
+        compose.onNodeWithText("책 한 쪽").assertIsDisplayed()
+        compose.onNodeWithText("스트레칭").assertDoesNotExist()
+        // 걸러도 차례는 온전한 줄의 것입니다.
+        compose.onNodeWithContentDescription("3 번째. 차례 옮기기").assertIsDisplayed()
+    }
+
+    @Test
+    fun anEmptyFilterSaysWhyInsteadOfShowingNothing() {
+        showRoutines(todayCounts = mapOf(1L to 1, 2L to 1, 3L to 1))
+
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).performClick()
+
+        compose.onNodeWithText("오늘 루틴을 모두 밟았습니다.").assertIsDisplayed()
+    }
+
+    @Test
     fun everythingDoneLeavesNoNextStep() {
         showRoutines(todayCounts = mapOf(1L to 1, 2L to 1, 3L to 1))
 

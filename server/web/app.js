@@ -323,6 +323,7 @@ function emptySnapshot() {
     diaries: [],
     todos: [],
     books: [],
+    growthReports: [],
     settings: {},
   };
 }
@@ -421,6 +422,7 @@ function render() {
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
+  if (state.activeTab === "growth") renderGrowth();
   if (state.activeTab === "history") renderHistory();
   if (state.activeTab === "settings") renderSettings();
 }
@@ -610,7 +612,7 @@ function renderTodos() {
           </div>
           <div class="field">
             <label for="todoDueDate">마감 날짜</label>
-            <input id="todoDueDate" name="dueDate" type="date" value="${attr(editing.dueDate || today)}" required>
+            <input id="todoDueDate" name="dueDate" type="date" value="${attr(editing.dueDate || "")}">
           </div>
           <div class="field">
             <label for="todoRemindAt">알람</label>
@@ -631,6 +633,7 @@ function renderTodos() {
         ${todoGroup(`지난 일 ${groups.overdue.length}개`, groups.overdue, today)}
         ${todoGroup(`오늘 ${groups.today.length}개`, groups.today, today)}
         ${todoGroup(`예정 ${groups.upcoming.length}개`, groups.upcoming, today)}
+        ${todoGroup(`언젠가 ${groups.someday.length}개`, groups.someday, today)}
         ${todoGroup(`끝낸 일 ${groups.done.length}개`, groups.done, today)}
         ${state.snapshot.todos.length ? "" : empty("저장된 할 일이 없습니다.")}
       </section>
@@ -653,9 +656,12 @@ function todoGroup(title, todos, today) {
  * 아예 안 보이면 밀린 일을 영영 놓칩니다. 그래서 따로 모읍니다.
  */
 function groupTodos(todos, today) {
-  const groups = { overdue: [], today: [], upcoming: [], done: [] };
+  // 마감일이 없는 할 일도 있습니다("언젠가"). 날짜로 견주기 전에 먼저 갈라 놓지 않으면
+  // 빈 문자열이 어떤 날짜보다도 작아서 지난 일에 섞입니다.
+  const groups = { overdue: [], today: [], upcoming: [], someday: [], done: [] };
   for (const todo of todos) {
     if (todo.doneAt) groups.done.push(todo);
+    else if (!todo.dueDate) groups.someday.push(todo);
     else if (todo.dueDate < today) groups.overdue.push(todo);
     else if (todo.dueDate === today) groups.today.push(todo);
     else groups.upcoming.push(todo);
@@ -665,14 +671,14 @@ function groupTodos(todos, today) {
 
 function todoCard(todo, today) {
   const done = Boolean(todo.doneAt);
-  const overdue = !done && todo.dueDate < today;
+  const overdue = !done && Boolean(todo.dueDate) && todo.dueDate < today;
   return `
     <article class="item">
       <div class="itemHeader">
         <div>
           <h3>${escapeHtml(todo.title)}</h3>
           <div class="meta">
-            <span class="chip">${escapeHtml(todo.dueDate)}</span>
+            <span class="chip">${escapeHtml(todo.dueDate || "언젠가")}</span>
             ${overdue ? `<span class="chip danger">지남</span>` : ""}
             ${todo.remindAt ? `<span class="chip">알람 ${formatDate(todo.remindAt)}</span>` : ""}
             ${done ? `<span class="chip">완료 ${formatDate(todo.doneAt)}</span>` : ""}
@@ -1366,7 +1372,7 @@ function todaySummary() {
 /** 오늘까지 마감인데 아직 안 끝낸 일. 지난 일도 오늘 할 일로 봅니다. */
 function remainingTodayTodos() {
   const today = todayIso();
-  return state.snapshot.todos.filter((todo) => !todo.doneAt && todo.dueDate <= today);
+  return state.snapshot.todos.filter((todo) => !todo.doneAt && Boolean(todo.dueDate) && todo.dueDate <= today);
 }
 
 function summaryLine(line) {
@@ -1536,4 +1542,50 @@ function escapeHtml(value = "") {
 
 function attr(value = "") {
   return escapeHtml(value);
+}
+
+/**
+ * AI가 써 준 돌아보기.
+ *
+ * 여기서는 읽기만 합니다. 만드는 것은 앱이 합니다. 무엇을 보낼지(일기 본문을 실을지 같은 것)는
+ * 사용자가 앱에서 정해 두는데, 웹에서 따로 부르면 그 뜻이 조용히 뒤집힐 수 있습니다.
+ */
+function renderGrowth() {
+  const reports = [...(state.snapshot.growthReports || [])].sort(
+    (a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0),
+  );
+  app.innerHTML = `
+    <section>
+      <h2 class="sectionTitle">돌아보기 ${reports.length}편</h2>
+      <p class="meta">앱에서 받아 둔 글입니다. 새로 받는 것은 앱에서 합니다.</p>
+      <div class="itemList">
+        ${reports.length ? reports.map(growthCard).join("") : empty("아직 받은 돌아보기가 없습니다.")}
+      </div>
+    </section>
+  `;
+}
+
+function growthCard(report) {
+  const lines = (title, values) =>
+    values && values.length
+      ? `<p><strong>${title}</strong></p><ul>${values.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+      : "";
+  return `
+    <article class="item">
+      <div class="itemHeader">
+        <div>
+          <h3>${escapeHtml(report.period || "")} 돌아보기</h3>
+          <div class="meta">
+            <span class="chip">${escapeHtml(report.periodStart)} ~ ${escapeHtml(report.periodEnd)}</span>
+            ${report.model ? `<span class="chip">${escapeHtml(report.model)}</span>` : ""}
+          </div>
+        </div>
+      </div>
+      ${lines("잘한 점", report.strengths)}
+      ${lines("다음 걸음", report.improvements)}
+      ${report.suggestedQuote ? `<p><strong>추천 글귀</strong><br>${escapeHtml(report.suggestedQuote)}</p>` : ""}
+      ${lines("해 볼 만한 루틴", report.suggestedRoutines)}
+      ${report.guide ? `<p><strong>가이드</strong><br>${escapeHtml(report.guide)}</p>` : ""}
+    </article>
+  `;
 }

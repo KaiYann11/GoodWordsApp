@@ -89,6 +89,8 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.2")
+    // 앱 잠금은 기기에 이미 있는 잠금(지문·PIN)을 빌려 씁니다. 우리가 비밀번호를 따로 보관하지 않습니다.
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")

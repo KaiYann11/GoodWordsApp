@@ -38,6 +38,17 @@ class SettingsStore(
         val autoSyncEnabled = booleanPreferencesKey("auto_sync_enabled")
         val autoSyncIntervalHours = intPreferencesKey("auto_sync_interval_hours")
         val lastSyncAt = longPreferencesKey("last_sync_at")
+        /** AI 열쇠는 이 기기에만 둡니다. 동기화 스냅샷과 백업 파일에는 넣지 않습니다. */
+        val aiApiKey = stringPreferencesKey("ai_api_key")
+        val aiModel = stringPreferencesKey("ai_model")
+        val aiSchedule = stringPreferencesKey("ai_schedule")
+        val aiHour = intPreferencesKey("ai_hour")
+        val aiMinute = intPreferencesKey("ai_minute")
+        val aiIncludeDiaryBody = booleanPreferencesKey("ai_include_diary_body")
+        val aiLastRunAt = longPreferencesKey("ai_last_run_at")
+        val aiLastError = stringPreferencesKey("ai_last_error")
+        /** 앱 잠금. 비밀번호는 담지 않습니다. 기기에 있는 잠금을 빌려 씁니다. */
+        val appLockEnabled = booleanPreferencesKey("app_lock_enabled")
         val lastSyncError = stringPreferencesKey("last_sync_error")
         /** 서버에서 마지막으로 본 리비전 번호. 다음 동기화에서 "이 뒤에 바뀐 것만" 달라고 씁니다. */
         val serverRev = longPreferencesKey("server_rev")
@@ -78,6 +89,27 @@ class SettingsStore(
         )
     }
 
+    val aiFeedbackSettingsFlow: Flow<AiFeedbackSettings> = context.dataStore.data.map { preferences ->
+        AiFeedbackSettings(
+            apiKey = preferences[Keys.aiApiKey].orEmpty(),
+            model = preferences[Keys.aiModel]?.takeIf { it.isNotBlank() } ?: AiFeedbackSettings.DEFAULT_MODEL,
+            schedule = preferences[Keys.aiSchedule].orEmpty(),
+            hour = preferences[Keys.aiHour] ?: AiFeedbackSettings.DEFAULT_HOUR,
+            minute = preferences[Keys.aiMinute] ?: 0,
+            includeDiaryBody = preferences[Keys.aiIncludeDiaryBody] ?: false,
+            lastRunAt = preferences[Keys.aiLastRunAt] ?: 0L,
+            lastError = preferences[Keys.aiLastError].orEmpty()
+        )
+    }
+
+    val appLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[Keys.appLockEnabled] ?: false
+    }
+
+    suspend fun setAppLockEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences -> preferences[Keys.appLockEnabled] = enabled }
+    }
+
     val syncStatusFlow: Flow<SyncStatus> = context.dataStore.data.map { preferences ->
         SyncStatus(
             lastSyncAt = preferences[Keys.lastSyncAt] ?: 0L,
@@ -88,6 +120,27 @@ class SettingsStore(
     suspend fun getSettings(): ReminderSettings = settingsFlow.first()
 
     suspend fun getServerSyncSettings(): ServerSyncSettings = serverSyncSettingsFlow.first()
+
+    suspend fun getAiFeedbackSettings(): AiFeedbackSettings = aiFeedbackSettingsFlow.first()
+
+    suspend fun updateAiFeedbackSettings(settings: AiFeedbackSettings) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.aiApiKey] = settings.apiKey.trim()
+            preferences[Keys.aiModel] = settings.model.trim().ifBlank { AiFeedbackSettings.DEFAULT_MODEL }
+            preferences[Keys.aiSchedule] = settings.schedule
+            preferences[Keys.aiHour] = settings.hour.coerceIn(0, 23)
+            preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
+            preferences[Keys.aiIncludeDiaryBody] = settings.includeDiaryBody
+        }
+    }
+
+    /** 만들어 본 결과. 배경에서 돌다 실패하면 화면에 뜨지 않아 여기에 남깁니다. */
+    suspend fun recordAiFeedbackResult(runAt: Long, error: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.aiLastRunAt] = runAt
+            preferences[Keys.aiLastError] = error
+        }
+    }
 
     /** 설정은 레코드가 아니라 한 덩어리여서, 병합에서 최근에 손댄 쪽을 고르려면 시각이 필요하다. */
     suspend fun getSettingsUpdatedAt(): Long = context.dataStore.data.first()[Keys.settingsUpdatedAt] ?: 0L

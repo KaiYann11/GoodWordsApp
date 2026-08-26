@@ -39,7 +39,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.ReminderSettings
+import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncStatus
@@ -54,11 +56,13 @@ internal const val autoSyncSwitchTag = "auto_sync_switch"
 /** 이력은 하단 바에서 빠졌으므로 여기로 들어가는 길이 있는지 확인해야 한다. */
 internal const val historyButtonTag = "history_button"
 
-/** 통계도 하단 바에서 빠졌으므로 설정에서 여는 버튼을 따로 둔다. */
-internal const val statsButtonTag = "stats_button"
-
 /** 교체와 병합은 결과가 정반대라 버튼을 헷갈리면 안 된다. */
 internal const val fileMergeButtonTag = "file_merge_button"
+
+/** AI 열쇠 칸과 주기 칩. 설정에는 칸과 칩이 여럿이라 표식으로 짚습니다. */
+internal const val aiApiKeyFieldTag = "ai_api_key_field"
+
+internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank { "off" }
 
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
@@ -90,8 +94,11 @@ fun SettingsScreen(
     onDownloadFromServer: () -> Unit,
     onRestoreBackup: (SyncBackup) -> Unit,
     onDeleteCategory: (String) -> Unit,
-    onOpenStats: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
+    appLockEnabled: Boolean = false,
+    onAppLockChanged: (Boolean) -> Unit = {},
+    aiFeedbackSettings: AiFeedbackSettings = AiFeedbackSettings(),
+    onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -662,19 +669,18 @@ fun SettingsScreen(
                 Text("테스트 알림 보내기")
             }
         }
-
-        // 통계와 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기에서 엽니다.
         item {
-            OutlinedButton(
-                onClick = onOpenStats,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(statsButtonTag)
-            ) {
-                Text("통계 보기")
-            }
+            AppLockSection(enabled = appLockEnabled, onChanged = onAppLockChanged)
         }
 
+        item {
+            AiFeedbackSection(
+                settings = aiFeedbackSettings,
+                onChanged = onAiFeedbackSettingsChanged
+            )
+        }
+
+        // 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기에서 엽니다. 통계는 홈이 맡습니다.
         item {
             OutlinedButton(
                 onClick = onOpenHistory,
@@ -786,4 +792,190 @@ private fun defaultExportFileName(): String {
     val timestamp = LocalDateTime.now()
         .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
     return "app-good-words-export-$timestamp.json"
+}
+
+/**
+ * AI 성장 피드백 설정.
+ *
+ * 열쇠는 이 기기에만 둡니다. 동기화 스냅샷과 백업 파일에는 넣지 않으므로, 기기를 새로
+ * 붙이면 거기서 다시 넣거나 서버에 넣어 두어야 합니다.
+ */
+@Composable
+private fun AiFeedbackSection(
+    settings: AiFeedbackSettings,
+    onChanged: (AiFeedbackSettings) -> Unit
+) {
+    val context = LocalContext.current
+    var apiKeyText by rememberSaveable { mutableStateOf(settings.apiKey) }
+
+    LaunchedEffect(settings.apiKey) {
+        if (apiKeyText != settings.apiKey) apiKeyText = settings.apiKey
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("AI 돌아보기", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "기록을 AI에게 보내 잘한 점과 다음 걸음을 받아 옵니다. " +
+                    "서버 주소가 설정되어 있으면 서버를 먼저 쓰고, 없으면 아래 열쇠로 이 기기가 직접 부릅니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            OutlinedTextField(
+                value = apiKeyText,
+                onValueChange = { apiKeyText = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(aiApiKeyFieldTag),
+                label = { Text("OpenAI API 키") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                supportingText = { Text("이 기기에만 저장됩니다. 백업·동기화에는 담기지 않습니다.") }
+            )
+            OutlinedButton(
+                onClick = { onChanged(settings.copy(apiKey = apiKeyText.trim())) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("열쇠 저장")
+            }
+
+            Text("모델", style = MaterialTheme.typography.titleSmall)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(AiFeedbackSettings.MODEL_CHOICES) { model ->
+                    FilterChip(
+                        selected = settings.model == model,
+                        onClick = { onChanged(settings.copy(model = model)) },
+                        label = { Text(model) }
+                    )
+                }
+            }
+
+            Text("자동 실행 주기", style = MaterialTheme.typography.titleSmall)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(
+                        selected = !settings.isScheduled,
+                        onClick = { onChanged(settings.copy(schedule = "")) },
+                        label = { Text("꺼짐") },
+                        modifier = Modifier.testTag(aiScheduleTag(""))
+                    )
+                }
+                items(ReportPeriod.entries.filter { it != ReportPeriod.MANUAL }) { period ->
+                    FilterChip(
+                        selected = settings.schedule == period.name,
+                        onClick = { onChanged(settings.copy(schedule = period.name)) },
+                        label = { Text(period.label) },
+                        modifier = Modifier.testTag(aiScheduleTag(period.name))
+                    )
+                }
+            }
+
+            if (settings.isScheduled) {
+                OutlinedButton(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, hour, minute -> onChanged(settings.copy(hour = hour, minute = minute)) },
+                            settings.hour,
+                            settings.minute,
+                            true
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("실행 시각 %02d:%02d".format(settings.hour, settings.minute))
+                }
+                Text(
+                    text = "그날이 되면 이 시각에 만들고 알림으로 알려 드립니다. " +
+                        "폰이 꺼져 있었으면 다음에 깨어날 때 만듭니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            SettingSwitchRow(
+                title = "일기 본문도 보내기",
+                checked = settings.includeDiaryBody,
+                onCheckedChange = { onChanged(settings.copy(includeDiaryBody = it)) }
+            )
+            Text(
+                text = if (settings.includeDiaryBody) {
+                    "일기 본문이 그대로 AI에 전달됩니다. 피드백은 구체적이지만, 가장 사적인 글이 밖으로 나갑니다."
+                } else {
+                    "일기는 날짜·기분·날씨·글자 수만 보냅니다. 본문은 이 기기를 떠나지 않습니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (settings.lastRunAt > 0L) {
+                Text(
+                    text = "마지막 실행: ${formatDateTime(settings.lastRunAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (settings.lastError.isNotBlank()) {
+                Text(
+                    text = settings.lastError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 앱 잠금 설정.
+ *
+ * **기기에 잠금이 없으면 켤 수 없습니다.** 앱만 잠가 봐야 지킬 수 있는 것이 없고, 무엇보다
+ * 풀 방법이 없어서 사용자가 자기 기록에서 갇힙니다.
+ */
+@Composable
+private fun AppLockSection(
+    enabled: Boolean,
+    onChanged: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val canLock = remember { AppLock.canLock(context) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("앱 잠금", style = MaterialTheme.typography.titleMedium)
+            SettingSwitchRow(
+                title = "열 때 기기 잠금으로 확인",
+                checked = enabled && canLock,
+                onCheckedChange = { wanted -> if (canLock) onChanged(wanted) }
+            )
+            Text(
+                text = when {
+                    !canLock ->
+                        "휴대폰에 화면 잠금(지문·PIN·패턴)이 없어 켤 수 없습니다. " +
+                            "휴대폰 설정에서 화면 잠금을 먼저 정해 주세요."
+
+                    enabled ->
+                        "앱을 켤 때와 1분 넘게 자리를 비운 뒤 돌아올 때 확인합니다. " +
+                            "사진을 고르러 잠깐 다녀오는 것으로는 잠기지 않습니다."
+
+                    else ->
+                        "일기처럼 사적인 기록을 남 눈에서 가립니다. 비밀번호를 따로 만들지 않고 " +
+                            "휴대폰에 이미 있는 잠금을 그대로 씁니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (canLock) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+        }
+    }
 }

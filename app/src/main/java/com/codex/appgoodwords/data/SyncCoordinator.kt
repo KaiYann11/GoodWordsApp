@@ -33,7 +33,8 @@ class SyncCoordinator(
         deletions = database.deletionDao().getAll(),
         diaries = database.diaryDao().getAll(),
         todos = database.todoDao().getAll(),
-        books = database.bookDao().getAll()
+        books = database.bookDao().getAll(),
+        growthReports = database.growthReportDao().getAll()
     )
 
     /**

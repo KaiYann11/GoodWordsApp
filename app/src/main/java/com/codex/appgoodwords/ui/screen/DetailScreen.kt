@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.SubcomposeAsyncImage
 import com.codex.appgoodwords.data.ContentItemEntity
@@ -60,10 +62,15 @@ fun DetailScreen(
     onDelete: (ContentItemEntity) -> Unit,
     onConfirm: (ContentItemEntity) -> Unit,
     onToggleFavorite: (ContentItemEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 이 글귀를 오늘부터 밟을 루틴으로 옮깁니다. */
+    onMakeRoutine: (String) -> Unit = {},
+    /** 이 글귀를 할 일 하나로 옮깁니다. */
+    onMakeTodo: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var practiceKind by remember { mutableStateOf<PracticeKind?>(null) }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -347,7 +354,124 @@ fun DetailScreen(
                 }
             }
         }
+
+        item {
+            // 읽고 마는 대신 실천으로 옮기는 자리입니다. 모아 두는 것과 실천하는 것이 한 앱에
+            // 있는데 그 사이를 잇는 길이 AI 추천에만 있었습니다.
+            SectionCard(title = "실천으로 옮기기") {
+                Text(
+                    text = "마음에 남은 글귀를 루틴이나 할 일로 만들어 둡니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { practiceKind = PracticeKind.ROUTINE },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(detailMakeRoutineTag)
+                    ) {
+                        Text("루틴으로")
+                    }
+                    OutlinedButton(
+                        onClick = { practiceKind = PracticeKind.TODO },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(detailMakeTodoTag)
+                    ) {
+                        Text("할 일로")
+                    }
+                }
+            }
+        }
     }
+
+    practiceKind?.let { kind ->
+        PracticeDialog(
+            kind = kind,
+            initialTitle = practiceTitleOf(item),
+            onDismiss = { practiceKind = null },
+            onConfirm = { title ->
+                when (kind) {
+                    PracticeKind.ROUTINE -> onMakeRoutine(title)
+                    PracticeKind.TODO -> onMakeTodo(title)
+                }
+                practiceKind = null
+            }
+        )
+    }
+}
+
+internal const val detailMakeRoutineTag = "detail_make_routine"
+internal const val detailMakeTodoTag = "detail_make_todo"
+internal const val practiceTitleFieldTag = "practice_title_field"
+
+private enum class PracticeKind(val label: String) {
+    ROUTINE("루틴"),
+    TODO("할 일")
+}
+
+/**
+ * 글귀에서 실천 이름을 뽑습니다.
+ *
+ * 본문을 그대로 넣지 않습니다. 글귀는 대개 한 문단이라 루틴 이름으로는 너무 길고,
+ * 목록에서 잘려 무엇인지 알 수 없게 됩니다. 제목이 있으면 제목을, 없으면 첫 줄만 씁니다.
+ * 어차피 다음 칸에서 고칠 수 있으니 여기서는 손이 덜 가는 쪽으로 채워 둡니다.
+ */
+private fun practiceTitleOf(item: ContentItemEntity): String {
+    val source = item.title.ifBlank { item.body }
+    val firstLine = source.trim().lineSequence().firstOrNull().orEmpty().trim()
+    return firstLine.take(PRACTICE_TITLE_LIMIT).trim()
+}
+
+private const val PRACTICE_TITLE_LIMIT = 30
+
+@Composable
+private fun PracticeDialog(
+    kind: PracticeKind,
+    initialTitle: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var title by remember(initialTitle) { mutableStateOf(initialTitle) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${kind.label}으로 만들기") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = if (kind == PracticeKind.ROUTINE) {
+                        "하루에 밟는 차례 맨 뒤에 붙습니다."
+                    } else {
+                        "오늘 할 일로 담습니다. 날짜는 할 일 화면에서 바꿀 수 있습니다."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("이름") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(practiceTitleFieldTag)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = title.isNotBlank(),
+                onClick = { onConfirm(title.trim()) }
+            ) {
+                Text("만들기")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
 }
 
 @Composable

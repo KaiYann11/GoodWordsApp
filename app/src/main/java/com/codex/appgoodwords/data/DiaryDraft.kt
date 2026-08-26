@@ -92,7 +92,8 @@ data class TodoDraft(
     val id: Long = 0L,
     val title: String = "",
     val note: String = "",
-    val dueDate: LocalDate = LocalDate.now(),
+    /** 마감일. null이면 "언젠가" 할 일입니다. */
+    val dueDate: LocalDate? = LocalDate.now(),
     /** 알람 시각(epoch millis). null이면 알리지 않습니다. */
     val remindAt: Long? = null
 ) {
@@ -101,7 +102,7 @@ data class TodoDraft(
             id = todo.id,
             title = todo.title,
             note = todo.note,
-            dueDate = runCatching { LocalDate.parse(todo.dueDate) }.getOrElse { LocalDate.now() },
+            dueDate = runCatching { LocalDate.parse(todo.dueDate) }.getOrNull(),
             remindAt = todo.remindAt
         )
     }

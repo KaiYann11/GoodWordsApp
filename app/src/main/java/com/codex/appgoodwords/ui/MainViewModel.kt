@@ -4,17 +4,24 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
+import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.ExposureTrigger
+import com.codex.appgoodwords.data.FeedbackWriter
+import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.LinkMetadata
+import com.codex.appgoodwords.data.MoodPractice
+import com.codex.appgoodwords.data.OnThisDay
 import com.codex.appgoodwords.data.ReminderSettings
+import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
@@ -26,6 +33,7 @@ import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.data.SyncStatus
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
+import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,6 +69,12 @@ class MainViewModel(
 
     val books = container.repository.observeBooks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val growthReports = container.repository.observeGrowthReports()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val aiFeedbackSettings = container.settingsStore.aiFeedbackSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AiFeedbackSettings())
 
     val routineChecks = container.repository.observeRoutineChecks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -118,6 +133,42 @@ class MainViewModel(
         )
     )
 
+    /**
+     * 홈에 띄울 짚어 주는 문구.
+     *
+     * 통계 카드가 숫자를 맡고, 이쪽이 그 숫자가 무슨 뜻인지를 맡습니다.
+     * 화면에서 셈하지 않고 여기서 만들어 내려보내야 [FeedbackWriter]를 기기 없이 시험할 수 있습니다.
+     */
+    val feedbackNotes = combine(stats, dailyLoop, routines, routineChecks) { summary, progress, routineList, checks ->
+        FeedbackWriter.write(
+            summary = summary,
+            progress = progress,
+            routines = routineList,
+            routineChecks = checks,
+            today = LocalDate.now()
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 지난 이맘때 남긴 것. 없는 날이 대부분이라 대개 빈 목록입니다. */
+    val onThisDay = combine(diaries, allItems) { diaryList, items ->
+        OnThisDay.find(today = LocalDate.now(), diaries = diaryList, items = items)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 기분별 실천. 기분 그래프와 실천 통계를 겹쳐 본 것입니다. */
+    val moodPractice = combine(diaries, routineChecks, historyEvents, todos) { diaryList, checks, events, todoList ->
+        MoodPractice.build(
+            diaries = diaryList,
+            routineChecks = checks,
+            events = events,
+            todos = todoList
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 여기저기 붙여 둔 첨부를 한자리에. 파일을 옮기지 않고 주소만 모읍니다. */
+    val attachmentShots = combine(diaries, allItems) { diaryList, items ->
+        AttachmentGallery.collect(diaries = diaryList, items = items)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val categories = allItems
         .map { items ->
             items.map { it.category.trim() }
@@ -164,6 +215,24 @@ class MainViewModel(
     /** 앱이 화면에서 물러난 시각. 아직 한 번도 물러난 적이 없으면 0입니다. */
     private var leftAtMillis = 0L
 
+    val appLockEnabled = container.settingsStore.appLockEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /**
+     * 잠금의 세 가지 상태.
+     *
+     * 세 번째([AppLockState.CHECKING])가 필요한 이유가 있습니다. 설정은 DataStore에서 읽어 오는데
+     * 그동안 화면은 이미 그려집니다. "잠김/열림" 둘뿐이면 어느 쪽을 처음 값으로 두든 한쪽이
+     * 손해입니다. 열림으로 두면 잠금을 켠 사람에게 첫 한 순간 내용이 비치고, 잠김으로 두면
+     * 켜지 않은 대다수가 열 때마다 잠금 화면이 깜빡입니다. 읽는 동안에는 아무것도 그리지 않습니다.
+     */
+    private val _lockState = MutableStateFlow(AppLockState.CHECKING)
+    val lockState: StateFlow<AppLockState> = _lockState.asStateFlow()
+
+    fun unlock() {
+        _lockState.value = AppLockState.OPEN
+    }
+
     private val routineDayRange = MutableStateFlow(container.repository.todayRangeMillis())
     val routineTodayCounts = combine(routineChecks, routineDayRange) { checks, range ->
         val (start, end) = range
@@ -181,6 +250,12 @@ class MainViewModel(
             reloadSyncBackups()
             // 앱을 다시 깔거나 기기를 껐다 켜면 예약이 사라질 수 있어 시작할 때 맞춰 둔다.
             container.reminderScheduler.syncAutoSync(container.settingsStore.getServerSyncSettings())
+            container.reminderScheduler.syncGrowthFeedback(container.settingsStore.getAiFeedbackSettings())
+            _lockState.value = if (container.settingsStore.appLockEnabledFlow.first()) {
+                AppLockState.LOCKED
+            } else {
+                AppLockState.OPEN
+            }
 
             val currentSettings = container.settingsStore.getSettings()
             if (currentSettings.showOnLaunch) {
@@ -263,6 +338,18 @@ class MainViewModel(
     }
 
     /**
+     * 잠금을 켜고 끕니다.
+     *
+     * 끌 때는 바로 풀어 줍니다. 껐는데 잠금 화면이 남아 있으면 사용자가 갇힙니다.
+     */
+    fun setAppLockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            container.settingsStore.setAppLockEnabled(enabled)
+            if (!enabled) _lockState.value = AppLockState.OPEN
+        }
+    }
+
+    /**
      * 앱이 화면 앞으로 돌아왔습니다. 오래 비웠으면 "다시 켠 것"으로 보고 새로 섞습니다.
      *
      * 화면을 돌릴 때도 여기를 지나지만, 나갔다 온 시간이 0에 가까워 섞이지 않습니다.
@@ -271,6 +358,10 @@ class MainViewModel(
         val awayMillis = SystemClock.elapsedRealtime() - leftAtMillis
         if (leftAtMillis != 0L && awayMillis >= RESHUFFLE_AFTER_MS) {
             reshuffleContent()
+        }
+        // 잠깐 사진을 고르러 나갔다 온 것까지 잠그면 성가십니다. 오래 비웠을 때만 다시 잠급니다.
+        if (leftAtMillis != 0L && awayMillis >= LOCK_AFTER_MS && appLockEnabled.value) {
+            _lockState.value = AppLockState.LOCKED
         }
         leftAtMillis = 0L
     }
@@ -348,16 +439,15 @@ class MainViewModel(
         }
     }
 
+    /**
+     * 기기 데이터를 파일로 내보냅니다.
+     *
+     * 화면이 들고 있는 목록이 아니라 DB에서 통째로 읽습니다. 화면에 없는 종류(일기·할 일·책 등)를
+     * 빠뜨리지 않으려는 것입니다. 예전에는 여기서 종류를 하나씩 넘겨 주다가 셋을 빠뜨렸고,
+     * 그 파일로 복원하면 기기의 일기가 사라졌습니다.
+     */
     suspend fun exportData(uri: Uri): Result<Int> = runCatching {
-        container.appDataExporter.export(
-            uri = uri,
-            items = allItems.value,
-            events = historyEvents.value,
-            routines = routines.value,
-            routineChecks = routineChecks.value,
-            routineMemos = routineMemos.value,
-            settings = container.settingsStore.getSettings()
-        )
+        container.appDataExporter.export(uri = uri, snapshot = currentSnapshot())
     }
 
     suspend fun importData(uri: Uri): Result<AppImportResult> = runCatching {
@@ -528,6 +618,71 @@ class MainViewModel(
         container.repository.moveRoutine(routineId, up)
     }
 
+    /**
+     * AI에게 성장 피드백을 받아 저장합니다.
+     *
+     * 실패 사유는 사용자가 읽고 무엇을 고칠지 알 수 있는 말이어야 합니다. 열쇠가 없는 것과
+     * 인터넷이 끊긴 것은 할 일이 다릅니다.
+     */
+    suspend fun requestGrowthFeedback(period: ReportPeriod): Result<GrowthReportEntity> = runCatching {
+        container.growthFeedbackCoordinator.generate(period)
+    }
+
+    /** 보내기 전에 무엇이 나가는지 보여 줍니다. 실제로 보내는 글과 같은 함수로 만듭니다. */
+    suspend fun previewGrowthPrompt(period: ReportPeriod): Result<String> = runCatching {
+        container.growthFeedbackCoordinator.preview(period)
+    }
+
+    suspend fun deleteGrowthReport(reportId: Long): Result<Unit> = runCatching {
+        container.repository.deleteGrowthReport(reportId)
+    }
+
+    fun updateAiFeedbackSettings(updated: AiFeedbackSettings) {
+        viewModelScope.launch {
+            container.settingsStore.updateAiFeedbackSettings(updated)
+            container.reminderScheduler.syncGrowthFeedback(updated)
+        }
+    }
+
+    /**
+     * 글귀를 오늘부터 밟을 루틴으로 옮깁니다.
+     *
+     * 모아 두는 것과 실천하는 것이 한 앱에 있는데, 그 사이를 잇는 길이 AI 추천에만 있었습니다.
+     */
+    suspend fun makeRoutineFromQuote(title: String): Result<Unit> = runCatching {
+        val trimmed = title.trim()
+        require(trimmed.isNotBlank()) { "루틴 이름이 비어 있습니다." }
+        container.repository.saveRoutine(RoutineDraft(title = trimmed, category = PRACTICE_CATEGORY))
+    }
+
+    /** 글귀를 오늘 할 일로 옮깁니다. 날짜는 할 일 화면에서 바꿉니다. */
+    suspend fun makeTodoFromQuote(title: String): Result<Unit> = runCatching {
+        val trimmed = title.trim()
+        require(trimmed.isNotBlank()) { "할 일 이름이 비어 있습니다." }
+        container.repository.saveTodo(TodoDraft(title = trimmed, dueDate = LocalDate.now()))
+    }
+
+    /** 추천 글귀를 보관함에 담습니다. 읽고 마는 대신 남겨 두려는 것입니다. */
+    suspend fun keepSuggestedQuote(report: GrowthReportEntity): Result<Unit> = runCatching {
+        require(report.suggestedQuote.isNotBlank()) { "담을 글귀가 없습니다." }
+        container.repository.saveContent(
+            ContentDraft(
+                type = ContentType.QUOTE,
+                title = report.suggestedQuote.take(40),
+                body = report.suggestedQuote,
+                author = report.suggestedQuoteAuthor,
+                category = AI_CATEGORY
+            )
+        )
+    }
+
+    /** 추천 루틴을 하루 끝에 붙입니다. */
+    suspend fun keepSuggestedRoutine(title: String): Result<Unit> = runCatching {
+        val trimmed = title.trim()
+        require(trimmed.isNotBlank()) { "루틴 이름이 비어 있습니다." }
+        container.repository.saveRoutine(RoutineDraft(title = trimmed, category = AI_CATEGORY))
+    }
+
     /** 루틴을 [targetIndex](0부터) 자리로 한 번에 옮깁니다. */
     suspend fun moveRoutineTo(routineId: Long, targetIndex: Int): Result<Boolean> = runCatching {
         container.repository.moveRoutineTo(routineId, targetIndex)
@@ -683,5 +838,18 @@ class MainViewModel(
          * 길게 잡으면 아침에 열어도 어제와 같은 차례가 나옵니다.
          */
         const val RESHUFFLE_AFTER_MS = 10 * 60 * 1000L
+
+        /**
+         * 이만큼 넘게 앱을 떠나 있었으면 다시 잠급니다.
+         *
+         * 짧게 잡으면 사진을 고르러 갤러리에 다녀올 때마다 잠기고, 길게 잡으면 잠가 둔 뜻이 없습니다.
+         */
+        const val LOCK_AFTER_MS = 60 * 1000L
+
+        /** AI가 권해서 담은 것에 붙는 카테고리. 나중에 골라 보기 쉽게 표시해 둡니다. */
+        const val AI_CATEGORY = "AI 추천"
+
+        /** 글귀에서 옮겨 온 실천에 붙는 카테고리. 어디서 비롯됐는지 나중에 알아보려는 것입니다. */
+        const val PRACTICE_CATEGORY = "글귀에서"
     }
 }

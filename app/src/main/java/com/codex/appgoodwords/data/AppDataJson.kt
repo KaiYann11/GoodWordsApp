@@ -19,6 +19,7 @@ data class AppDataSnapshot(
     val diaries: List<DiaryEntity> = emptyList(),
     val todos: List<TodoEntity> = emptyList(),
     val books: List<BookEntity> = emptyList(),
+    val growthReports: List<GrowthReportEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -33,10 +34,19 @@ data class AppDataSnapshot(
      * 이때 DB를 통째로 갈아엎으면 담기지 않은 기록이 전부 사라집니다.
      */
     val partial: Boolean = false
-)
+) {
+    /**
+     * 담긴 기록 수. 내보내기가 "몇 개를 내보냈는지" 알릴 때 씁니다.
+     *
+     * 삭제 표식은 세지 않습니다. 사용자가 만든 기록이 아니라 병합용 자취입니다.
+     */
+    val recordCount: Int
+        get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
+            diaries.size + todos.size + books.size + growthReports.size
+}
 
 object AppDataJson {
-    const val schemaVersion: Int = 14
+    const val schemaVersion: Int = 15
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -106,6 +116,13 @@ object AppDataJson {
                 snapshot.books.forEach { book -> put(book.toJson()) }
             }
         )
+        .put("growthReportCount", snapshot.growthReports.size)
+        .put(
+            "growthReports",
+            JSONArray().apply {
+                snapshot.growthReports.forEach { report -> put(report.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -123,6 +140,7 @@ object AppDataJson {
             diaries = payload.optJSONArray("diaries").toDiaries(),
             todos = payload.optJSONArray("todos").toTodos(),
             books = payload.optJSONArray("books").toBooks(),
+            growthReports = payload.optJSONArray("growthReports").toGrowthReports(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -172,6 +190,53 @@ object AppDataJson {
                         createdAt = book.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
+            }
+        }
+    }
+
+    private fun GrowthReportEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("period", period)
+        .put("periodStart", periodStart)
+        .put("periodEnd", periodEnd)
+        .put("model", model)
+        .put("strengths", JSONArray(strengths))
+        .put("improvements", JSONArray(improvements))
+        .put("suggestedQuote", suggestedQuote)
+        .put("suggestedQuoteAuthor", suggestedQuoteAuthor)
+        .put("suggestedRoutines", JSONArray(suggestedRoutines))
+        .put("guide", guide)
+        .put("createdAt", createdAt)
+        .put("createdAtText", formatTimestamp(createdAt))
+
+    private fun JSONArray?.toGrowthReports(): List<GrowthReportEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val report = optJSONObject(index) ?: continue
+                val restored = GrowthReportEntity(
+                    id = report.optLong("id", 0L),
+                    syncId = SyncIdentity.orNew(report.optString("syncId")),
+                    updatedAt = report.optLong("updatedAt", 0L)
+                        .takeIf { it > 0L }
+                        ?: report.optLong("createdAt", 0L),
+                    period = ReportPeriod.of(report.optString("period")).name,
+                    periodStart = report.optString("periodStart"),
+                    periodEnd = report.optString("periodEnd"),
+                    model = report.optString("model"),
+                    strengths = report.optJSONArray("strengths").toStringList(),
+                    improvements = report.optJSONArray("improvements").toStringList(),
+                    suggestedQuote = report.optString("suggestedQuote"),
+                    suggestedQuoteAuthor = report.optString("suggestedQuoteAuthor"),
+                    suggestedRoutines = report.optJSONArray("suggestedRoutines").toStringList(),
+                    guide = report.optString("guide"),
+                    createdAt = report.optLong("createdAt", System.currentTimeMillis())
+                )
+                // 알맹이가 하나도 없으면 화면에 놓아도 빈 카드만 보입니다.
+                if (!restored.hasContent) continue
+                add(restored)
             }
         }
     }
@@ -244,8 +309,10 @@ object AppDataJson {
             for (index in 0 until length()) {
                 val todo = optJSONObject(index) ?: continue
                 val title = todo.optString("title").trim()
+                // 마감일은 없어도 됩니다("언젠가" 할 일). 여기서 버리면 기기에서 만든 것이
+                // 첫 동기화에 조용히 사라집니다.
                 val dueDate = todo.optString("dueDate").trim()
-                if (title.isBlank() || dueDate.isBlank()) continue
+                if (title.isBlank()) continue
 
                 add(
                     TodoEntity(

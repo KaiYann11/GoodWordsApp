@@ -1,5 +1,6 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,14 +11,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -31,6 +35,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +44,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -63,9 +70,46 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 /** 차례 옮기기 대화상자에서 [step]번째 자리를 가리키는 줄. 카드에도 같은 이름이 있어 태그로 짚습니다. */
 internal fun routineMoveTargetTag(step: Int): String = "routine_move_target_$step"
+
+/** 오늘 무엇을 볼지 고르는 거르개. 개수가 같이 적혀서 글자만으로는 짚기 어렵습니다. */
+internal fun routineFilterTag(name: String): String = "routine_filter_$name"
+
+/** 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다. */
+private const val HEADER_ITEM_COUNT = 3
+
+/**
+ * 오늘 무엇을 볼지 고르는 거르개.
+ *
+ * 루틴이 서른 개가 넘으면 다 끝낸 것까지 함께 굴려야 남은 것을 찾을 수 있습니다.
+ */
+private enum class RoutineFilter(val label: String) {
+    ALL("전체"),
+    UNDONE("안 한 것"),
+    DONE("한 것");
+
+    fun matches(todayCount: Int): Boolean = when (this) {
+        ALL -> true
+        UNDONE -> todayCount == 0
+        DONE -> todayCount > 0
+    }
+}
+
+/**
+ * 화면에 놓을 루틴 한 줄.
+ *
+ * [step]은 걸러 내기 전 온전한 줄에서의 차례입니다. 걸러 놓고 다시 세면 "안 한 것"만 볼 때
+ * 3번이던 루틴이 1번으로 보여, 옮기기가 엉뚱한 자리를 가리킵니다.
+ */
+private data class RoutineRow(
+    val routine: RoutineEntity,
+    val step: Int,
+    val canMoveUp: Boolean,
+    val canMoveDown: Boolean
+)
 
 @Composable
 fun RoutineScreen(
@@ -98,7 +142,31 @@ fun RoutineScreen(
     // 눈으로 짚기 어렵고, 사용자가 정한 순서라는 약속도 깨집니다.
     val sortedRoutines = RoutineOrder.sorted(routines)
     // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다.
-    val nextRoutineId = sortedRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }?.id
+    val nextRoutine = sortedRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }
+    val nextRoutineId = nextRoutine?.id
+    val doneCount = sortedRoutines.count { (todayCounts[it.id] ?: 0) > 0 }
+
+    var selectedFilter by rememberSaveable { mutableStateOf(RoutineFilter.ALL.name) }
+    val currentFilter = RoutineFilter.valueOf(selectedFilter)
+    val rows = remember(sortedRoutines, todayCounts, currentFilter) {
+        sortedRoutines
+            .mapIndexed { index, routine ->
+                RoutineRow(
+                    routine = routine,
+                    step = index + 1,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < sortedRoutines.lastIndex
+                )
+            }
+            .filter { row -> currentFilter.matches(todayCounts[row.routine.id] ?: 0) }
+    }
+
+    // 검색에서 고른 루틴이 지금 거르개에 걸려 안 보이면, 찾아 놓고도 빈 화면을 보게 됩니다.
+    LaunchedEffect(focusId, currentFilter, sortedRoutines) {
+        if (focusId != null && sortedRoutines.any { it.id == focusId } && rows.none { it.routine.id == focusId }) {
+            selectedFilter = RoutineFilter.ALL.name
+        }
+    }
 
     if (editingRoutineId != null) {
         RoutineEditorDialog(
@@ -157,9 +225,9 @@ fun RoutineScreen(
     }
 
     val listState = rememberLazyListState()
-    // 추가 버튼을 지나야 루틴 목록이 시작합니다.
-    val focusIndex = remember(focusId, sortedRoutines) {
-        sortedRoutines.indexOfFirst { it.id == focusId }.takeIf { it >= 0 }?.plus(1)
+    // 추가 버튼·진행 카드·거르개를 지나야 루틴 목록이 시작합니다.
+    val focusIndex = remember(focusId, rows) {
+        rows.indexOfFirst { it.routine.id == focusId }.takeIf { it >= 0 }?.plus(HEADER_ITEM_COUNT)
     }
     ScrollToFocus(listState = listState, index = focusIndex, key = focusId)
 
@@ -203,26 +271,137 @@ fun RoutineScreen(
                 }
             }
         } else {
-            itemsIndexed(sortedRoutines, key = { _, routine -> routine.id }) { index, routine ->
-                RoutineCard(
-                    routine = routine,
-                    step = index + 1,
-                    isNext = routine.id == nextRoutineId,
-                    canMoveUp = index > 0,
-                    canMoveDown = index < sortedRoutines.lastIndex,
-                    focused = routine.id == focusId,
-                    focusKey = focusId,
-                    todayCount = todayCounts[routine.id] ?: 0,
-                    memoCount = memosByRoutine[routine.id]?.size ?: 0,
-                    latestMemo = memosByRoutine[routine.id]?.maxByOrNull { it.createdAt },
-                    onOpenMemos = { memoRoutineId = routine.id },
-                    onCheckRoutine = onCheckRoutine,
-                    onMoveRoutine = onMoveRoutine,
-                    onOpenMove = { movingRoutineId = routine.id },
-                    onEditRoutine = { editingRoutineId = routine.id },
-                    onDeleteRoutine = { showDeleteRoutineId = routine.id }
+            item {
+                RoutineProgressCard(
+                    doneCount = doneCount,
+                    totalCount = sortedRoutines.size,
+                    nextRoutine = nextRoutine
                 )
             }
+
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(RoutineFilter.entries) { filter ->
+                        CountFilterPill(
+                            title = filter.label,
+                            count = when (filter) {
+                                RoutineFilter.ALL -> sortedRoutines.size
+                                RoutineFilter.UNDONE -> sortedRoutines.size - doneCount
+                                RoutineFilter.DONE -> doneCount
+                            },
+                            selected = currentFilter == filter,
+                            onClick = { selectedFilter = filter.name },
+                            modifier = Modifier.testTag(routineFilterTag(filter.name))
+                        )
+                    }
+                }
+            }
+
+            if (rows.isEmpty()) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (currentFilter == RoutineFilter.UNDONE) {
+                                    "오늘 루틴을 모두 밟았습니다."
+                                } else {
+                                    "아직 밟은 루틴이 없습니다."
+                                },
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "전체를 누르면 다시 다 보입니다.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(rows, key = { row -> row.routine.id }) { row ->
+                    RoutineCard(
+                        routine = row.routine,
+                        step = row.step,
+                        isNext = row.routine.id == nextRoutineId,
+                        canMoveUp = row.canMoveUp,
+                        canMoveDown = row.canMoveDown,
+                        focused = row.routine.id == focusId,
+                        focusKey = focusId,
+                        todayCount = todayCounts[row.routine.id] ?: 0,
+                        memoCount = memosByRoutine[row.routine.id]?.size ?: 0,
+                        latestMemo = memosByRoutine[row.routine.id]?.maxByOrNull { it.createdAt },
+                        onOpenMemos = { memoRoutineId = row.routine.id },
+                        onCheckRoutine = onCheckRoutine,
+                        onMoveRoutine = onMoveRoutine,
+                        onOpenMove = { movingRoutineId = row.routine.id },
+                        onEditRoutine = { editingRoutineId = row.routine.id },
+                        onDeleteRoutine = { showDeleteRoutineId = row.routine.id }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 오늘 어디까지 왔는지.
+ *
+ * 개수만 적으면 "여덟 개 중 셋"이 얼마만큼인지 머리로 셈해야 합니다. 막대를 함께 둡니다.
+ * 다 끝낸 날에는 남은 것을 세지 않고 끝났다고만 말합니다. 다그치지 않는 것이 이 앱의 규칙입니다.
+ */
+@Composable
+private fun RoutineProgressCard(
+    doneCount: Int,
+    totalCount: Int,
+    nextRoutine: RoutineEntity?
+) {
+    val ratio = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
+    val animatedRatio by animateFloatAsState(targetValue = ratio, label = "routineProgress")
+    val percent = (ratio * 100).roundToInt()
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "오늘 진행",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$doneCount / $totalCount · $percent%",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            LinearProgressIndicator(
+                progress = { animatedRatio },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(6.dp))
+            )
+
+            Text(
+                text = when {
+                    totalCount == 0 -> "루틴을 추가하면 여기에 오늘 진행이 보입니다."
+                    nextRoutine == null -> "오늘 몫을 다 밟았습니다."
+                    else -> "다음 차례: ${nextRoutine.title}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

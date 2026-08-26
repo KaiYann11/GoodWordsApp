@@ -16,7 +16,8 @@ class AppRepository(
     private val deletionDao: DeletionDao? = null,
     private val diaryDao: DiaryDao? = null,
     private val todoDao: TodoDao? = null,
-    private val bookDao: BookDao? = null
+    private val bookDao: BookDao? = null,
+    private val growthReportDao: GrowthReportDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -379,6 +380,18 @@ class AppRepository(
 
     // ---- 독서 ----
 
+    // ---- AI 성장 피드백 ----
+
+    fun observeGrowthReports(): Flow<List<GrowthReportEntity>> =
+        growthReportDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun deleteGrowthReport(id: Long) {
+        val dao = growthReportDao ?: return
+        val existing = dao.getById(id) ?: return
+        dao.deleteById(id)
+        recordDeletion(existing.syncId, SyncEntityType.GROWTH_REPORT)
+    }
+
     fun observeBooks(): Flow<List<BookEntity>> =
         bookDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
@@ -508,7 +521,9 @@ class AppRepository(
             updatedAt = System.currentTimeMillis(),
             title = title,
             note = draft.note.trim(),
-            dueDate = draft.dueDate.toString(),
+            // 날짜가 없으면 빈 문자열입니다. 열을 null 허용으로 바꾸지 않은 것은,
+            // 이미 있는 DB와 서버가 이 열을 NOT NULL로 알고 있기 때문입니다.
+            dueDate = draft.dueDate?.toString().orEmpty(),
             remindAt = draft.remindAt,
             // 고칠 때 완료 상태를 잃으면 끝낸 일이 되살아난다.
             doneAt = existing?.doneAt,

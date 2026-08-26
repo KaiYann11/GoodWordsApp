@@ -5,17 +5,21 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
 import com.codex.appgoodwords.ui.AppGoodWordsApp
 import com.codex.appgoodwords.ui.AppViewModelFactory
 import com.codex.appgoodwords.ui.MainViewModel
 import com.codex.appgoodwords.work.AppNotifications
 
-class MainActivity : ComponentActivity() {
+/**
+ * [FragmentActivity]를 씁니다. 앱 잠금이 쓰는 BiometricPrompt가 그것을 요구합니다.
+ * ComponentActivity의 기능은 그대로입니다(FragmentActivity가 그것을 물려받습니다).
+ */
+class MainActivity : FragmentActivity() {
     private val viewModel: MainViewModel by viewModels {
         AppViewModelFactory((application as AppGoodWordsApplication).container)
     }

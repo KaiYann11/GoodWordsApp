@@ -16,9 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DeletionEntity::class,
         DiaryEntity::class,
         TodoEntity::class,
-        BookEntity::class
+        BookEntity::class,
+        GrowthReportEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -32,6 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
     abstract fun todoDao(): TodoDao
     abstract fun bookDao(): BookDao
+    abstract fun growthReportDao(): GrowthReportDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -361,6 +363,37 @@ abstract class AppDatabase : RoomDatabase() {
                         "SELECT COUNT(*) FROM routines AS newer " +
                         "WHERE newer.createdAt > routines.createdAt " +
                         "OR (newer.createdAt = routines.createdAt AND newer.id > routines.id))"
+                )
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // AI가 써 준 성장 피드백을 담는 표입니다. 목록 열은 JSON 문자열로 들어갑니다.
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS growth_reports (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "period TEXT NOT NULL, " +
+                        "periodStart TEXT NOT NULL, " +
+                        "periodEnd TEXT NOT NULL, " +
+                        "model TEXT NOT NULL, " +
+                        "strengths TEXT NOT NULL, " +
+                        "improvements TEXT NOT NULL, " +
+                        "suggestedQuote TEXT NOT NULL, " +
+                        "suggestedQuoteAuthor TEXT NOT NULL, " +
+                        "suggestedRoutines TEXT NOT NULL, " +
+                        "guide TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                // syncId가 두 벌이면 병합이 어느 쪽인지 알 수 없게 됩니다.
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_growth_reports_syncId ON growth_reports (syncId)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_growth_reports_createdAt ON growth_reports (createdAt)"
                 )
             }
         }

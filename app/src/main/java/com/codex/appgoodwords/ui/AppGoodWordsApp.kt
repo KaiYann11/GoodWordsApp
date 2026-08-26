@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -66,11 +68,18 @@ import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
+import com.codex.appgoodwords.data.GrowthReportEntity
+import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.ui.screen.AddContentScreen
+import com.codex.appgoodwords.ui.screen.AppLock
+import com.codex.appgoodwords.ui.screen.AppLockScreen
+import com.codex.appgoodwords.ui.screen.AppLockState
+import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DetailScreen
 import com.codex.appgoodwords.ui.screen.DiaryScreen
+import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
 import com.codex.appgoodwords.ui.screen.LibraryScreen
@@ -78,8 +87,6 @@ import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
-import com.codex.appgoodwords.ui.screen.StatsScreen
-import com.codex.appgoodwords.ui.screen.TodayScreen
 import com.codex.appgoodwords.ui.screen.TodoScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
 import com.codex.appgoodwords.work.AppNotifications
@@ -93,14 +100,17 @@ private enum class AppTab(
 ) {
     HOME("홈"),
     LIBRARY("보관함"),
-    /** 루틴과 할 일을 함께 봅니다. 하단 바에 자리가 없어 안에서 나눴습니다. */
-    TODAY("오늘"),
+    ROUTINE("루틴"),
+    /** 할 일은 루틴과 성격이 달라 자리를 나눴습니다. 루틴은 매일 세는 것이고 할 일은 한 번 끝나는 것입니다. */
+    TODO("할 일"),
     DIARY("일기"),
     ADD("추가"),
     /** 이력은 매일 볼 화면이 아니라 설정 안으로 옮겼습니다. 하단 바에는 없습니다. */
     HISTORY("이력"),
-    /** 통계도 설정의 버튼으로 엽니다. 하단 바에는 없습니다. */
-    STATS("통계"),
+    /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
+    GROWTH("AI 돌아보기"),
+    /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
+    GALLERY("모아 보기"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
     SETTINGS("설정")
@@ -139,6 +149,12 @@ fun AppGoodWordsApp(
     val routineTodayCounts by viewModel.routineTodayCounts.collectAsStateWithLifecycle()
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val feedbackNotes by viewModel.feedbackNotes.collectAsStateWithLifecycle()
+    val onThisDay by viewModel.onThisDay.collectAsStateWithLifecycle()
+    val moodPractice by viewModel.moodPractice.collectAsStateWithLifecycle()
+    val attachmentShots by viewModel.attachmentShots.collectAsStateWithLifecycle()
+    val growthReports by viewModel.growthReports.collectAsStateWithLifecycle()
+    val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
@@ -146,6 +162,8 @@ fun AppGoodWordsApp(
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val books by viewModel.books.collectAsStateWithLifecycle()
     val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
+    val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
+    val lockState by viewModel.lockState.collectAsStateWithLifecycle()
 
     // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
     val context = LocalContext.current
@@ -189,6 +207,12 @@ fun AppGoodWordsApp(
     val selectedItem = allItems.firstOrNull { it.id == destination.selectedItemId }
     val editingItem = allItems.firstOrNull { it.id == destination.editingItemId }
     val canNavigateBack = navStack.size > 1
+
+    // AI 요청은 오래 걸리고 값이 듭니다. 도는 중인지와 왜 실패했는지를 화면이 들고 있어야
+    // 사용자가 같은 것을 두 번 부르지 않습니다.
+    var growthRunning by remember { mutableStateOf(false) }
+    var growthError by remember { mutableStateOf("") }
+    var growthPreview by remember { mutableStateOf<String?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -283,6 +307,23 @@ fun AppGoodWordsApp(
     }
 
     AppGoodWordsTheme {
+        // 잠겨 있으면 아래를 아예 그리지 않습니다. 화면 위에 덮기만 하면 최근 앱 목록의
+        // 미리보기에 내용이 그대로 남습니다.
+        when (lockState) {
+            AppLockState.CHECKING -> {
+                // 설정을 읽는 동안입니다. 잠깐 비워 둡니다.
+                Box(modifier = Modifier.fillMaxSize())
+                return@AppGoodWordsTheme
+            }
+
+            AppLockState.LOCKED -> {
+                AppLockScreen(onUnlocked = { viewModel.unlock() })
+                return@AppGoodWordsTheme
+            }
+
+            AppLockState.OPEN -> Unit
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
@@ -323,6 +364,15 @@ fun AppGoodWordsApp(
                                 )
                             }
                         }
+                        // 설정은 하단 바에서 빠졌으므로 어느 화면에서나 여기로 들어갑니다.
+                        if (selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SETTINGS) {
+                            IconButton(onClick = { pushRoute(tabRoute(AppTab.SETTINGS)) }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Settings,
+                                    contentDescription = "설정"
+                                )
+                            }
+                        }
                     }
                 )
             },
@@ -333,7 +383,9 @@ fun AppGoodWordsApp(
                         // 담기(+)는 하단 바에 두지 않습니다. 하단 바는 "어디로 갈지"만 담아야
                         // 읽기 쉬운데, +만 혼자 "무엇을 할지"여서 성격이 달랐습니다.
                         // 지금은 보관함의 글귀 화면 안에 있습니다.
-                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.TODAY, AppTab.DIARY, AppTab.SETTINGS)
+                        // 설정은 매일 쓰는 것이 아니라 위쪽 톱니로 옮겼습니다. 하단 바는 매일
+                        // 들르는 다섯 곳만 남깁니다.
+                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.ROUTINE, AppTab.TODO, AppTab.DIARY)
                             .forEach { tab ->
                                 val selected = currentTab == tab
                                 NavigationBarItem(
@@ -344,11 +396,13 @@ fun AppGoodWordsApp(
                                             imageVector = when (tab) {
                                                 AppTab.HOME -> Icons.Outlined.Home
                                                 AppTab.LIBRARY -> Icons.AutoMirrored.Outlined.LibraryBooks
-                                                AppTab.TODAY -> Icons.Outlined.CheckCircle
+                                                AppTab.ROUTINE -> Icons.Outlined.CheckCircle
+                                                AppTab.TODO -> Icons.AutoMirrored.Outlined.ListAlt
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
-                                                AppTab.STATS -> Icons.Outlined.BarChart
+                                                AppTab.GROWTH -> Icons.Outlined.AutoAwesome
+                                                AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
                                             },
@@ -385,6 +439,24 @@ fun AppGoodWordsApp(
                             pushRoute(editRoute(currentTab, item.id))
                             addFormVersion += 1
                         },
+                        onMakeRoutine = { title ->
+                            coroutineScope.launch {
+                                val result = viewModel.makeRoutineFromQuote(title)
+                                snackbarHostState.showSnackbar(
+                                    if (result.isSuccess) "루틴에 추가했습니다."
+                                    else result.exceptionOrNull()?.message ?: "루틴을 만들지 못했습니다."
+                                )
+                            }
+                        },
+                        onMakeTodo = { title ->
+                            coroutineScope.launch {
+                                val result = viewModel.makeTodoFromQuote(title)
+                                snackbarHostState.showSnackbar(
+                                    if (result.isSuccess) "오늘 할 일에 담았습니다."
+                                    else result.exceptionOrNull()?.message ?: "할 일을 만들지 못했습니다."
+                                )
+                            }
+                        },
                         onDelete = { item ->
                             coroutineScope.launch {
                                 val result = viewModel.deleteContent(item.id)
@@ -408,28 +480,29 @@ fun AppGoodWordsApp(
                     when (currentTab) {
                         AppTab.HOME -> HomeScreen(
                             modifier = Modifier.padding(innerPadding),
-                            todayItems = allItems,
-                            settings = settings,
-                            confirmedTodayIds = confirmedTodayIds,
+                            summary = stats,
+                            notes = feedbackNotes,
+                            routines = routines,
+                            checks = routineChecks,
                             dailyLoop = dailyLoop,
-                            shuffleSeed = shuffleSeed,
-                            onShuffle = { viewModel.reshuffleContent() },
-                            // 글귀는 이 화면에 이미 있어서 옮기지 않습니다. 나머지 둘만 데려다줍니다.
+                            // 글귀 읽기는 이제 보관함에 있습니다. 세 걸음 모두 다른 화면으로 데려갑니다.
                             onOpenStep = { step ->
                                 when (step) {
-                                    DailyStep.QUOTE -> Unit
-                                    DailyStep.ROUTINE -> pushRoute(tabRoute(AppTab.TODAY))
+                                    DailyStep.QUOTE -> pushRoute(tabRoute(AppTab.LIBRARY))
+                                    DailyStep.ROUTINE -> pushRoute(tabRoute(AppTab.ROUTINE))
                                     DailyStep.DIARY -> pushRoute(tabRoute(AppTab.DIARY))
                                 }
                             },
-                            onToggleFavorite = { item ->
-                                viewModel.toggleFavorite(item.id, !item.isFavorite)
-                            },
-                            onConfirmItem = { item ->
-                                toggleConfirmed(item, showMessage = false)
-                            },
-                            onOpenItem = { item ->
-                                openItemDetail(AppTab.HOME, item.id)
+                            latestReport = growthReports.firstOrNull(),
+                            onOpenGrowth = { pushRoute(tabRoute(AppTab.GROWTH)) },
+                            memories = onThisDay,
+                            moodPractice = moodPractice,
+                            // 그때 그 글을 열어 줍니다. 알려만 주면 사용자가 다시 뒤져야 합니다.
+                            onOpenMemory = { memory ->
+                                when (memory.kind) {
+                                    SearchKind.QUOTE -> openItemDetail(AppTab.HOME, memory.id)
+                                    else -> pushRoute(focusRoute(memory.kind, memory.id))
+                                }
                             }
                         )
 
@@ -496,11 +569,14 @@ fun AppGoodWordsApp(
                             items = allItems,
                             categories = categories,
                             confirmedTodayIds = confirmedTodayIds,
+                            shuffleSeed = shuffleSeed,
+                            onShuffle = { viewModel.reshuffleContent() },
                             onToggleFavorite = { item ->
                                 viewModel.toggleFavorite(item.id, !item.isFavorite)
                             },
+                            // 스와이프로 넘길 때마다 스낵바가 뜨면 콤보 알약과 겹쳐 시끄럽습니다.
                             onConfirmItem = { item ->
-                                toggleConfirmed(item, showMessage = true)
+                                toggleConfirmed(item, showMessage = false)
                             },
                             onOpenItem = { item ->
                                 openItemDetail(AppTab.LIBRARY, item.id)
@@ -526,13 +602,8 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.TODAY -> TodayScreen(
+                        AppTab.ROUTINE -> RoutineScreen(
                             modifier = Modifier.padding(innerPadding),
-                            // 검색에서 할 일을 골라 왔으면 할 일 쪽을 열어 줍니다.
-                            requestedTab = if (destination.focusKind == SearchKind.TODO) 1 else null,
-                            requestKey = destination.focusId,
-                            routineContent = {
-                                RoutineScreen(
                             focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
                             routines = routines,
                             todayCounts = routineTodayCounts,
@@ -613,10 +684,10 @@ fun AppGoodWordsApp(
                                     }
                                 }
                             }
-                                )
-                            },
-                            todoContent = {
-                                TodoScreen(
+                        )
+
+                        AppTab.TODO -> TodoScreen(
+                            modifier = Modifier.padding(innerPadding),
                                     todos = todos,
                                     focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.TODO },
                                     today = LocalDate.now(),
@@ -648,8 +719,6 @@ fun AppGoodWordsApp(
                                     onOpenExactAlarmSettings = {
                                         viewModel.exactAlarmSettingsIntent()?.let(context::startActivity)
                                     }
-                                )
-                            }
                         )
 
                         AppTab.DIARY -> DiaryScreen(
@@ -671,6 +740,7 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             },
+                            onOpenGallery = { pushRoute(tabRoute(AppTab.GALLERY)) },
                             onDeleteDiary = { id ->
                                 coroutineScope.launch {
                                     val result = viewModel.deleteDiary(id)
@@ -721,11 +791,71 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.STATS -> StatsScreen(
+                        AppTab.GROWTH -> GrowthFeedbackScreen(
                             modifier = Modifier.padding(innerPadding),
-                            summary = stats,
-                            routines = routines,
-                            checks = routineChecks
+                            reports = growthReports,
+                            running = growthRunning,
+                            errorMessage = growthError.ifBlank { aiFeedbackSettings.lastError },
+                            previewText = growthPreview,
+                            onDismissPreview = { growthPreview = null },
+                            onRequest = { period ->
+                                coroutineScope.launch {
+                                    growthRunning = true
+                                    growthError = ""
+                                    val result = viewModel.requestGrowthFeedback(period)
+                                    growthRunning = false
+                                    result.onFailure { failure ->
+                                        growthError = failure.message ?: "돌아보기를 받지 못했습니다."
+                                    }
+                                    result.onSuccess {
+                                        snackbarHostState.showSnackbar("새 돌아보기가 도착했습니다.")
+                                    }
+                                }
+                            },
+                            onPreview = { period ->
+                                coroutineScope.launch {
+                                    viewModel.previewGrowthPrompt(period)
+                                        .onSuccess { growthPreview = it }
+                                        .onFailure { growthError = it.message ?: "미리 볼 수 없습니다." }
+                                }
+                            },
+                            onDeleteReport = { report ->
+                                coroutineScope.launch { viewModel.deleteGrowthReport(report.id) }
+                            },
+                            onKeepQuote = { report ->
+                                coroutineScope.launch {
+                                    val result = viewModel.keepSuggestedQuote(report)
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "보관함에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
+                            onKeepRoutine = { title ->
+                                coroutineScope.launch {
+                                    val result = viewModel.keepSuggestedRoutine(title)
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "루틴에 추가했습니다."
+                                        else result.exceptionOrNull()?.message ?: "추가하지 못했습니다."
+                                    )
+                                }
+                            },
+                            onOpenSettings = { pushRoute(tabRoute(AppTab.SETTINGS)) }
+                        )
+
+                        AppTab.GALLERY -> AttachmentGalleryScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            shots = attachmentShots,
+                            serverUrl = serverSyncSettings.serverUrl,
+                            apiKey = serverSyncSettings.apiKey,
+                            // 누른 사진이 붙어 있던 기록으로 데려갑니다. 어디에 있던 것인지
+                            // 알려만 주면 사용자가 다시 찾아 들어가야 합니다.
+                            onOpenSource = { shot ->
+                                when (shot.source) {
+                                    SearchKind.QUOTE -> openItemDetail(AppTab.GALLERY, shot.sourceId)
+                                    else -> pushRoute(focusRoute(shot.source, shot.sourceId))
+                                }
+                            }
                         )
 
                         AppTab.ADD -> AddContentScreen(
@@ -799,8 +929,11 @@ fun AppGoodWordsApp(
                             syncBackupDirectory = syncBackupDirectory,
                             notificationsBlocked = notificationsBlocked,
                             onSettingsChanged = viewModel::updateSettings,
-                            onOpenStats = { pushRoute(tabRoute(AppTab.STATS)) },
                             onOpenHistory = { pushRoute(tabRoute(AppTab.HISTORY)) },
+                            appLockEnabled = appLockEnabled,
+                            onAppLockChanged = { enabled -> viewModel.setAppLockEnabled(enabled) },
+                            aiFeedbackSettings = aiFeedbackSettings,
+                            onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
                                 viewModel.sendTestNotification()
@@ -1021,8 +1154,8 @@ private fun tabOf(kind: SearchKind): AppTab = when (kind) {
     SearchKind.QUOTE -> AppTab.LIBRARY
     SearchKind.BOOK -> AppTab.LIBRARY
     SearchKind.DIARY -> AppTab.DIARY
-    SearchKind.TODO -> AppTab.TODAY
-    SearchKind.ROUTINE -> AppTab.TODAY
+    SearchKind.TODO -> AppTab.TODO
+    SearchKind.ROUTINE -> AppTab.ROUTINE
 }
 
 private fun parseRoute(route: String): AppDestination {

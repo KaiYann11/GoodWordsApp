@@ -21,6 +21,7 @@ object SyncDeduplicator {
         val diaries = resolve(snapshot.diaries, { it.syncId }, { it.updatedAt }, ::diaryFingerprint)
         val todos = resolve(snapshot.todos, { it.syncId }, { it.updatedAt }, ::todoFingerprint)
         val books = resolve(snapshot.books, { it.syncId }, { it.updatedAt }, ::bookFingerprint)
+        val reports = resolve(snapshot.growthReports, { it.syncId }, { it.updatedAt }, ::reportFingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -32,6 +33,7 @@ object SyncDeduplicator {
             diaries = diaries.kept,
             todos = todos.kept,
             books = books.kept,
+            growthReports = reports.kept,
             events = snapshot.events.map { event ->
                 event.copy(contentItemSyncId = items.survivorOf(event.contentItemSyncId))
             },
@@ -130,6 +132,19 @@ object SyncDeduplicator {
         todo.dueDate.trim(),
         normalize(todo.title),
         normalize(todo.note)
+    ).joinToString("|")
+
+    /**
+     * 같은 기간을 두고 받은 피드백은 한 편만 남깁니다.
+     *
+     * 두 기기에서 같은 주를 각각 돌리면 글은 조금씩 달라도 말하는 바는 같습니다.
+     * 본문까지 견주면 늘 다른 것이 되어 쌓이기만 하므로 기간과 단위로만 봅니다.
+     * 서버 `reportFingerprint`와 같아야 합니다.
+     */
+    private fun reportFingerprint(report: GrowthReportEntity): String = listOf(
+        report.period.trim(),
+        report.periodStart.trim(),
+        report.periodEnd.trim()
     ).joinToString("|")
 
     /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 봅니다. */

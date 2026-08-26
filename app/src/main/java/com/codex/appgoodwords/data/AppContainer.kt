@@ -27,7 +27,8 @@ class AppContainer(
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
-                AppDatabase.MIGRATION_13_14
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -61,7 +62,8 @@ class AppContainer(
             deletionDao = database.deletionDao(),
             diaryDao = database.diaryDao(),
             todoDao = database.todoDao(),
-            bookDao = database.bookDao()
+            bookDao = database.bookDao(),
+            growthReportDao = database.growthReportDao()
         )
     }
 
@@ -87,6 +89,13 @@ class AppContainer(
 
     val attachmentUploader: AttachmentUploader by lazy {
         AttachmentUploader(client = attachmentClient, database = database)
+    }
+
+    val growthFeedbackCoordinator: GrowthFeedbackCoordinator by lazy {
+        GrowthFeedbackCoordinator(
+            database = database,
+            settingsStore = settingsStore
+        )
     }
 
     val syncCoordinator: SyncCoordinator by lazy {

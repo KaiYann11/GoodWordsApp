@@ -15,7 +15,9 @@ import com.codex.appgoodwords.MainActivity
 import com.codex.appgoodwords.R
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.DailySummary
+import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
+import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineEntity
 
 object AppNotifications {
@@ -335,6 +337,44 @@ object AppNotifications {
             .build()
 
         NotificationManagerCompat.from(context).notify(9_002, notification)
+    }
+
+    /**
+     * AI가 새 피드백을 써 두었다고 알립니다.
+     *
+     * 글 전체를 알림에 담지 않습니다. 잘한 점 한 줄만 보이고, 나머지는 앱에서 봅니다.
+     * 알림 그림자에 긴 글을 펼쳐 두면 잠금 화면에서 남에게 그대로 보입니다.
+     */
+    fun showGrowthFeedbackNotification(
+        context: Context,
+        report: GrowthReportEntity,
+        soundEnabled: Boolean
+    ) {
+        if (!hasNotificationPermission(context)) return
+
+        val openAppIntent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            9_003,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val headline = report.strengths.firstOrNull()
+            ?: report.guide.takeIf { it.isNotBlank() }
+            ?: "앱에서 확인해 보세요."
+
+        val notification = NotificationCompat.Builder(context, summaryChannelFor(soundEnabled))
+            .setSmallIcon(android.R.drawable.ic_menu_agenda)
+            .setContentTitle("${ReportPeriod.of(report.period).label} 돌아보기가 도착했습니다")
+            .setContentText(headline)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setSilent(!soundEnabled)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(9_004, notification)
     }
 
     private fun contentChannelFor(settings: ReminderSettings): String {

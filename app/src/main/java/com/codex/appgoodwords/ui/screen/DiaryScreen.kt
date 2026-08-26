@@ -63,6 +63,9 @@ import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.DiaryWeather
 import java.time.LocalDate
 
+/** 모아 보기로 가는 길. 일기 화면에는 버튼이 여럿이라 표식으로 짚습니다. */
+internal const val diaryGalleryButtonTag = "diary_gallery_button"
+
 internal const val diaryWriteButtonTag = "diary_write_button"
 internal const val diaryBodyTag = "diary_body"
 internal const val diarySaveButtonTag = "diary_save_button"
@@ -97,7 +100,9 @@ fun DiaryScreen(
     serverUrl: String = "",
     apiKey: String = "",
     /** 검색에서 고른 일기. 그 자리로 굴려 주고 잠깐 강조합니다. */
-    focusId: Long? = null
+    focusId: Long? = null,
+    /** 붙여 둔 사진을 한자리에 모아 봅니다. */
+    onOpenGallery: () -> Unit = {}
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
@@ -143,6 +148,14 @@ fun DiaryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    OutlinedButton(
+                        onClick = onOpenGallery,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(diaryGalleryButtonTag)
+                    ) {
+                        Text("붙여 둔 사진 모아 보기")
+                    }
                     Button(
                         onClick = { editing = DiaryDraft(entryDate = today) },
                         modifier = Modifier

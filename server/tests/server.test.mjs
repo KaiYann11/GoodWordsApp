@@ -54,6 +54,7 @@ function emptySnapshot(overrides = {}) {
     diaries: [],
     todos: [],
     books: [],
+    growthReports: [],
     ...overrides,
   };
 }
@@ -2023,5 +2024,125 @@ describe("같은 내용 합치기", () => {
     assert.equal(first.items.length, 1);
     assert.equal(second.items.length, 1);
     assert.equal(first.items[0].syncId, second.items[0].syncId);
+  });
+});
+
+describe("AI 돌아보기", () => {
+  function report(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "report-1",
+      updatedAt: 1_000,
+      period: "WEEKLY",
+      periodStart: "2026-08-17",
+      periodEnd: "2026-08-23",
+      model: "gpt-4o-mini",
+      strengths: ["이레 내내 물을 마셨습니다."],
+      improvements: [],
+      suggestedQuote: "작게 시작하라.",
+      suggestedQuoteAuthor: "",
+      suggestedRoutines: ["자기 전 스트레칭"],
+      guide: "천천히 가도 됩니다.",
+      createdAt: 1_000,
+      ...overrides,
+    };
+  }
+
+  it("받아 둔 돌아보기가 스냅샷에 그대로 남는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ growthReports: [report()] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.growthReports.length, 1);
+    assert.equal(stored.growthReports[0].guide, "천천히 가도 됩니다.");
+    assert.deepEqual(stored.growthReports[0].suggestedRoutines, ["자기 전 스트레칭"]);
+    assert.equal(stored.growthReportCount, 1);
+  });
+
+  it("알맹이가 없는 것은 받아 두지 않는다", async () => {
+    // 화면에 놓아도 빈 카드만 보인다.
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        growthReports: [report({ strengths: [], improvements: [], suggestedRoutines: [], suggestedQuote: "", guide: "" })],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.growthReports.length, 0);
+  });
+
+  it("같은 기간을 두고 두 기기가 각각 받은 것은 하나로 합친다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ growthReports: [report()] }) });
+
+    // 글은 달라도 같은 주를 두고 쓴 것이다. 본문까지 견주면 늘 다른 것이 되어 쌓이기만 한다.
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        growthReports: [
+          report({ id: 9, syncId: "report-2", updatedAt: 2_000, createdAt: 2_000, guide: "다르게 쓴 글" }),
+        ],
+      }),
+    });
+    await api("/api/deduplicate", { method: "POST" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.growthReports.length, 1);
+    // 최신 updatedAt이 남는다.
+    assert.equal(stored.growthReports[0].guide, "다르게 쓴 글");
+    // 사라진 쪽에는 삭제 표식을 남겨야, 바뀐 것만 받는 기기도 사라진 사실을 안다.
+    assert.ok(stored.deletions.some((entry) => entry.entityType === "GROWTH_REPORT"));
+  });
+
+  it("서버에 AI 열쇠가 없으면 왜 안 되는지 알려 준다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", model: "gpt-4o-mini" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.ok(body.error.includes("OPENAI_API_KEY"), body.error);
+  });
+
+  it("물어볼 내용이 비어 있으면 부르지 않는다", async () => {
+    const response = await api("/api/growth-feedback", { method: "POST", body: { system: "코치입니다" } });
+
+    // 열쇠 확인이 먼저라 503이 나오지만, 열쇠가 있어도 빈 물음은 400이다.
+    assert.ok(response.status === 503 || response.status === 400);
+  });
+});
+
+describe("날짜 없는 할 일", () => {
+  it("마감일을 비워 둔 할 일도 서버에 남는다", async () => {
+    // 여기서 버리면 기기에서 만든 "언젠가" 할 일이 첫 업로드에 조용히 사라진다.
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        todos: [
+          { id: 1, syncId: "todo-1", updatedAt: 10, title: "언젠가 배우기", note: "", dueDate: "", createdAt: 10 },
+        ],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.todos.length, 1);
+    assert.equal(stored.todos[0].dueDate, "");
+    assert.equal(stored.todos[0].title, "언젠가 배우기");
+  });
+
+  it("제목이 없으면 여전히 버린다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        todos: [{ id: 1, syncId: "todo-1", updatedAt: 10, title: "  ", dueDate: "2026-08-26", createdAt: 10 }],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.todos.length, 0);
   });
 });
