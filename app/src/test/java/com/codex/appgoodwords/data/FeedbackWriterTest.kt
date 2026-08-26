@@ -149,7 +149,12 @@ class FeedbackWriterTest {
 
     private fun write(
         summary: StatsSummary,
-        progress: DailyProgress = DailyProgress(doneSteps = emptySet(), streakDays = summary.currentStreakDays, bestStreakDays = summary.bestStreakDays),
+        progress: DailyProgress = DailyProgress(
+            steps = DailyStep.DEFAULTS,
+            doneSteps = emptySet(),
+            streakDays = summary.currentStreakDays,
+            bestStreakDays = summary.bestStreakDays
+        ),
         routines: List<RoutineEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList()
     ) = FeedbackWriter.write(

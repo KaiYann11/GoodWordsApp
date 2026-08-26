@@ -101,6 +101,13 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_KEY`)에만 두고,
 스냅샷·백업에는 넣지 않습니다.
 
+**하루의 걸음은 고정이 아닙니다.** 무엇을 축으로 삼을지는 설정에서 고릅니다
+(`DailyStep` · `SettingsStore.dailySteps`). `DailyStep.entries`를 화면이나 셈에 그대로 쓰지 말고
+`DailyProgress.steps`를 쓰세요. 안 고른 걸음이 남으면 채울 수 없는 하나 때문에 이어 온 날이
+매일 끊깁니다. **연속 날수는 저장하지 않고 기록에서 다시 셉니다.** 그래서 축을 바꾸면 지난
+날수도 곧바로 새 기준이 됩니다. 저장해 두면 옛 기준으로 쌓인 숫자와 새 기준이 섞입니다.
+걸음을 늘리면 `DailyLoopCalculator`의 `daysByStep`과 앱의 탭 이동(`selectTab`)을 함께 늘립니다.
+
 **돌아보기는 지난번에 권한 것에서 이어집니다.** 물음에 직전 `GrowthReport`의 `improvements`와
 `suggestedRoutines`를 함께 싣습니다(`GrowthPrompt.previousAdvice`). 빼면 매번 처음 만난 사람처럼
 말하고 사용자는 같은 조언을 몇 번이고 다시 받습니다. **`strengths`와 `guide`는 싣지 않습니다.**

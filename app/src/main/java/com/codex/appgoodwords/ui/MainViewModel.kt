@@ -27,6 +27,7 @@ import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
@@ -114,17 +115,28 @@ class MainViewModel(
     )
 
     /**
-     * 오늘의 세 걸음. 홈 맨 위에 둡니다.
+     * 오늘의 걸음. 홈 맨 위에 둡니다.
      *
      * 따로 저장하지 않고 이미 있는 기록에서 셉니다. "오늘 했는지"를 어딘가에 또 적어 두면
      * 이력을 지웠을 때 두 값이 어긋납니다.
      */
-    val dailyLoop = combine(historyEvents, routineChecks, diaries) { events, checks, diaryList ->
+    val dailySteps = container.settingsStore.dailyStepsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyStep.DEFAULTS)
+
+    val dailyLoop = combine(
+        historyEvents,
+        routineChecks,
+        todos,
+        diaries,
+        container.settingsStore.dailyStepsFlow
+    ) { events, checks, todoList, diaryList, steps ->
         DailyLoopCalculator.build(
             events = events,
             routineChecks = checks,
+            todos = todoList,
             diaries = diaryList,
-            today = LocalDate.now()
+            today = LocalDate.now(),
+            steps = steps
         )
     }.stateIn(
         viewModelScope,
@@ -132,10 +144,15 @@ class MainViewModel(
         DailyLoopCalculator.build(
             events = emptyList(),
             routineChecks = emptyList(),
+            todos = emptyList(),
             diaries = emptyList(),
             today = LocalDate.now()
         )
     )
+
+    fun setDailySteps(steps: List<DailyStep>) {
+        viewModelScope.launch { container.settingsStore.setDailySteps(steps) }
+    }
 
     /**
      * 홈에 띄울 짚어 주는 문구.

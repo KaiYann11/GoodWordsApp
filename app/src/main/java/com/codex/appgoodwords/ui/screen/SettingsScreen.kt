@@ -15,10 +15,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +47,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AiProvider
+import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.ServerSyncSettings
@@ -66,6 +73,13 @@ internal const val aiApiKeyFieldTag = "ai_api_key_field"
 internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank { "off" }
 
 internal fun aiProviderTag(provider: AiProvider): String = "ai_provider_" + provider.name.lowercase()
+
+/** 오늘의 걸음 줄. 네 줄이 같은 모양이라 이름으로 짚습니다. */
+internal fun dailyStepRowTag(step: DailyStep): String = "daily_step_" + step.name.lowercase()
+
+internal fun dailyStepToggleTag(step: DailyStep): String = "daily_step_toggle_" + step.name.lowercase()
+
+internal fun dailyStepUpTag(step: DailyStep): String = "daily_step_up_" + step.name.lowercase()
 
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
@@ -102,6 +116,9 @@ fun SettingsScreen(
     onAppLockChanged: (Boolean) -> Unit = {},
     aiFeedbackSettings: AiFeedbackSettings = AiFeedbackSettings(),
     onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
+    /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
+    dailySteps: List<DailyStep> = DailyStep.DEFAULTS,
+    onDailyStepsChanged: (List<DailyStep>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -673,6 +690,10 @@ fun SettingsScreen(
             }
         }
         item {
+            DailyStepsSection(steps = dailySteps, onChanged = onDailyStepsChanged)
+        }
+
+        item {
             AppLockSection(enabled = appLockEnabled, onChanged = onAppLockChanged)
         }
 
@@ -795,6 +816,94 @@ private fun defaultExportFileName(): String {
     val timestamp = LocalDateTime.now()
         .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
     return "app-good-words-export-$timestamp.json"
+}
+
+/**
+ * 하루의 축으로 삼을 걸음을 고릅니다.
+ *
+ * 예전에는 글귀·루틴·일기 셋으로 박혀 있었습니다. 글귀로 하루를 여는 사람도 있지만
+ * 할 일을 끝내는 것이 하루인 사람도 있는데, 그런 사람에게는 첫 칸이 늘 남의 것이었습니다.
+ *
+ * **연속 날수는 어디에도 적혀 있지 않고 기록에서 다시 셉니다.** 그래서 축을 바꾸면 지난
+ * 날수도 곧바로 새 기준이 됩니다. 그 사실을 화면에 적어 두어야, 어제 12일이던 것이
+ * 오늘 8일로 보일 때 고장으로 읽히지 않습니다.
+ */
+@Composable
+private fun DailyStepsSection(
+    steps: List<DailyStep>,
+    onChanged: (List<DailyStep>) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("오늘의 걸음", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "홈 카드에 놓을 걸음과 그 차례를 고릅니다. 고른 걸음을 모두 밟은 날만 " +
+                    "이어 온 날로 셉니다. 바꾸면 지난 날수도 새 기준으로 다시 셉니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            DailyStep.entries.forEach { step ->
+                val position = steps.indexOf(step)
+                val chosen = position >= 0
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(dailyStepRowTag(step)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Checkbox(
+                        checked = chosen,
+                        // 하나도 안 남기면 카드가 뜻을 잃습니다. 마지막 하나는 끄지 못하게 둡니다.
+                        enabled = !chosen || steps.size > 1,
+                        onCheckedChange = { on ->
+                            onChanged(if (on) steps + step else steps - step)
+                        },
+                        modifier = Modifier.testTag(dailyStepToggleTag(step))
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(step.label, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = step.hint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (chosen) {
+                        IconButton(
+                            onClick = { onChanged(steps.moved(position, position - 1)) },
+                            enabled = position > 0,
+                            modifier = Modifier.testTag(dailyStepUpTag(step))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.KeyboardArrowUp,
+                                contentDescription = "${step.label}을 앞으로"
+                            )
+                        }
+                        IconButton(
+                            onClick = { onChanged(steps.moved(position, position + 1)) },
+                            enabled = position < steps.lastIndex
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.KeyboardArrowDown,
+                                contentDescription = "${step.label}을 뒤로"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 한 자리 옮깁니다. 줄 밖을 가리키면 그대로 둡니다. */
+private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {
+    if (from !in indices || to !in indices) return this
+    return toMutableList().apply { add(to, removeAt(from)) }
 }
 
 /**

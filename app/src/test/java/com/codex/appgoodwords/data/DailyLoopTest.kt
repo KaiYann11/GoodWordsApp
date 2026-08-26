@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 오늘의 세 걸음이 제대로 세어지는지 봅니다.
+ * 오늘의 걸음이 제대로 세어지는지 봅니다.
  *
  * 이 카드의 목적은 다그치는 것이 아니라 다음 한 걸음을 알려 주는 것입니다. 그래서
  * "무엇이 남았는지"보다 **이어 온 날이 끊기지 않는지**를 특히 봅니다. 하루를 잘못 세면
@@ -68,7 +68,7 @@ class DailyLoopTest {
         val progress = build(
             confirmedOn = listOf(today, today.minusDays(1), today.minusDays(2)),
             checkedOn = listOf(today, today.minusDays(1), today.minusDays(2)),
-            // 어제는 일기를 안 썼습니다. 세 걸음이 아니므로 이어짐이 거기서 끊깁니다.
+            // 어제는 일기를 안 썼습니다. 고른 걸음을 다 밟은 날이 아니라 이어짐이 거기서 끊깁니다.
             diaryOn = listOf(today, today.minusDays(2))
         )
 
@@ -150,11 +150,101 @@ class DailyLoopTest {
         assertFalse(progress.message, progress.message.contains("2개"))
     }
 
+    @Test
+    fun theAxisOfTheDayIsChosen() {
+        // 글귀로 하루를 여는 사람도 있고, 할 일을 끝내는 것이 하루인 사람도 있습니다.
+        val progress = build(
+            checkedOn = listOf(today),
+            steps = listOf(DailyStep.TODO, DailyStep.ROUTINE)
+        )
+
+        assertEquals(listOf(DailyStep.TODO, DailyStep.ROUTINE), progress.steps)
+        assertEquals(2, progress.stepCount)
+        // 고르지 않은 걸음은 세지 않습니다. 글귀를 읽었어도 오늘 밟은 걸음이 아닙니다.
+        assertEquals(DailyStep.TODO, progress.nextStep)
+        assertEquals(0.5f, progress.ratio, 0.001f)
+    }
+
+    @Test
+    fun aTodoCountsOnTheDayItWasFinished() {
+        // 지난주 할 일을 오늘 끝냈으면 오늘 한 것입니다. 마감일로 세면 오늘이 빈 채로 남습니다.
+        val progress = build(todoDoneOn = listOf(today), steps = listOf(DailyStep.TODO))
+
+        assertTrue(progress.isComplete)
+    }
+
+    @Test
+    fun anUnfinishedTodoIsNotAStep() {
+        val progress = DailyLoopCalculator.build(
+            events = emptyList(),
+            routineChecks = emptyList(),
+            todos = listOf(TodoEntity(syncId = "todo-1", title = "할 일", dueDate = today.toString())),
+            diaries = emptyList(),
+            today = today,
+            steps = listOf(DailyStep.TODO),
+            zoneId = zone
+        )
+
+        assertEquals(0, progress.doneCount)
+    }
+
+    @Test
+    fun changingTheAxisRecountsThePastRightAway() {
+        // 연속 날수는 어디에도 적혀 있지 않고 기록에서 다시 셉니다. 저장해 두면 옛 기준으로
+        // 쌓인 숫자와 새 기준이 섞여, 어느 기준의 며칠인지 아무도 모르게 됩니다.
+        val days = (0..2).map { today.minusDays(it.toLong()) }
+
+        val withDiary = build(confirmedOn = days, checkedOn = days, diaryOn = listOf(today))
+        val withoutDiary = build(
+            confirmedOn = days,
+            checkedOn = days,
+            diaryOn = listOf(today),
+            steps = listOf(DailyStep.QUOTE, DailyStep.ROUTINE)
+        )
+
+        assertEquals(1, withDiary.streakDays)
+        assertEquals(3, withoutDiary.streakDays)
+    }
+
+    @Test
+    fun anAxisWithNothingOnItFallsBackToTheDefaults() {
+        // 걸음이 하나도 없으면 카드가 뜻을 잃습니다. 0으로 나누는 일도 없어야 합니다.
+        val progress = build(steps = emptyList())
+
+        assertEquals(DailyStep.DEFAULTS, progress.steps)
+        assertEquals(0f, progress.ratio, 0.001f)
+        assertFalse(progress.isComplete)
+    }
+
+    @Test
+    fun theSameStepTwiceIsStillOneStep() {
+        val progress = build(
+            checkedOn = listOf(today),
+            steps = listOf(DailyStep.ROUTINE, DailyStep.ROUTINE)
+        )
+
+        assertEquals(1, progress.stepCount)
+        assertTrue(progress.isComplete)
+    }
+
+    @Test
+    fun whatIsStoredComesBackTheSame() {
+        val steps = listOf(DailyStep.TODO, DailyStep.DIARY)
+
+        assertEquals(steps, DailyStep.parse(DailyStep.store(steps)))
+        // 모르는 이름이 남아 있어도 앱이 서지 않아야 합니다.
+        assertEquals(listOf(DailyStep.DIARY), DailyStep.parse("SLEEP,DIARY"))
+        assertEquals(DailyStep.DEFAULTS, DailyStep.parse(""))
+        assertEquals(DailyStep.DEFAULTS, DailyStep.parse("SLEEP"))
+    }
+
     private fun build(
         confirmedOn: List<LocalDate> = emptyList(),
         shownOn: List<LocalDate> = emptyList(),
         checkedOn: List<LocalDate> = emptyList(),
         diaryOn: List<LocalDate> = emptyList(),
+        todoDoneOn: List<LocalDate> = emptyList(),
+        steps: List<DailyStep> = DailyStep.DEFAULTS,
         brokenDiaryDates: List<String> = emptyList()
     ): DailyProgress = DailyLoopCalculator.build(
         events = confirmedOn.map { event(it, ExposureEventType.CONFIRMED) } +
@@ -168,11 +258,21 @@ class DailyLoopTest {
                 checkedAt = millisAt(date)
             )
         },
+        todos = todoDoneOn.mapIndexed { index, date ->
+            TodoEntity(
+                syncId = "todo-$index",
+                title = "할 일 $index",
+                // 마감일은 일부러 다른 날로 둡니다. 끝낸 날로 세는지 보려는 것입니다.
+                dueDate = date.minusDays(3).toString(),
+                doneAt = millisAt(date)
+            )
+        },
         diaries = diaryOn.map { DiaryEntity(syncId = "diary-$it", entryDate = it.toString()) } +
             brokenDiaryDates.mapIndexed { index, raw ->
                 DiaryEntity(syncId = "broken-$index", entryDate = raw)
             },
         today = today,
+        steps = steps,
         zoneId = zone
     )
 

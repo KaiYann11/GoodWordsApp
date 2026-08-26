@@ -12,7 +12,7 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * 오늘의 세 걸음 카드.
+ * 오늘의 걸음 카드.
  *
  * 이 카드는 다그치지 않는 것이 전부입니다. 못 한 것을 세어 보여 주면 할 일 목록이 되고,
  * 하루 빠뜨린 날에는 앱을 열기가 싫어집니다.
@@ -26,6 +26,7 @@ class DailyLoopCardTest {
         compose.setContent {
             DailyLoopCard(
                 progress = DailyProgress(
+                    steps = DailyStep.DEFAULTS,
                     doneSteps = setOf(DailyStep.QUOTE),
                     streakDays = 0,
                     bestStreakDays = 0
@@ -34,9 +35,9 @@ class DailyLoopCardTest {
             )
         }
 
-        compose.onNodeWithText("오늘의 세 걸음").assertIsDisplayed()
+        compose.onNodeWithText("오늘의 3걸음").assertIsDisplayed()
         compose.onNodeWithText("1 / 3").assertIsDisplayed()
-        // 지금 할 것에만 안내를 답니다. 세 줄이 다 설명을 달면 어느 것부터인지 모릅니다.
+        // 지금 할 것에만 안내를 답니다. 모든 줄이 설명을 달면 어느 것부터인지 모릅니다.
         compose.onNodeWithText(DailyStep.ROUTINE.hint).assertIsDisplayed()
         compose.onNodeWithText(DailyStep.DIARY.hint).assertDoesNotExist()
         // 격려 문구가 그 안내문을 그대로 되풀이하면 같은 말이 카드에 두 번 나옵니다.
@@ -44,11 +45,37 @@ class DailyLoopCardTest {
     }
 
     @Test
+    fun onlyTheChosenStepsAreOnTheCard() {
+        // 하루의 축은 사람마다 다릅니다. 안 고른 걸음이 카드에 남아 있으면 늘 못 채운 하루가 됩니다.
+        compose.setContent {
+            DailyLoopCard(
+                progress = DailyProgress(
+                    steps = listOf(DailyStep.TODO, DailyStep.ROUTINE),
+                    doneSteps = setOf(DailyStep.TODO),
+                    streakDays = 0,
+                    bestStreakDays = 0
+                ),
+                onOpenStep = {}
+            )
+        }
+
+        compose.onNodeWithText("오늘의 2걸음").assertIsDisplayed()
+        compose.onNodeWithText("1 / 2").assertIsDisplayed()
+        compose.onNodeWithTag(dailyLoopStepTag(DailyStep.TODO)).assertIsDisplayed()
+        compose.onNodeWithTag(dailyLoopStepTag(DailyStep.QUOTE)).assertDoesNotExist()
+    }
+
+    @Test
     fun tappingAStepGoesThere() {
         var opened: DailyStep? = null
         compose.setContent {
             DailyLoopCard(
-                progress = DailyProgress(doneSteps = emptySet(), streakDays = 0, bestStreakDays = 0),
+                progress = DailyProgress(
+                    steps = DailyStep.DEFAULTS,
+                    doneSteps = emptySet(),
+                    streakDays = 0,
+                    bestStreakDays = 0
+                ),
                 onOpenStep = { opened = it }
             )
         }
@@ -64,6 +91,7 @@ class DailyLoopCardTest {
         compose.setContent {
             DailyLoopCard(
                 progress = DailyProgress(
+                    steps = DailyStep.DEFAULTS,
                     doneSteps = setOf(DailyStep.QUOTE, DailyStep.ROUTINE),
                     streakDays = 4,
                     bestStreakDays = 9
@@ -81,7 +109,8 @@ class DailyLoopCardTest {
         compose.setContent {
             DailyLoopCard(
                 progress = DailyProgress(
-                    doneSteps = DailyStep.entries.toSet(),
+                    steps = DailyStep.DEFAULTS,
+                    doneSteps = DailyStep.DEFAULTS.toSet(),
                     streakDays = 3,
                     bestStreakDays = 3
                 ),
@@ -90,7 +119,7 @@ class DailyLoopCardTest {
         }
 
         compose.onNodeWithText("3 / 3").assertIsDisplayed()
-        compose.onNodeWithText("오늘도 세 걸음을 다 밟았습니다. 3일째 이어 가는 중입니다.").assertIsDisplayed()
+        compose.onNodeWithText("오늘도 3걸음을 다 밟았습니다. 3일째 이어 가는 중입니다.").assertIsDisplayed()
     }
 
     @Test
@@ -98,6 +127,7 @@ class DailyLoopCardTest {
         compose.setContent {
             DailyLoopCard(
                 progress = DailyProgress(
+                    steps = DailyStep.DEFAULTS,
                     doneSteps = emptySet(),
                     streakDays = 0,
                     // 예전에 9일을 이어 간 적이 있지만 지금은 끊긴 상태.

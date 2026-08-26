@@ -86,7 +86,7 @@ object FeedbackWriter {
         val streak = summary.currentStreakDays
         val text = when {
             streak >= 2 -> "${streak}일째 이어 가고 있습니다."
-            streak == 1 && progress.isComplete -> "오늘 세 걸음을 다 밟았습니다."
+            streak == 1 && progress.isComplete -> "오늘 ${progress.stepCount}걸음을 다 밟았습니다."
             streak == 1 -> "오늘 첫 걸음을 뗐습니다."
             summary.bestStreakDays >= 2 -> "가장 길게는 ${summary.bestStreakDays}일을 이어 갔습니다. 오늘 한 걸음이면 다시 시작입니다."
             else -> "오늘 한 걸음이면 이어 가기가 시작됩니다."

@@ -55,7 +55,7 @@ internal const val moodPracticeCardTag = "home_mood_practice"
  *
  * 예전에는 홈에도 글귀 목록이 있어서 보관함과 같은 일을 두 곳에서 했습니다. 읽는 일은
  * 글귀가 모여 있는 보관함으로 모으고, 홈에는 "지금 어떻게 지내고 있는지"만 남겼습니다.
- * 오늘 할 일(세 걸음), 짚어 주는 문구, 그리고 통계 순서입니다. 앞에서부터 시간의 폭이
+ * 오늘 할 일(오늘의 걸음), 짚어 주는 문구, 그리고 통계 순서입니다. 앞에서부터 시간의 폭이
  * 넓어지도록 두어, 위에서 아래로 읽으면 오늘에서 지난 달까지 자연스럽게 이어집니다.
  */
 @Composable
@@ -65,7 +65,7 @@ fun HomeScreen(
     routines: List<RoutineEntity>,
     checks: List<RoutineCheckEntity>,
     modifier: Modifier = Modifier,
-    /** 오늘의 세 걸음. null이면 카드를 두지 않습니다. */
+    /** 오늘의 걸음. null이면 카드를 두지 않습니다. */
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
     onOpenStep: (DailyStep) -> Unit = {},

@@ -60,6 +60,14 @@ class SettingsStore(
         val aiIncludeDiaryBody = booleanPreferencesKey("ai_include_diary_body")
         val aiLastRunAt = longPreferencesKey("ai_last_run_at")
         val aiLastError = stringPreferencesKey("ai_last_error")
+        /**
+         * 하루의 축으로 삼을 걸음들. 이름을 쉼표로 이어 둡니다.
+         *
+         * 이 기기에만 둡니다. 기기를 나눠 쓰는 사람은 폰에서 하루를 밟고 태블릿에서는 돌아보기만
+         * 하기도 합니다. 한쪽에서 고른 축이 다른 쪽까지 따라가면 오히려 성가십니다.
+         */
+        val dailySteps = stringPreferencesKey("daily_steps")
+
         /** 앱 잠금. 비밀번호는 담지 않습니다. 기기에 있는 잠금을 빌려 씁니다. */
         val appLockEnabled = booleanPreferencesKey("app_lock_enabled")
         val lastSyncError = stringPreferencesKey("last_sync_error")
@@ -116,6 +124,23 @@ class SettingsStore(
             lastRunAt = preferences[Keys.aiLastRunAt] ?: 0L,
             lastError = preferences[Keys.aiLastError].orEmpty()
         )
+    }
+
+    val dailyStepsFlow: Flow<List<DailyStep>> = context.dataStore.data.map { preferences ->
+        DailyStep.parse(preferences[Keys.dailySteps].orEmpty())
+    }
+
+    /**
+     * 하루의 축을 바꿉니다.
+     *
+     * 하나도 안 남기면 카드가 뜻을 잃으므로 그때는 저장하지 않고 되돌립니다. 연속 날수는
+     * 어디에도 적혀 있지 않고 기록에서 다시 세므로, 바꾸는 순간 지난 날수도 새 기준이 됩니다.
+     */
+    suspend fun setDailySteps(steps: List<DailyStep>) {
+        val kept = steps.distinct().ifEmpty { DailyStep.DEFAULTS }
+        context.dataStore.edit { preferences ->
+            preferences[Keys.dailySteps] = DailyStep.store(kept)
+        }
     }
 
     val appLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->

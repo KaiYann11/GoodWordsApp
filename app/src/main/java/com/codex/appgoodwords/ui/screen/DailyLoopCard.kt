@@ -37,10 +37,11 @@ internal const val dailyLoopCardTag = "daily_loop_card"
 internal fun dailyLoopStepTag(step: DailyStep) = "daily_loop_step_${step.name}"
 
 /**
- * 오늘의 세 걸음.
+ * 오늘의 걸음.
  *
- * 글귀 읽기 → 루틴 → 일기를 한자리에 두고, 오늘 어디까지 왔는지 보여 줍니다.
+ * 하루의 축으로 삼기로 한 걸음을 한자리에 두고, 오늘 어디까지 왔는지 보여 줍니다.
  * 기능은 다 있었지만 서로 떨어져 있어서 무엇부터 할지 매번 정해야 했습니다.
+ * 무엇을 축으로 삼을지는 설정에서 고릅니다. 여기서는 [DailyProgress.steps]를 그대로 놓습니다.
  *
  * **못 한 것을 붉게 세지 않습니다.** 남은 것을 세어 보여 주면 할 일 목록이 되고, 하루라도
  * 빠뜨린 날에는 앱을 열기가 싫어집니다. 다음 한 걸음만 말하고 나머지는 조용히 둡니다.
@@ -75,9 +76,9 @@ fun DailyLoopCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("오늘의 세 걸음", style = MaterialTheme.typography.titleMedium)
+                Text("오늘의 ${progress.stepCount}걸음", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "${progress.doneCount} / ${DailyStep.entries.size}",
+                    text = "${progress.doneCount} / ${progress.stepCount}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = if (progress.isComplete) {
@@ -95,7 +96,8 @@ fun DailyLoopCard(
 
             Text(progress.message, style = MaterialTheme.typography.bodyMedium)
 
-            DailyStep.entries.forEach { step ->
+            // 고른 걸음만, 고른 순서대로. 무엇을 축으로 삼을지는 사람마다 다릅니다.
+            progress.steps.forEach { step ->
                 StepRow(
                     step = step,
                     done = step in progress.doneSteps,
@@ -164,7 +166,7 @@ private fun StepRow(
                     Color.Unspecified
                 }
             )
-            // 지금 할 것에만 안내를 답니다. 세 줄이 다 설명을 달고 있으면 어느 것부터인지 모릅니다.
+            // 지금 할 것에만 안내를 답니다. 모든 줄이 설명을 달고 있으면 어느 것부터인지 모릅니다.
             if (isNext) {
                 Text(
                     text = step.hint,

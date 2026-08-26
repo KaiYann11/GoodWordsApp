@@ -143,6 +143,7 @@ fun AppGoodWordsApp(
     val sharedText by viewModel.sharedText.collectAsStateWithLifecycle()
     val openItemRequest by viewModel.openItemRequest.collectAsStateWithLifecycle()
     val dailyLoop by viewModel.dailyLoop.collectAsStateWithLifecycle()
+    val dailySteps by viewModel.dailySteps.collectAsStateWithLifecycle()
     val confirmedTodayIds by viewModel.confirmedTodayIds.collectAsStateWithLifecycle()
     val routines by viewModel.routines.collectAsStateWithLifecycle()
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
@@ -509,11 +510,12 @@ fun AppGoodWordsApp(
                             routines = routines,
                             checks = routineChecks,
                             dailyLoop = dailyLoop,
-                            // 글귀 읽기는 이제 보관함에 있습니다. 세 걸음 모두 다른 화면으로 데려갑니다.
+                            // 글귀 읽기는 이제 보관함에 있습니다. 걸음마다 다른 화면으로 데려갑니다.
                             onOpenStep = { step ->
                                 when (step) {
                                     DailyStep.QUOTE -> selectTab(AppTab.LIBRARY)
                                     DailyStep.ROUTINE -> selectTab(AppTab.ROUTINE)
+                                    DailyStep.TODO -> selectTab(AppTab.TODO)
                                     DailyStep.DIARY -> selectTab(AppTab.DIARY)
                                 }
                             },
@@ -984,6 +986,8 @@ fun AppGoodWordsApp(
                             onAppLockChanged = { enabled -> viewModel.setAppLockEnabled(enabled) },
                             aiFeedbackSettings = aiFeedbackSettings,
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
+                            dailySteps = dailySteps,
+                            onDailyStepsChanged = { updated -> viewModel.setDailySteps(updated) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
                                 viewModel.sendTestNotification()

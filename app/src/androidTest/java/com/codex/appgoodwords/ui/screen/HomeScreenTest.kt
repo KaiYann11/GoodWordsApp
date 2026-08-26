@@ -73,7 +73,12 @@ class HomeScreenTest {
         var opened: DailyStep? = null
         compose.setContent {
             homeScreen(
-                dailyLoop = DailyProgress(doneSteps = emptySet(), streakDays = 0, bestStreakDays = 0),
+                dailyLoop = DailyProgress(
+                    steps = DailyStep.DEFAULTS,
+                    doneSteps = emptySet(),
+                    streakDays = 0,
+                    bestStreakDays = 0
+                ),
                 onOpenStep = { opened = it }
             )
         }
