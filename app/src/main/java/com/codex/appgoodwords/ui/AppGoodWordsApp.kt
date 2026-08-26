@@ -175,6 +175,10 @@ fun AppGoodWordsApp(
     val books by viewModel.books.collectAsStateWithLifecycle()
     val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
     val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
+    val diaryLockEnabled by viewModel.diaryLockEnabled.collectAsStateWithLifecycle()
+
+    // 지문을 물으려면 FragmentActivity가 필요합니다. 아니면 못 묻고, 그때는 그냥 엽니다.
+    val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
     val lockState by viewModel.lockState.collectAsStateWithLifecycle()
 
     // 사용자가 휴대폰 설정에서 권한을 바꾸고 돌아올 수 있으므로 화면이 살아날 때마다 다시 본다.
@@ -764,6 +768,18 @@ fun AppGoodWordsApp(
                         AppTab.DIARY -> DiaryScreen(
                             modifier = Modifier.padding(innerPadding),
                             diaries = diaries,
+                            locked = diaryLockEnabled,
+                            // 기기에 이미 있는 잠금을 빌려 씁니다. 못 물어보는 기기면 그냥 엽니다.
+                            // 열 수 없게 두면 사용자가 자기 일기에서 잠깁니다.
+                            onRequestUnlock = { onUnlocked ->
+                                val host = activity
+                                if (host == null) onUnlocked() else AppLock.authenticate(
+                                    activity = host,
+                                    onUnlocked = onUnlocked,
+                                    onFailed = { },
+                                    title = "일기 열기"
+                                )
+                            },
                             focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.DIARY },
                             today = LocalDate.now(),
                             // 서버가 보관하는 첨부를 받아오려면 주소와 키가 필요합니다.
@@ -998,6 +1014,8 @@ fun AppGoodWordsApp(
                             onOpenHistory = { pushRoute(tabRoute(AppTab.HISTORY)) },
                             appLockEnabled = appLockEnabled,
                             onAppLockChanged = { enabled -> viewModel.setAppLockEnabled(enabled) },
+                            diaryLockEnabled = diaryLockEnabled,
+                            onDiaryLockChanged = { enabled -> viewModel.setDiaryLockEnabled(enabled) },
                             aiFeedbackSettings = aiFeedbackSettings,
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
                             dailySteps = dailySteps,

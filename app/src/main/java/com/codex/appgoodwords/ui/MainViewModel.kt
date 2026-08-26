@@ -271,6 +271,10 @@ class MainViewModel(
     val appLockEnabled = container.settingsStore.appLockEnabledFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** 일기만 따로 거는 잠금. 앱 잠금과 별개입니다. */
+    val diaryLockEnabled = container.settingsStore.diaryLockEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /**
      * 잠금의 세 가지 상태.
      *
@@ -395,6 +399,10 @@ class MainViewModel(
      *
      * 끌 때는 바로 풀어 줍니다. 껐는데 잠금 화면이 남아 있으면 사용자가 갇힙니다.
      */
+    fun setDiaryLockEnabled(enabled: Boolean) {
+        viewModelScope.launch { container.settingsStore.setDiaryLockEnabled(enabled) }
+    }
+
     fun setAppLockEnabled(enabled: Boolean) {
         viewModelScope.launch {
             container.settingsStore.setAppLockEnabled(enabled)

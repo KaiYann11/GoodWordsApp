@@ -141,6 +141,51 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun whatIsAlreadyKeptGoesOutSoItIsNotRecommendedBack() {
+        // 기록만 보여 주면 모델은 거기 있던 글귀를 그대로 돌려줍니다. 내가 쓴 것을 내가
+        // 추천받는 셈이 됩니다. 무엇에 쓰는 목록인지 제목에 적어 보냅니다.
+        val prompt = GrowthPrompt.userPrompt(
+            digest(
+                items = listOf(
+                    ContentItemEntity(
+                        id = 1,
+                        syncId = "i1",
+                        type = ContentType.QUOTE,
+                        title = "오늘 할 수 있는 것부터",
+                        body = "본문",
+                        author = "내가"
+                    )
+                ),
+                includeDiaryBody = false
+            )
+        )
+
+        assertTrue(prompt, prompt.contains("이미 담아 둔 것 (추천에서 빼 주세요)"))
+        assertTrue(prompt, prompt.contains("오늘 할 수 있는 것부터 (내가)"))
+    }
+
+    @Test
+    fun theRulesSayNotToHandBackWhatIsAlreadyThere() {
+        val system = GrowthPrompt.systemPrompt()
+
+        assertTrue(system, system.contains("권하지 않습니다"))
+        // 검색해 오라고 시키지 않습니다. 알고 있는 것 중에서 고르면 됩니다.
+        assertTrue(system, system.contains("인터넷을 찾아볼 필요는 없습니다"))
+    }
+
+    @Test
+    fun whatIsKeptAloneIsNotSomethingToLookBackOn() {
+        // 담아 둔 것만 있고 이 기간에 한 일이 없으면 값만 나가고 빈 글이 돌아옵니다.
+        val digest = digest(
+            items = listOf(ContentItemEntity(id = 1, syncId = "i1", type = ContentType.QUOTE, title = "글귀", body = "본문")),
+            includeDiaryBody = false
+        )
+
+        assertTrue(digest.ownedQuoteLines.isNotEmpty())
+        assertTrue(digest.isEmpty)
+    }
+
+    @Test
     fun aWeekWithoutDiariesIsNoLongerBlank() {
         // 기분을 일기에서 뗀 이유입니다. 바빠서 일기를 못 쓴 주는 AI에게 "아무것도 안 한 주"로
         // 보였습니다. 정작 그런 주가 가장 알고 싶은 주입니다.
@@ -224,6 +269,7 @@ class GrowthPromptTest {
         checks: List<RoutineCheckEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
         moodLogs: List<MoodLogEntity> = emptyList(),
+        items: List<ContentItemEntity> = emptyList(),
         previous: GrowthReportEntity? = null,
         includeDiaryBody: Boolean
     ) = GrowthPrompt.digest(
@@ -233,7 +279,7 @@ class GrowthPromptTest {
         routineChecks = checks,
         todos = emptyList(),
         diaries = diaries,
-        items = emptyList(),
+        items = items,
         events = emptyList(),
         books = emptyList(),
         moodLogs = moodLogs,

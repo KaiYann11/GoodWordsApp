@@ -70,6 +70,13 @@ class SettingsStore(
 
         /** 앱 잠금. 비밀번호는 담지 않습니다. 기기에 있는 잠금을 빌려 씁니다. */
         val appLockEnabled = booleanPreferencesKey("app_lock_enabled")
+        /**
+         * 일기만 따로 거는 잠금.
+         *
+         * 앱 잠금과 별개입니다. 앱은 열어 두고 쓰면서도 일기는 가리고 싶을 수 있습니다.
+         * 폰을 잠깐 건네줄 때 나머지는 보여 줘도 되지만 일기는 아닙니다.
+         */
+        val diaryLockEnabled = booleanPreferencesKey("diary_lock_enabled")
         val lastSyncError = stringPreferencesKey("last_sync_error")
         /** 서버에서 마지막으로 본 리비전 번호. 다음 동기화에서 "이 뒤에 바뀐 것만" 달라고 씁니다. */
         val serverRev = longPreferencesKey("server_rev")
@@ -145,6 +152,14 @@ class SettingsStore(
 
     val appLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[Keys.appLockEnabled] ?: false
+    }
+
+    val diaryLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[Keys.diaryLockEnabled] ?: false
+    }
+
+    suspend fun setDiaryLockEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences -> preferences[Keys.diaryLockEnabled] = enabled }
     }
 
     suspend fun setAppLockEnabled(enabled: Boolean) {

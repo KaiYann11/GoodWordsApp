@@ -123,6 +123,11 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 날수도 곧바로 새 기준이 됩니다. 저장해 두면 옛 기준으로 쌓인 숫자와 새 기준이 섞입니다.
 걸음을 늘리면 `DailyLoopCalculator`의 `daysByStep`과 앱의 탭 이동(`selectTab`)을 함께 늘립니다.
 
+**추천 글귀는 이미 가진 것을 되돌려 주지 않습니다.** 물음에 보관함 목록을 `ownedQuoteLines`로
+함께 싣습니다. **추천을 받으려는 것이 아니라 빼 달라는 목록입니다.** 기록만 보여 주면 모델은
+거기 있던 글귀를 그대로 돌려주어, 자기가 쓴 것을 자기가 추천받게 됩니다. `isEmpty`에는 세지
+않습니다. 담아 둔 것만 있고 이 기간에 한 일이 없으면 돌아볼 것이 없는 것입니다.
+
 **돌아보기는 지난번에 권한 것에서 이어집니다.** 물음에 직전 `GrowthReport`의 `improvements`와
 `suggestedRoutines`를 함께 싣습니다(`GrowthPrompt.previousAdvice`). 빼면 매번 처음 만난 사람처럼
 말하고 사용자는 같은 조언을 몇 번이고 다시 받습니다. **`strengths`와 `guide`는 싣지 않습니다.**

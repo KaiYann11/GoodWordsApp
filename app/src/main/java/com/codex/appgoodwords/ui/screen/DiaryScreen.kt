@@ -102,7 +102,17 @@ fun DiaryScreen(
     /** 검색에서 고른 일기. 그 자리로 굴려 주고 잠깐 강조합니다. */
     focusId: Long? = null,
     /** 붙여 둔 사진을 한자리에 모아 봅니다. */
-    onOpenGallery: () -> Unit = {}
+    onOpenGallery: () -> Unit = {},
+    /**
+     * 일기를 열 때 잠금을 물을지.
+     *
+     * 날짜와 기분은 그대로 보입니다. 그것까지 가리면 목록이 아무 뜻 없는 줄이 되어
+     * 무엇을 열지 고를 수조차 없습니다. 가리는 것은 본문이고, 제목이 비었을 때 대신 나오는
+     * 본문 첫 줄도 함께 가립니다.
+     */
+    locked: Boolean = false,
+    /** 잠금을 풀어 달라고 묻습니다. 풀리면 받은 것을 부릅니다. */
+    onRequestUnlock: (() -> Unit) -> Unit = { it() }
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
@@ -114,6 +124,15 @@ fun DiaryScreen(
      * 두 날을 나란히 볼 수 없습니다.
      */
     var expandedIds by rememberSaveable { mutableStateOf(emptySet<Long>()) }
+    /**
+     * 이번에 한 번 풀었는지.
+     *
+     * 일기 하나를 열 때마다 물으면, 어제와 오늘을 견주어 보려는 것만으로도 지문을 여러 번
+     * 대야 합니다. 한 번 풀면 이 화면을 떠날 때까지 열어 둡니다. 저장하지 않으므로 앱이
+     * 다시 뜨면 다시 묻습니다.
+     */
+    var unlocked by remember { mutableStateOf(false) }
+    val needsUnlock = locked && !unlocked
 
     val listState = rememberLazyListState()
     // 맨 위 안내 카드 하나를 지나야 목록이 시작합니다.
@@ -124,8 +143,9 @@ fun DiaryScreen(
 
     // 검색에서 찾아온 일기는 펼쳐 둡니다. 찾던 말이 본문 안에 있는데 접혀 있으면
     // 데려다 놓고도 못 보여 주는 셈입니다.
-    LaunchedEffect(focusId) {
-        focusId?.let { expandedIds = expandedIds + it }
+    // 잠겨 있으면 검색에서 찾아왔더라도 저절로 펼치지 않습니다. 물어보지도 않고 여는 셈입니다.
+    LaunchedEffect(focusId, needsUnlock) {
+        if (!needsUnlock) focusId?.let { expandedIds = expandedIds + it }
     }
 
     LazyColumn(
@@ -195,7 +215,14 @@ fun DiaryScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                expandedIds = if (expanded) expandedIds - diary.id else expandedIds + diary.id
+                                when {
+                                    expanded -> expandedIds = expandedIds - diary.id
+                                    needsUnlock -> onRequestUnlock {
+                                        unlocked = true
+                                        expandedIds = expandedIds + diary.id
+                                    }
+                                    else -> expandedIds = expandedIds + diary.id
+                                }
                             }
                             .testTag(diaryCardTag(diary.id))
                     ) {
@@ -207,11 +234,13 @@ fun DiaryScreen(
                                     diary.weatherOption?.let { "${it.emoji} ${it.label}" },
                                     diary.moodOption?.let { "${it.emoji} ${it.label}" },
                                     // 접혀 있어도 안에 무엇이 있는지는 알려 줍니다. 안 그러면 열어 봐야 압니다.
-                                    attachmentSummary(diary).takeIf { !expanded && it.isNotBlank() }
+                                    attachmentSummary(diary).takeIf { !expanded && it.isNotBlank() },
+                                    "잠김".takeIf { needsUnlock }
                                 ).joinToString("  ·  "),
                                 style = MaterialTheme.typography.labelMedium
                             )
-                            if (diary.displayTitle.isNotBlank()) {
+                            // 제목이 비면 본문 첫 줄이 대신 나옵니다. 잠긴 동안에는 그것도 본문입니다.
+                            if (diary.displayTitle.isNotBlank() && !needsUnlock) {
                                 Text(diary.displayTitle, style = MaterialTheme.typography.titleSmall)
                             }
                         }

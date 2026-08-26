@@ -19,6 +19,13 @@ data class GrowthDigest(
     val diaryLines: List<String>,
     val quoteLines: List<String>,
     val bookLines: List<String>,
+    /**
+     * 이미 담아 둔 글귀.
+     *
+     * 추천을 받으려고 보내는 것이 아니라 **빼 달라고** 보냅니다. 기록만 보여 주면 모델은
+     * 거기 있던 글귀를 그대로 돌려줍니다. 내가 쓴 것을 내가 추천받는 셈이 됩니다.
+     */
+    val ownedQuoteLines: List<String> = emptyList(),
     /** 일기를 쓰지 않은 날의 기분까지. 없으면 빈 목록입니다. */
     val moodLines: List<String> = emptyList(),
     /**
@@ -139,6 +146,16 @@ object GrowthPrompt {
                 event.contentTitle.ifBlank { "제목 없는 글귀" } + if (category.isNotBlank()) " ($category)" else ""
             }
 
+        // 종류를 가리지 않습니다. 링크든 영상이든 번뜩인 것이든 이미 내 것입니다.
+        val ownedQuoteLines = items
+            .sortedByDescending { it.updatedAt }
+            .take(MAX_LINES)
+            .mapNotNull { item ->
+                val title = item.title.trim().ifBlank { item.body.trim().take(40) }
+                title.takeIf { it.isNotBlank() }
+                    ?.plus(if (item.author.isNotBlank()) " (${item.author.trim()})" else "")
+            }
+
         val bookLines = books
             .sortedByDescending { it.updatedAt }
             .take(MAX_LINES)
@@ -168,6 +185,7 @@ object GrowthPrompt {
             diaryLines = diaryLines,
             quoteLines = quoteLines,
             bookLines = bookLines,
+            ownedQuoteLines = ownedQuoteLines,
             moodLines = moodLines,
             previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
             previousAdviceOn = previousOn,
@@ -228,7 +246,13 @@ object GrowthPrompt {
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
         appendLine("""{"strengths":["..."],"improvements":["..."],"suggestedQuote":{"text":"...","author":"..."},"suggestedRoutines":["..."],"guide":"..."}""")
         appendLine("- strengths와 improvements는 각각 1~3개, suggestedRoutines는 0~3개입니다.")
-        appendLine("- suggestedQuote는 오늘 곁에 둘 만한 짧은 글귀 하나입니다. 지어낸 인용이라면 author는 빈 문자열로 둡니다.")
+        appendLine(
+            "- suggestedQuote는 오늘 곁에 둘 만한 짧은 글귀 하나입니다. **위 기록에 나온 글귀는 " +
+                "권하지 않습니다.** 이미 가진 것을 되돌려 받으면 새로 만나는 것이 없습니다. " +
+                "당신이 알고 있는 글귀 중에서, 이번 기간에 어울리는 것을 하나 고르세요. " +
+                "인터넷을 찾아볼 필요는 없습니다."
+        )
+        appendLine("- 지어낸 인용이라면 author는 빈 문자열로 둡니다. 없는 사람 이름을 붙이지 않습니다.")
         append("- guide는 다음 기간을 어떻게 보내면 좋을지 두세 문장으로 적습니다.")
     }
 
@@ -255,6 +279,8 @@ object GrowthPrompt {
         section("일기 없이 남긴 기분", digest.moodLines)
         section("읽은 글귀", digest.quoteLines)
         section("독서", digest.bookLines)
+        // 추천을 받으려는 것이 아니라 빼 달라는 목록입니다. 무엇에 쓰는지 제목에 적어 둡니다.
+        section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
         if (digest.previousAdviceLines.isNotEmpty()) {
             append("지난번에 권한 것이 그 뒤로 어떻게 되었는지부터 짚고, ")
         }

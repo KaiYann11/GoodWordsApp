@@ -56,7 +56,9 @@ object AppLock {
     fun authenticate(
         activity: FragmentActivity,
         onUnlocked: () -> Unit,
-        onFailed: (String) -> Unit
+        onFailed: (String) -> Unit,
+        /** 무엇을 열려고 묻는지. 앱 전체와 일기가 같은 말을 쓰면 어느 쪽인지 알 수 없습니다. */
+        title: String = "오늘의 글귀 잠금"
     ) {
         val prompt = BiometricPrompt(
             activity,
@@ -74,7 +76,7 @@ object AppLock {
 
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("오늘의 글귀 잠금")
+                .setTitle(title)
                 .setSubtitle("기기 잠금으로 확인합니다.")
                 .setAllowedAuthenticators(authenticators)
                 .build()

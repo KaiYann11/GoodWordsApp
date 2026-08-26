@@ -74,6 +74,9 @@ internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank
 
 internal fun aiProviderTag(provider: AiProvider): String = "ai_provider_" + provider.name.lowercase()
 
+/** 일기 잠금 스위치. 잠금 칸에 스위치가 둘이라 이름으로 짚습니다. */
+internal const val diaryLockSwitchTag = "diary_lock_switch"
+
 /** 오늘의 걸음 줄. 네 줄이 같은 모양이라 이름으로 짚습니다. */
 internal fun dailyStepRowTag(step: DailyStep): String = "daily_step_" + step.name.lowercase()
 
@@ -114,6 +117,9 @@ fun SettingsScreen(
     onOpenHistory: () -> Unit = {},
     appLockEnabled: Boolean = false,
     onAppLockChanged: (Boolean) -> Unit = {},
+    /** 일기만 따로 거는 잠금. 앱 잠금과 별개입니다. */
+    diaryLockEnabled: Boolean = false,
+    onDiaryLockChanged: (Boolean) -> Unit = {},
     aiFeedbackSettings: AiFeedbackSettings = AiFeedbackSettings(),
     onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
     /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
@@ -694,7 +700,12 @@ fun SettingsScreen(
         }
 
         item {
-            AppLockSection(enabled = appLockEnabled, onChanged = onAppLockChanged)
+            AppLockSection(
+                enabled = appLockEnabled,
+                onChanged = onAppLockChanged,
+                diaryLocked = diaryLockEnabled,
+                onDiaryLockChanged = onDiaryLockChanged
+            )
         }
 
         item {
@@ -779,7 +790,8 @@ private fun SyncConfirmDialog(
 private fun SettingSwitchRow(
     title: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -788,7 +800,8 @@ private fun SettingSwitchRow(
         Text(title)
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            modifier = modifier
         )
     }
 }
@@ -1067,7 +1080,9 @@ private fun AiFeedbackSection(
 @Composable
 private fun AppLockSection(
     enabled: Boolean,
-    onChanged: (Boolean) -> Unit
+    onChanged: (Boolean) -> Unit,
+    diaryLocked: Boolean = false,
+    onDiaryLockChanged: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val canLock = remember { AppLock.canLock(context) }
@@ -1103,6 +1118,24 @@ private fun AppLockSection(
                 } else {
                     MaterialTheme.colorScheme.error
                 }
+            )
+
+            // 앱 잠금과 따로 둡니다. 앱은 열어 두고 쓰면서도 일기는 가리고 싶을 수 있습니다.
+            SettingSwitchRow(
+                title = "일기를 열 때 따로 확인",
+                checked = diaryLocked && canLock,
+                onCheckedChange = { wanted -> if (canLock) onDiaryLockChanged(wanted) },
+                modifier = Modifier.testTag(diaryLockSwitchTag)
+            )
+            Text(
+                text = if (diaryLocked) {
+                    "일기 본문을 펼칠 때 한 번 확인합니다. 날짜와 기분은 그대로 보입니다. " +
+                        "한 번 풀면 그 화면을 떠날 때까지 열어 둡니다."
+                } else {
+                    "폰을 잠깐 건네줄 때 나머지는 보여 줘도 일기는 아닐 수 있습니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
