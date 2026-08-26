@@ -224,6 +224,19 @@ fun AppGoodWordsApp(
         }
     }
 
+    /**
+     * 하단 바의 탭으로 갑니다. **쌓지 않고 뿌리를 갈아 끼웁니다.**
+     *
+     * 탭을 누를 때마다 쌓으면 두 가지가 어긋납니다. 탭 화면인데 위쪽에 뒤로 가기 화살표가
+     * 생기고, 뒤로가기가 "들른 차례"를 되짚어서 보관함 → 일기 → 보관함으로 돌아다닌 만큼
+     * 그대로 되감깁니다. 탭은 오가는 자리이지 파고드는 자리가 아닙니다.
+     *
+     * 파고드는 것(상세·편집·검색·설정처럼 다시 나와야 하는 것)만 [pushRoute]로 쌓습니다.
+     */
+    fun selectTab(tab: AppTab) {
+        navStack = listOf(tabRoute(tab))
+    }
+
     fun popRoute() {
         if (navStack.size > 1) {
             navStack = navStack.dropLast(1)
@@ -279,8 +292,18 @@ fun AppGoodWordsApp(
         pushRoute(addRoute())
     }
 
-    BackHandler(enabled = canNavigateBack) {
-        popRoute()
+    /**
+     * 뒤로가기.
+     *
+     * 파고든 것이 있으면 한 겹 나옵니다. 탭 뿌리에 있으면 홈으로 가고, 홈에서는 시스템에
+     * 넘겨 앱을 닫습니다. 들른 차례를 되짚지 않는 것이 요점입니다. 어디를 거쳐 왔든
+     * 일기에서 뒤로 가면 늘 홈입니다.
+     *
+     * 탭 뿌리에서 바로 앱을 닫지 않는 이유는, 홈이 이 앱의 시작 자리이기 때문입니다.
+     * 일기를 보다 무심코 뒤로 갔을 때 앱이 꺼지면 보던 자리를 잃습니다.
+     */
+    BackHandler(enabled = canNavigateBack || currentTab != AppTab.HOME) {
+        if (canNavigateBack) popRoute() else selectTab(AppTab.HOME)
     }
 
     LaunchedEffect(confirmFeedbackToken) {
@@ -390,7 +413,7 @@ fun AppGoodWordsApp(
                                 val selected = currentTab == tab
                                 NavigationBarItem(
                                     selected = selected,
-                                    onClick = { pushRoute(tabRoute(tab)) },
+                                    onClick = { selectTab(tab) },
                                     icon = {
                                         Icon(
                                             imageVector = when (tab) {
@@ -488,9 +511,9 @@ fun AppGoodWordsApp(
                             // 글귀 읽기는 이제 보관함에 있습니다. 세 걸음 모두 다른 화면으로 데려갑니다.
                             onOpenStep = { step ->
                                 when (step) {
-                                    DailyStep.QUOTE -> pushRoute(tabRoute(AppTab.LIBRARY))
-                                    DailyStep.ROUTINE -> pushRoute(tabRoute(AppTab.ROUTINE))
-                                    DailyStep.DIARY -> pushRoute(tabRoute(AppTab.DIARY))
+                                    DailyStep.QUOTE -> selectTab(AppTab.LIBRARY)
+                                    DailyStep.ROUTINE -> selectTab(AppTab.ROUTINE)
+                                    DailyStep.DIARY -> selectTab(AppTab.DIARY)
                                 }
                             },
                             latestReport = growthReports.firstOrNull(),
@@ -898,7 +921,7 @@ fun AppGoodWordsApp(
                                             if (navStack.size > 1 && navStack.last() == addRoute()) {
                                                 popRoute()
                                             } else {
-                                                navStack = listOf(tabRoute(AppTab.HOME))
+                                                selectTab(AppTab.HOME)
                                             }
                                             "저장했습니다."
                                         }
