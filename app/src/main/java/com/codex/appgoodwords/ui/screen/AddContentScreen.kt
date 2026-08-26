@@ -29,10 +29,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ContentDraft
+import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.LinkMetadata
+
+/** 번뜩인 것으로 담는 스위치. 이 화면에 스위치가 둘이라 이름으로 짚습니다. */
+internal const val ideaSwitchTag = "add_idea_switch"
 
 @Composable
 fun AddContentScreen(
@@ -70,6 +75,8 @@ fun AddContentScreen(
     var imageUris by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.imageUris ?: emptyList()) }
     var videoUris by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.videoUris ?: emptyList()) }
     var isFavorite by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.isFavorite ?: false) }
+    // 번뜩인 것은 겉모습으로 알 수 없습니다. 주소로 종류를 알아내는 규칙이 짚어 주지 못합니다.
+    var isIdea by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.type == ContentType.IDEA) }
 
     val selectedTags = remember(tagsText) { parseTags(tagsText) }
 
@@ -288,6 +295,28 @@ fun AddContentScreen(
         }
 
         item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("내가 번뜩인 것")
+                    Switch(
+                        checked = isIdea,
+                        onCheckedChange = { isIdea = it },
+                        modifier = Modifier.testTag(ideaSwitchTag)
+                    )
+                }
+                Text(
+                    text = "할 일이 아니라 여기에 둡니다. 익어서 할 만한 것이 되면 그때 " +
+                        "루틴이나 할 일로 옮기면 됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -318,6 +347,8 @@ fun AddContentScreen(
                     onClick = {
                         onSave(
                             ContentDraft(
+                                // 켜지 않으면 예전처럼 주소를 보고 알아서 정합니다.
+                                type = if (isIdea) ContentType.IDEA else ContentType.QUOTE,
                                 title = title,
                                 body = body,
                                 author = author,

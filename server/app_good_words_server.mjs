@@ -59,7 +59,8 @@ for (const [mime, ext] of attachmentExtensions) {
   if (!attachmentMimes.has(ext)) attachmentMimes.set(ext, mime);
 }
 
-const contentTypes = new Set(["QUOTE", "LINK", "VIDEO"]);
+/** 보관함에 담기는 종류. 앱 `ContentType`과 같은 이름이어야 한다. */
+const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
 const triggers = new Set([
   "APP_LAUNCH",

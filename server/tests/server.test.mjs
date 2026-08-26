@@ -2148,6 +2148,31 @@ describe("AI 돌아보기", () => {
   });
 });
 
+describe("번뜩인 아이디어", () => {
+  it("아이디어 종류가 그대로 남는다", async () => {
+    // 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 보관함에서 아이디어만 골라 볼 수 없게 된다.
+    const created = await (
+      await api("/api/content", {
+        method: "POST",
+        body: { type: "IDEA", title: "자기 전 5분 회고", body: "하루를 닫는 말 한 줄" },
+      })
+    ).json();
+
+    assert.equal(created.type, "IDEA");
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.items.find((item) => item.id === created.id).type, "IDEA");
+  });
+
+  it("모르는 종류는 여전히 글귀로 읽는다", async () => {
+    const created = await (
+      await api("/api/content", { method: "POST", body: { type: "NOTE", title: "무엇", body: "내용" } })
+    ).json();
+
+    assert.equal(created.type, "QUOTE");
+  });
+});
+
 describe("오늘 기분", () => {
   function moodLog(overrides = {}) {
     return {

@@ -92,7 +92,8 @@ fun shareContentItem(
 
 private fun buildShareText(item: ContentItemEntity): String {
     return when (item.type) {
-        ContentType.QUOTE -> buildQuoteShareText(item)
+        // 번뜩인 것도 글 한 덩어리라 글귀와 같은 모양으로 나눕니다.
+        ContentType.QUOTE, ContentType.IDEA -> buildQuoteShareText(item)
         ContentType.LINK -> buildLinkShareText(item)
         ContentType.VIDEO -> buildVideoShareText(item)
     }

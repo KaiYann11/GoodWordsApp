@@ -476,6 +476,7 @@ function renderLibrary() {
             <label for="contentType">유형</label>
             <select id="contentType" name="type">
               ${option("QUOTE", "글귀", editing.type)}
+              ${option("IDEA", "아이디어", editing.type)}
               ${option("LINK", "링크", editing.type)}
               ${option("VIDEO", "영상", editing.type)}
             </select>
@@ -521,6 +522,7 @@ function renderLibrary() {
             <select id="typeFilter">
               ${option("ALL", "전체", state.typeFilter)}
               ${option("QUOTE", "글귀", state.typeFilter)}
+              ${option("IDEA", "아이디어", state.typeFilter)}
               ${option("LINK", "링크", state.typeFilter)}
               ${option("VIDEO", "영상", state.typeFilter)}
             </select>
@@ -1509,7 +1511,7 @@ function formatDate(timestamp) {
 }
 
 function labelForType(type) {
-  return { QUOTE: "글귀", LINK: "링크", VIDEO: "영상" }[type] || type || "";
+  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상" }[type] || type || "";
 }
 
 function labelForEvent(type) {

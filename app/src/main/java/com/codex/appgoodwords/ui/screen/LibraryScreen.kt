@@ -74,6 +74,7 @@ private enum class ContentFilter(
 ) {
     ALL("전체"),
     QUOTE("글귀"),
+    IDEA("아이디어"),
     LINK("링크"),
     VIDEO("영상");
 
@@ -81,6 +82,7 @@ private enum class ContentFilter(
         return when (this) {
             ALL -> true
             QUOTE -> item.type == ContentType.QUOTE
+            IDEA -> item.type == ContentType.IDEA
             LINK -> item.type == ContentType.LINK
             VIDEO -> item.type == ContentType.VIDEO
         }

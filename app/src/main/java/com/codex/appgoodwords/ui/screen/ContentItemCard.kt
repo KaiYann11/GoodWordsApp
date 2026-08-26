@@ -266,5 +266,6 @@ private fun ContentType.displayLabel(): String {
         ContentType.QUOTE -> "글귀"
         ContentType.LINK -> "링크"
         ContentType.VIDEO -> "영상"
+        ContentType.IDEA -> "아이디어"
     }
 }

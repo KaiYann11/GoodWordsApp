@@ -60,6 +60,11 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 기분별 실천·상위 기분은 `settledByDate`(어느 쪽이라 할 수 없는 날은 뺌)를 씁니다.**
 그래프에서 빼면 실제로는 쓴 날이 안 쓴 날처럼 보이고, 평균에 넣으면 그 칸이 흔들립니다.
 
+**보관함 종류(`ContentType`)는 앱·서버·웹이 같아야 합니다.** 앱 `ContentType` · 서버 `contentTypes` ·
+웹 `app.js`의 종류 고르개와 이름표. 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 담아 둔 것이
+보관함에서 그 종류로 골라지지 않습니다. **`IDEA`는 담는 사람이 짚어 줍니다** — 주소로 종류를
+알아내는 `detectContentType`이 번뜩인 것은 알아볼 수 없습니다.
+
 **날씨·기분·일기 종류 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의
 `DiaryWeather`·`DiaryMood`·`DiaryKind`와 웹 `server/web/app.js`의
 `weatherOptions`·`moodOptions`·`diaryKinds`가 같은 코드 값을 씁니다. 한쪽만 늘리면

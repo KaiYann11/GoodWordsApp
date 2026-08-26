@@ -869,6 +869,8 @@ class MainViewModel(
     }
 
     private fun detectContentType(draft: ContentDraft): ContentType {
+        // 번뜩인 것은 겉모습으로 알 수 없습니다. 담는 사람이 짚어 준 것을 덮어쓰지 않습니다.
+        if (draft.type == ContentType.IDEA) return ContentType.IDEA
         val url = draft.sourceUrl.trim().lowercase()
         return when {
             url.contains("youtube.com") ||
