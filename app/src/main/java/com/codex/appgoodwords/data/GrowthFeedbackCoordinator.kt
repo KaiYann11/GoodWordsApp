@@ -18,10 +18,70 @@ class GrowthFeedbackCoordinator(
      *
      * 실제로 보내는 글과 **같은 함수**로 만듭니다. 미리 보기만 따로 만들면
      * 화면에 보이는 것과 나가는 것이 언젠가 어긋납니다.
+     *
+     * 이 글은 그대로 복사해 채팅창에 붙여넣을 수도 있습니다. 그래서 일러 주는 말까지
+     * 함께 보여 줍니다. 답의 형식을 정하는 것이 그 말이라, 빠뜨리면 읽어 낼 수 없는 답이 옵니다.
      */
     suspend fun preview(period: ReportPeriod, today: LocalDate = LocalDate.now()): String {
         val aiSettings = settingsStore.getAiFeedbackSettings()
-        return GrowthPrompt.userPrompt(buildDigest(period, today, aiSettings.includeDiaryBody))
+        return GrowthPrompt.chatPrompt(buildDigest(period, today, aiSettings.includeDiaryBody))
+    }
+
+    /**
+     * 물음을 복사해 갔다고 적어 둡니다.
+     *
+     * 돌아와 답을 붙여넣을 때 어느 구간을 보고 쓴 글인지 알아야 합니다. 채팅 앱에 다녀오는
+     * 사이 앱이 꺼질 수 있어 화면이 아니라 설정에 남깁니다.
+     */
+    suspend fun markPromptCopied(period: ReportPeriod, today: LocalDate = LocalDate.now()) {
+        settingsStore.setPendingGrowthPrompt(period, today)
+    }
+
+    suspend fun pendingPrompt(): PendingGrowthPrompt? = settingsStore.getPendingGrowthPrompt()
+
+    /**
+     * 채팅창에서 받아 온 답을 그대로 받아 한 편으로 적습니다.
+     *
+     * AI에 연결하지 못하는 자리를 위한 길입니다. 앱이 못 부를 뿐이지 사용자는 자기 계정으로
+     * 얼마든지 물어볼 수 있는데, 그렇게 받은 답을 앱에 남길 방법이 없었습니다.
+     *
+     * **형식이 어긋나도 버리지 않습니다.** 사람이 직접 옮겨 온 글입니다. 갈래를 나눠 읽지
+     * 못하면 통째로 가이드에 담아 둡니다. 못 읽었다며 되돌려 주면 사용자가 받아 온 답이
+     * 그 자리에서 사라집니다.
+     *
+     * @throws IllegalStateException 붙여넣은 글이 비어 있을 때
+     */
+    suspend fun saveManualAnswer(
+        rawText: String,
+        today: LocalDate = LocalDate.now()
+    ): GrowthReportEntity {
+        val trimmed = rawText.trim()
+        check(trimmed.isNotBlank()) { "붙여넣은 답이 비어 있습니다." }
+
+        val pending = settingsStore.getPendingGrowthPrompt()
+        val period = pending?.period ?: ReportPeriod.MANUAL
+        val from = pending?.from ?: today.minusDays((period.days - 1).toLong())
+        val to = pending?.to ?: today
+
+        val parsed = GrowthReportParser.parse(
+            rawText = trimmed,
+            period = period,
+            periodStart = from.toString(),
+            periodEnd = to.toString(),
+            model = MANUAL_MODEL
+        )
+        val report = parsed ?: GrowthReportEntity(
+            period = period.name,
+            periodStart = from.toString(),
+            periodEnd = to.toString(),
+            model = MANUAL_MODEL,
+            guide = trimmed.take(MANUAL_ANSWER_LIMIT)
+        )
+
+        val id = database.growthReportDao().insert(report)
+        settingsStore.clearPendingGrowthPrompt()
+        settingsStore.recordAiFeedbackResult(runAt = System.currentTimeMillis(), error = "")
+        return report.copy(id = id)
     }
 
     /**
@@ -44,7 +104,7 @@ class GrowthFeedbackCoordinator(
             client.ask(
                 system = GrowthPrompt.systemPrompt(),
                 user = GrowthPrompt.userPrompt(digest),
-                model = aiSettings.model,
+                model = aiSettings.effectiveModel,
                 aiSettings = aiSettings,
                 syncSettings = syncSettings
             )
@@ -61,7 +121,7 @@ class GrowthFeedbackCoordinator(
             period = period,
             periodStart = digest.from.toString(),
             periodEnd = digest.to.toString(),
-            model = aiSettings.model
+            model = aiSettings.effectiveModel
         )
         if (report == null) {
             val message = "AI가 보낸 답을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요."
@@ -97,4 +157,12 @@ class GrowthFeedbackCoordinator(
         books = database.bookDao().getAll(),
         includeDiaryBody = includeDiaryBody
     )
+
+    companion object {
+        /** 손으로 옮겨 온 답. 어느 모델이 썼는지는 앱이 알 수 없어 이렇게 적어 둡니다. */
+        const val MANUAL_MODEL = "직접 붙여넣음"
+
+        /** 갈래를 나눠 읽지 못했을 때 통째로 담아 두는 글자 수. */
+        const val MANUAL_ANSWER_LIMIT = 4000
+    }
 }

@@ -92,6 +92,36 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun theBlockToPasteCarriesTheRulesAsWellAsTheRecords() {
+        // 채팅창에는 붙여넣을 자리가 하나뿐입니다. 규칙을 빠뜨리면 읽어 낼 수 없는 답이 옵니다.
+        val digest = digest(includeDiaryBody = false)
+        val chat = GrowthPrompt.chatPrompt(digest)
+
+        assertTrue(chat, chat.contains(GrowthPrompt.systemPrompt()))
+        assertTrue(chat, chat.contains(GrowthPrompt.userPrompt(digest)))
+    }
+
+    @Test
+    fun theCopiedPromptRemembersWhichStretchItCovered() {
+        // 채팅 앱에 다녀오는 사이 앱이 꺼져도, 날짜와 기간만 있으면 구간을 그대로 다시 셉니다.
+        val pending = PendingGrowthPrompt(ReportPeriod.WEEKLY, LocalDate.of(2026, 8, 23))
+
+        assertEquals(LocalDate.of(2026, 8, 17), pending.from)
+        assertEquals(LocalDate.of(2026, 8, 23), pending.to)
+        assertEquals(
+            digest(period = ReportPeriod.WEEKLY, includeDiaryBody = false).from,
+            pending.from
+        )
+    }
+
+    @Test
+    fun aOneDayPromptCoversOneDay() {
+        val pending = PendingGrowthPrompt(ReportPeriod.DAILY, LocalDate.of(2026, 8, 23))
+
+        assertEquals(pending.to, pending.from)
+    }
+
+    @Test
     fun thePeriodDecidesHowFarBackToLook() {
         assertEquals(LocalDate.of(2026, 8, 23), digest(period = ReportPeriod.DAILY, includeDiaryBody = false).from)
         assertEquals(LocalDate.of(2026, 8, 17), digest(period = ReportPeriod.WEEKLY, includeDiaryBody = false).from)

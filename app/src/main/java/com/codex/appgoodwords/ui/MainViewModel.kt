@@ -76,6 +76,10 @@ class MainViewModel(
     val aiFeedbackSettings = container.settingsStore.aiFeedbackSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AiFeedbackSettings())
 
+    /** 복사해 두고 아직 답을 받아 적지 않은 물음. 없으면 null. */
+    val pendingGrowthPrompt = container.settingsStore.pendingGrowthPromptFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     val routineChecks = container.repository.observeRoutineChecks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -631,6 +635,22 @@ class MainViewModel(
     /** 보내기 전에 무엇이 나가는지 보여 줍니다. 실제로 보내는 글과 같은 함수로 만듭니다. */
     suspend fun previewGrowthPrompt(period: ReportPeriod): Result<String> = runCatching {
         container.growthFeedbackCoordinator.preview(period)
+    }
+
+    /**
+     * 물음을 복사해 갔다고 적어 둡니다.
+     *
+     * AI에 못 붙는 자리를 위한 길입니다. 복사해 채팅창에 붙여넣고 받아 온 답을
+     * [saveGrowthAnswer]로 다시 앱에 남깁니다. 그 사이 앱이 꺼져도 구간을 잃지 않게
+     * 화면이 아니라 설정에 적습니다.
+     */
+    suspend fun markGrowthPromptCopied(period: ReportPeriod): Result<Unit> = runCatching {
+        container.growthFeedbackCoordinator.markPromptCopied(period)
+    }
+
+    /** 채팅창에서 받아 온 답을 그대로 한 편으로 남깁니다. */
+    suspend fun saveGrowthAnswer(rawText: String): Result<GrowthReportEntity> = runCatching {
+        container.growthFeedbackCoordinator.saveManualAnswer(rawText)
     }
 
     suspend fun deleteGrowthReport(reportId: Long): Result<Unit> = runCatching {

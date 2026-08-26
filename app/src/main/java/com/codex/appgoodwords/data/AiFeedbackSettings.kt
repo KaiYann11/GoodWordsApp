@@ -6,13 +6,18 @@ import java.time.LocalTime
 /**
  * AI 성장 피드백 설정.
  *
- * 열쇠([apiKey])는 이 기기에만 둡니다. 동기화 스냅샷과 백업 파일에는 넣지 않습니다.
+ * 열쇠는 이 기기에만 둡니다. 동기화 스냅샷과 백업 파일에는 넣지 않습니다.
  * 한 번 나가면 되돌릴 수 없고, 서버 DB나 백업 파일을 남에게 보여 줄 일이 생기기 때문입니다.
  */
 data class AiFeedbackSettings(
+    /** [AiProvider]의 이름. 모르는 값이 들어와도 버리지 않고 OpenAI로 읽습니다. */
+    val provider: String = AiProvider.OPENAI.name,
     /** OpenAI 열쇠. 서버를 거쳐 부를 때는 비어 있어도 됩니다. */
-    val apiKey: String = "",
-    val model: String = DEFAULT_MODEL,
+    val openAiKey: String = "",
+    /** Claude 열쇠. 공급자를 바꿔 볼 때 앞서 넣어 둔 열쇠가 지워지지 않게 따로 둡니다. */
+    val anthropicKey: String = "",
+    /** 비어 있으면 고른 공급자의 기본 모델. [effectiveModel]로 읽습니다. */
+    val model: String = "",
     /** [ReportPeriod]의 이름, 또는 꺼짐을 뜻하는 빈 문자열. */
     val schedule: String = "",
     /** 주기가 돌아온 날 이 시각에 만듭니다. */
@@ -29,6 +34,25 @@ data class AiFeedbackSettings(
     /** 마지막 실패 사유. 배경에서 돌다 실패하면 화면에 뜨지 않아 따로 남깁니다. */
     val lastError: String = ""
 ) {
+    val activeProvider: AiProvider
+        get() = AiProvider.of(provider)
+
+    /** 지금 고른 공급자의 열쇠. */
+    val activeKey: String
+        get() = when (activeProvider) {
+            AiProvider.OPENAI -> openAiKey
+            AiProvider.ANTHROPIC -> anthropicKey
+        }
+
+    /**
+     * 실제로 부를 모델.
+     *
+     * 공급자를 바꾸면 앞서 고른 모델은 그 공급자에 없는 이름입니다. 그대로 보내면
+     * "모델을 찾을 수 없다"는 오류만 돌아오므로, 여기서 그 공급자의 기본으로 당겨 붙입니다.
+     */
+    val effectiveModel: String
+        get() = activeProvider.models.firstOrNull { it == model.trim() } ?: activeProvider.defaultModel
+
     val scheduledPeriod: ReportPeriod?
         get() = ReportPeriod.entries.firstOrNull { it.name == schedule && it != ReportPeriod.MANUAL }
 
@@ -45,7 +69,7 @@ data class AiFeedbackSettings(
      * 다시 넣지 않아도 되기 때문입니다.
      */
     val canCallDirectly: Boolean
-        get() = apiKey.isNotBlank()
+        get() = activeKey.isNotBlank()
 
     /** 오늘 만들 차례인지. [lastRunAt]이 오늘 안이면 다시 만들지 않습니다. */
     fun isDue(now: Long, today: LocalDate, zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
@@ -55,10 +79,17 @@ data class AiFeedbackSettings(
         return last.plusDays(period.days.toLong()) <= today
     }
 
+    /** 열쇠는 그대로 두고 공급자만 바꿉니다. 모델은 [effectiveModel]이 알아서 당겨 붙입니다. */
+    fun withProvider(provider: AiProvider): AiFeedbackSettings =
+        copy(provider = provider.name, model = "")
+
+    /** 지금 고른 공급자의 열쇠 자리에만 넣습니다. */
+    fun withKey(key: String): AiFeedbackSettings = when (activeProvider) {
+        AiProvider.OPENAI -> copy(openAiKey = key.trim())
+        AiProvider.ANTHROPIC -> copy(anthropicKey = key.trim())
+    }
+
     companion object {
-        /** 값이 싸고 이 정도 글에는 충분합니다. 설정에서 바꿀 수 있습니다. */
-        const val DEFAULT_MODEL = "gpt-4o-mini"
         const val DEFAULT_HOUR = 21
-        val MODEL_CHOICES = listOf("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini")
     }
 }

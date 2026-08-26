@@ -150,6 +150,7 @@ createServer((request, response) => {
   console.log(`Attachments: ${config.attachmentsDir}`);
   if (config.apiKey) console.log("API key protection is enabled.");
   if (config.openAiKey) console.log("AI growth feedback is enabled (OPENAI_API_KEY).");
+  if (config.anthropicKey) console.log("AI growth feedback is enabled (ANTHROPIC_API_KEY).");
 });
 
 async function route(request, response) {
@@ -220,7 +221,7 @@ async function route(request, response) {
   }
   if (method === "POST" && url.pathname === "/api/growth-feedback") {
     const payload = await readJson(request);
-    const result = await askOpenAi(payload);
+    const result = await askAi(payload);
     sendJson(response, 200, result);
     return;
   }
@@ -394,38 +395,35 @@ async function routeContentMember(method, parts, request, response) {
  * **서버는 물음을 만들지 않습니다.** 무엇이 나가는지는 기기가 정하고, 여기서는 그대로 전달만
  * 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 "일기 본문은 빼고" 정해 둔 것이
  * 서버 쪽에서 조용히 뒤집힐 수 있습니다.
+ *
+ * 어디에 물어볼지도 기기가 정합니다(`provider`). 서버는 그에 맞는 열쇠를 골라 쓸 뿐입니다.
+ * 옛 앱은 이 값을 보내지 않으므로, 없으면 OpenAI로 읽습니다.
  */
-async function askOpenAi(payload) {
-  if (!config.openAiKey) {
-    throw new HttpError(
-      503,
-      "서버에 AI 열쇠가 없습니다. OPENAI_API_KEY를 넣고 서버를 다시 띄우거나, 앱 설정에 열쇠를 넣어 주세요.",
-    );
-  }
+async function askAi(payload) {
   const system = text(payload?.system);
   const user = text(payload?.user);
   if (!user) throw new HttpError(400, "물어볼 내용이 비어 있습니다.");
 
-  const body = {
-    model: text(payload?.model) || "gpt-4o-mini",
-    messages: [
-      ...(system ? [{ role: "system", content: system }] : []),
-      { role: "user", content: user },
-    ],
-    response_format: { type: "json_object" },
-  };
+  const provider = text(payload?.provider).toLowerCase() || "openai";
+  const plan = aiProviders[provider];
+  if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider}`);
+
+  const key = plan.key();
+  if (!key) {
+    throw new HttpError(
+      503,
+      `서버에 ${plan.label} 열쇠가 없습니다. ${plan.envName}을 넣고 서버를 다시 띄우거나, 앱 설정에 열쇠를 넣어 주세요.`,
+    );
+  }
 
   let response;
   try {
-    response = await fetch("https://api.openai.com/v1/chat/completions", {
+    response = await fetch(plan.url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.openAiKey}`,
-      },
-      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", ...plan.headers(key) },
+      body: JSON.stringify(plan.body(system, user, text(payload?.model))),
       // 글을 쓰는 데 시간이 걸립니다. 그래도 영영 붙들고 있지는 않습니다.
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(180_000),
     });
   } catch (error) {
     throw new HttpError(502, `AI에 연결하지 못했습니다: ${error.message}`);
@@ -449,8 +447,57 @@ async function askOpenAi(payload) {
   } catch {
     throw new HttpError(502, "AI 응답을 읽지 못했습니다.");
   }
-  return { text: parsed?.choices?.[0]?.message?.content || "" };
+  return { text: plan.read(parsed) };
 }
+
+/**
+ * 공급자마다 다른 것만 모아 둡니다.
+ *
+ * 앱과 같은 곳에 물어봐야 같은 결의 답이 옵니다. 앱 `AiProvider`의 이름을 소문자로 보내옵니다.
+ * 열쇠는 환경 변수에서만 읽습니다. 명령줄은 ps로 남에게 보이고 셸 기록에도 남습니다.
+ */
+const aiProviders = {
+  openai: {
+    label: "OpenAI",
+    envName: "OPENAI_API_KEY",
+    key: () => config.openAiKey,
+    url: "https://api.openai.com/v1/chat/completions",
+    headers: (key) => ({ Authorization: `Bearer ${key}` }),
+    body: (system, user, model) => ({
+      model: model || "gpt-4o-mini",
+      messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user }],
+      response_format: { type: "json_object" },
+    }),
+    read: (parsed) => parsed?.choices?.[0]?.message?.content || "",
+  },
+  anthropic: {
+    label: "Claude",
+    envName: "ANTHROPIC_API_KEY",
+    key: () => config.anthropicKey,
+    url: "https://api.anthropic.com/v1/messages",
+    headers: (key) => ({
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      // 안전 분류기가 거절했을 때 같은 요청을 다른 모델로 한 번 더 돌려 줍니다.
+      "anthropic-beta": "server-side-fallback-2026-07-01",
+    }),
+    body: (system, user, model) => ({
+      model: model || "claude-opus-5",
+      // 없으면 안 되는 값입니다. 생각하는 데 쓰는 몫까지 여기서 셉니다.
+      max_tokens: 16000,
+      // 일러 주는 말은 messages가 아니라 이 자리에 따로 싣습니다.
+      ...(system ? { system } : {}),
+      messages: [{ role: "user", content: user }],
+      fallbacks: "default",
+    }),
+    // 답은 조각 배열입니다. 글 조각만 골라 잇습니다.
+    read: (parsed) =>
+      (parsed?.content || [])
+        .filter((block) => block?.type === "text")
+        .map((block) => block.text || "")
+        .join(""),
+  },
+};
 
 async function routeRoutineMember(method, parts, request, response) {
   const routineId = Number(parts[2]);
@@ -2130,6 +2177,7 @@ function parseArgs(args) {
     apiKey: process.env.APP_GOOD_WORDS_API_KEY || "",
     // AI 열쇠는 인자로 받지 않습니다. 명령줄은 ps로 남에게 보이고 셸 기록에도 남습니다.
     openAiKey: process.env.OPENAI_API_KEY || "",
+    anthropicKey: process.env.ANTHROPIC_API_KEY || "",
     seed: false,
   };
   for (let index = 0; index < args.length; index += 1) {

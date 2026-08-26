@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -40,7 +41,19 @@ class SettingsStore(
         val lastSyncAt = longPreferencesKey("last_sync_at")
         /** AI 열쇠는 이 기기에만 둡니다. 동기화 스냅샷과 백업 파일에는 넣지 않습니다. */
         val aiApiKey = stringPreferencesKey("ai_api_key")
+        /** Claude 열쇠. OpenAI 열쇠와 자리를 나눠 두어야 공급자를 바꿔도 지워지지 않습니다. */
+        val aiAnthropicKey = stringPreferencesKey("ai_anthropic_key")
+        val aiProvider = stringPreferencesKey("ai_provider")
         val aiModel = stringPreferencesKey("ai_model")
+        /**
+         * 복사해 둔 물음이 어느 기간의 것인지.
+         *
+         * 손으로 물어보는 길에서 씁니다. 앱을 나가 채팅창에 붙여넣고 오는 사이에 앱이 꺼질 수
+         * 있어, 화면 상태가 아니라 여기에 적어 둡니다. 날짜와 기간만 있으면 그때의 구간을
+         * 그대로 다시 계산할 수 있습니다.
+         */
+        val aiPromptPeriod = stringPreferencesKey("ai_prompt_period")
+        val aiPromptDate = stringPreferencesKey("ai_prompt_date")
         val aiSchedule = stringPreferencesKey("ai_schedule")
         val aiHour = intPreferencesKey("ai_hour")
         val aiMinute = intPreferencesKey("ai_minute")
@@ -91,8 +104,11 @@ class SettingsStore(
 
     val aiFeedbackSettingsFlow: Flow<AiFeedbackSettings> = context.dataStore.data.map { preferences ->
         AiFeedbackSettings(
-            apiKey = preferences[Keys.aiApiKey].orEmpty(),
-            model = preferences[Keys.aiModel]?.takeIf { it.isNotBlank() } ?: AiFeedbackSettings.DEFAULT_MODEL,
+            provider = preferences[Keys.aiProvider].orEmpty().ifBlank { AiProvider.OPENAI.name },
+            // 예전 열쇠 자리는 그대로 OpenAI 열쇠로 읽습니다. 이미 넣어 둔 사람이 다시 넣지 않아야 합니다.
+            openAiKey = preferences[Keys.aiApiKey].orEmpty(),
+            anthropicKey = preferences[Keys.aiAnthropicKey].orEmpty(),
+            model = preferences[Keys.aiModel].orEmpty(),
             schedule = preferences[Keys.aiSchedule].orEmpty(),
             hour = preferences[Keys.aiHour] ?: AiFeedbackSettings.DEFAULT_HOUR,
             minute = preferences[Keys.aiMinute] ?: 0,
@@ -125,12 +141,47 @@ class SettingsStore(
 
     suspend fun updateAiFeedbackSettings(settings: AiFeedbackSettings) {
         context.dataStore.edit { preferences ->
-            preferences[Keys.aiApiKey] = settings.apiKey.trim()
-            preferences[Keys.aiModel] = settings.model.trim().ifBlank { AiFeedbackSettings.DEFAULT_MODEL }
+            preferences[Keys.aiProvider] = settings.activeProvider.name
+            preferences[Keys.aiApiKey] = settings.openAiKey.trim()
+            preferences[Keys.aiAnthropicKey] = settings.anthropicKey.trim()
+            // 빈 값은 "그 공급자의 기본"이라는 뜻이라 그대로 둡니다.
+            preferences[Keys.aiModel] = settings.model.trim()
             preferences[Keys.aiSchedule] = settings.schedule
             preferences[Keys.aiHour] = settings.hour.coerceIn(0, 23)
             preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
             preferences[Keys.aiIncludeDiaryBody] = settings.includeDiaryBody
+        }
+    }
+
+    /**
+     * 복사해 둔 물음.
+     *
+     * 붙여넣은 답을 저장할 때 "언제부터 언제까지를 보고 쓴 글인지"가 있어야 합니다.
+     * 화면 상태로 들고 있으면, 채팅 앱에 다녀오는 사이에 앱이 꺼졌을 때 사라집니다.
+     */
+    val pendingGrowthPromptFlow: Flow<PendingGrowthPrompt?> = context.dataStore.data.map { preferences ->
+        val date = preferences[Keys.aiPromptDate].orEmpty()
+        val copiedOn = runCatching { LocalDate.parse(date) }.getOrNull() ?: return@map null
+        PendingGrowthPrompt(
+            period = ReportPeriod.of(preferences[Keys.aiPromptPeriod]),
+            copiedOn = copiedOn
+        )
+    }
+
+    suspend fun getPendingGrowthPrompt(): PendingGrowthPrompt? = pendingGrowthPromptFlow.first()
+
+    suspend fun setPendingGrowthPrompt(period: ReportPeriod, copiedOn: LocalDate) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.aiPromptPeriod] = period.name
+            preferences[Keys.aiPromptDate] = copiedOn.toString()
+        }
+    }
+
+    /** 답을 받아 적었으면 지웁니다. 남겨 두면 다음에 붙여넣는 답까지 옛 구간으로 들어갑니다. */
+    suspend fun clearPendingGrowthPrompt() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(Keys.aiPromptPeriod)
+            preferences.remove(Keys.aiPromptDate)
         }
     }
 

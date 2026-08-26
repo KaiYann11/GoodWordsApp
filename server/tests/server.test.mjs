@@ -2109,8 +2109,41 @@ describe("AI 돌아보기", () => {
   it("물어볼 내용이 비어 있으면 부르지 않는다", async () => {
     const response = await api("/api/growth-feedback", { method: "POST", body: { system: "코치입니다" } });
 
-    // 열쇠 확인이 먼저라 503이 나오지만, 열쇠가 있어도 빈 물음은 400이다.
-    assert.ok(response.status === 503 || response.status === 400);
+    // 열쇠를 보기 전에 막는다. 빈 물음은 열쇠가 있어도 보낼 것이 없다.
+    assert.equal(response.status, 400);
+  });
+
+  it("클로드로 물으면 클로드 열쇠를 찾는다", async () => {
+    // 열쇠가 둘로 나뉘어 있다. 어느 쪽을 넣어야 하는지 사유에 적히지 않으면 사용자가 알 수 없다.
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "anthropic", model: "claude-opus-5" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.ok(body.error.includes("ANTHROPIC_API_KEY"), body.error);
+  });
+
+  it("모르는 공급자는 조용히 다른 곳으로 보내지 않는다", async () => {
+    // OpenAI로 슬쩍 돌리면 사용자가 고른 곳이 아닌 데로 기록이 나간다.
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "gemini" },
+    });
+
+    assert.equal(response.status, 400);
+  });
+
+  it("공급자를 안 보내는 옛 앱은 OpenAI로 읽는다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.ok(body.error.includes("OPENAI_API_KEY"), body.error);
   });
 });
 

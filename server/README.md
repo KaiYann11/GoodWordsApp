@@ -375,14 +375,29 @@ DELETE /api/events?ids=1,2,3
 
 ### AI 돌아보기
 
-`POST /api/growth-feedback`은 기기 대신 OpenAI에 물어봐 줍니다. 열쇠를 서버 한 곳에만 두려는
-것입니다. 서버를 띄울 때 `OPENAI_API_KEY` 환경 변수를 주면 켜지고, 없으면 503과 함께 이유를
-돌려줍니다. 명령줄 인자로는 받지 않습니다. `ps`로 남에게 보이고 셸 기록에도 남기 때문입니다.
+`POST /api/growth-feedback`은 기기 대신 AI에 물어봐 줍니다. 열쇠를 서버 한 곳에만 두려는
+것입니다. 서버를 띄울 때 `OPENAI_API_KEY`나 `ANTHROPIC_API_KEY` 환경 변수를 주면 켜지고, 없으면
+503과 함께 어느 열쇠가 없는지 돌려줍니다. 명령줄 인자로는 받지 않습니다. `ps`로 남에게 보이고
+셸 기록에도 남기 때문입니다.
 
 ```text
 POST /api/growth-feedback   {"system":"...","user":"...","model":"gpt-4o-mini"}
            ->               {"text":"모델이 쓴 JSON 문자열"}
 ```
+
+**어디에 물어볼지는 기기가 정합니다.** `provider`에 `openai`나 `anthropic`을 실어 보내고, 서버는
+그에 맞는 열쇠를 골라 씁니다(`aiProviders`). 값이 없으면 OpenAI입니다. 이 값을 보내지 않던
+옛 앱이 그대로 돌아가야 하기 때문입니다. 모르는 이름은 400으로 막습니다. 슬쩍 다른 곳으로
+돌리면 사용자가 고르지 않은 데로 기록이 나갑니다.
+
+```text
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"anthropic","model":"claude-opus-5"}
+```
+
+두 곳은 요청 모양이 다릅니다. OpenAI는 일러 주는 말을 `messages`에 함께 싣고 답을
+`choices[0].message.content`에서 읽습니다. Claude는 `system`을 따로 싣고 `max_tokens`가 반드시
+있어야 하며, 답은 `content` 배열에서 글 조각만 골라 이어야 합니다. 생각하는 시간은 따로 켜지
+않습니다. 요즘 모델은 기본으로 켜져 있고 예전 방식(`budget_tokens`)을 보내면 400이 돌아옵니다.
 
 **서버는 물음을 만들지 않습니다.** 무엇이 나갈지는 앱 `GrowthPrompt`가 정하고 서버는 전달만
 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 일기 본문은 빼라고 정해 둔 것이

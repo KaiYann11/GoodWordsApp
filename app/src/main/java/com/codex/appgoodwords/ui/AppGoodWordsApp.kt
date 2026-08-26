@@ -155,6 +155,7 @@ fun AppGoodWordsApp(
     val attachmentShots by viewModel.attachmentShots.collectAsStateWithLifecycle()
     val growthReports by viewModel.growthReports.collectAsStateWithLifecycle()
     val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
+    val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
@@ -840,6 +841,32 @@ fun AppGoodWordsApp(
                                     viewModel.previewGrowthPrompt(period)
                                         .onSuccess { growthPreview = it }
                                         .onFailure { growthError = it.message ?: "미리 볼 수 없습니다." }
+                                }
+                            },
+                            pendingPrompt = pendingGrowthPrompt,
+                            onPromptCopied = { period ->
+                                coroutineScope.launch {
+                                    viewModel.markGrowthPromptCopied(period)
+                                    snackbarHostState.showSnackbar(
+                                        "복사했습니다. 채팅창에 붙여넣고 받은 답을 다시 가져오세요."
+                                    )
+                                }
+                            },
+                            onSaveAnswer = { text ->
+                                coroutineScope.launch {
+                                    val result = viewModel.saveGrowthAnswer(text)
+                                    result.onSuccess { report ->
+                                        snackbarHostState.showSnackbar(
+                                            if (report.strengths.isEmpty() && report.improvements.isEmpty()) {
+                                                "형식이 달라 가이드에 통째로 담았습니다."
+                                            } else {
+                                                "받아 온 답을 남겼습니다."
+                                            }
+                                        )
+                                    }
+                                    result.onFailure { failure ->
+                                        growthError = failure.message ?: "답을 남기지 못했습니다."
+                                    }
                                 }
                             },
                             onDeleteReport = { report ->

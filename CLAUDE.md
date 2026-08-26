@@ -98,7 +98,20 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 (`AiFeedbackSettings.includeDiaryBody`). 기본값을 바꾸지 마세요. 한번 나가면 되돌릴 수 없습니다.
 물음은 앱 `GrowthPrompt`만 만들고, 서버 `/api/growth-feedback`은 그대로 전달만 합니다.
 서버가 기록을 다시 읽어 물음을 짜면 사용자가 앱에서 정해 둔 범위가 조용히 뒤집힙니다.
-AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`)에만 두고, 스냅샷·백업에는 넣지 않습니다.
+AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_KEY`)에만 두고,
+스냅샷·백업에는 넣지 않습니다.
+
+**AI 공급자를 늘리면 앱 `AiProvider`와 서버 `aiProviders`를 함께 늘립니다.** 어디에 물어볼지는
+기기가 정하고(`provider`), 서버는 그에 맞는 열쇠만 골라 씁니다. 서버 쪽을 빠뜨리면 사용자가 고른
+곳이 아닌 데로 기록이 나갑니다. 열쇠는 공급자마다 따로 둡니다(`openAiKey`·`anthropicKey`).
+한 자리를 나눠 쓰면 바꿔 보는 사이에 앞서 넣은 열쇠가 지워집니다. 모델도 공급자마다 다르므로
+`effectiveModel`이 그 공급자에 없는 이름을 기본값으로 당겨 붙입니다.
+
+**AI에 못 붙어도 막다른 길이 아니어야 합니다.** 물음을 복사해 채팅창에 붙여넣고 받아 온 답을
+도로 넣는 길이 있습니다(`GrowthPrompt.chatPrompt` · `GrowthFeedbackCoordinator.saveManualAnswer`).
+미리 보기와 복사되는 글은 **같아야 합니다.** 달라지면 무엇이 밖으로 나가는지 확인할 방법이
+없어집니다. 붙여넣은 답은 형식이 어긋나도 버리지 않고 통째로 `guide`에 담습니다.
+사람이 옮겨 온 글을 "못 읽었다"며 되돌려 주면 그 자리에서 사라집니다.
 
 **동기화 JSON 포맷을 바꾸면 앱 `AppDataJson`과 서버를 함께 바꾸고 `schemaVersion`을 올립니다.**
 

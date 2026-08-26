@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.ServerSyncSettings
@@ -63,6 +64,8 @@ internal const val fileMergeButtonTag = "file_merge_button"
 internal const val aiApiKeyFieldTag = "ai_api_key_field"
 
 internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank { "off" }
+
+internal fun aiProviderTag(provider: AiProvider): String = "ai_provider_" + provider.name.lowercase()
 
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
@@ -806,10 +809,12 @@ private fun AiFeedbackSection(
     onChanged: (AiFeedbackSettings) -> Unit
 ) {
     val context = LocalContext.current
-    var apiKeyText by rememberSaveable { mutableStateOf(settings.apiKey) }
+    val provider = settings.activeProvider
+    var apiKeyText by rememberSaveable { mutableStateOf(settings.activeKey) }
 
-    LaunchedEffect(settings.apiKey) {
-        if (apiKeyText != settings.apiKey) apiKeyText = settings.apiKey
+    // 공급자를 바꾸면 칸에 남아 있던 것이 다른 곳의 열쇠입니다. 그대로 저장하면 서로 뒤바뀝니다.
+    LaunchedEffect(settings.activeKey, provider) {
+        if (apiKeyText != settings.activeKey) apiKeyText = settings.activeKey
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -825,19 +830,33 @@ private fun AiFeedbackSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            Text("어디에 물어볼지", style = MaterialTheme.typography.titleSmall)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(AiProvider.entries) { choice ->
+                    FilterChip(
+                        selected = provider == choice,
+                        onClick = { onChanged(settings.withProvider(choice)) },
+                        label = { Text(choice.label) },
+                        modifier = Modifier.testTag(aiProviderTag(choice))
+                    )
+                }
+            }
+
             OutlinedTextField(
                 value = apiKeyText,
                 onValueChange = { apiKeyText = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(aiApiKeyFieldTag),
-                label = { Text("OpenAI API 키") },
+                label = { Text("${provider.label} API 키") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                supportingText = { Text("이 기기에만 저장됩니다. 백업·동기화에는 담기지 않습니다.") }
+                supportingText = {
+                    Text("${provider.keyHint}. 이 기기에만 저장됩니다. 백업·동기화에는 담기지 않습니다.")
+                }
             )
             OutlinedButton(
-                onClick = { onChanged(settings.copy(apiKey = apiKeyText.trim())) },
+                onClick = { onChanged(settings.withKey(apiKeyText)) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("열쇠 저장")
@@ -845,9 +864,9 @@ private fun AiFeedbackSection(
 
             Text("모델", style = MaterialTheme.typography.titleSmall)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(AiFeedbackSettings.MODEL_CHOICES) { model ->
+                items(provider.models) { model ->
                     FilterChip(
-                        selected = settings.model == model,
+                        selected = settings.effectiveModel == model,
                         onClick = { onChanged(settings.copy(model = model)) },
                         label = { Text(model) }
                     )

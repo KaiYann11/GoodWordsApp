@@ -30,6 +30,24 @@ data class GrowthDigest(
 }
 
 /**
+ * 복사해 둔 물음이 어느 구간의 것인지.
+ *
+ * 손으로 물어보는 길에서 씁니다. 앱에서 물음을 복사해 채팅창에 붙여넣고 답을 받아 오는 동안
+ * 앱을 떠나 있게 되는데, 돌아와 답을 적을 때 "언제부터 언제까지를 보고 쓴 글인지"가 있어야
+ * 합니다. 복사한 날짜와 기간만 남겨 두면 그때의 구간을 그대로 다시 셈할 수 있습니다.
+ */
+data class PendingGrowthPrompt(
+    val period: ReportPeriod,
+    val copiedOn: LocalDate
+) {
+    val from: LocalDate
+        get() = copiedOn.minusDays((period.days - 1).toLong())
+
+    val to: LocalDate
+        get() = copiedOn
+}
+
+/**
  * 기록을 추려 물음을 씁니다.
  *
  * **일기 본문은 기본으로 나가지 않습니다.** 가장 사적인 글이라, 설정에서 따로 켠 사람에게만
@@ -163,6 +181,17 @@ object GrowthPrompt {
         section("독서", digest.bookLines)
         append("위 기록을 보고 형식에 맞는 JSON으로만 답해 주세요.")
     }
+
+    /**
+     * 채팅창에 그대로 붙여넣을 한 덩어리.
+     *
+     * 앱이 부를 때는 일러 주는 말([systemPrompt])과 내 기록([userPrompt])을 따로 실어 보냅니다.
+     * 사람이 채팅창에 붙여넣을 때는 그 자리가 하나뿐이라 이어 붙입니다. **나가는 내용은 같습니다.**
+     * 미리 보기도 이 글을 그대로 보여 줍니다. 보이는 것과 나가는 것이 달라지면,
+     * 무엇이 밖으로 나가는지 확인할 방법이 없어집니다.
+     */
+    fun chatPrompt(digest: GrowthDigest): String =
+        systemPrompt() + "\n\n" + userPrompt(digest)
 
     private fun StringBuilder.section(title: String, lines: List<String>) {
         if (lines.isEmpty()) return
