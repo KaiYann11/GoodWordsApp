@@ -63,6 +63,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.DayMood
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ExposureEventEntity
@@ -157,10 +158,19 @@ fun AppGoodWordsApp(
     val growthReports by viewModel.growthReports.collectAsStateWithLifecycle()
     val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
     val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
+    val moodLogs by viewModel.moodLogs.collectAsStateWithLifecycle()
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
     val diaries by viewModel.diaries.collectAsStateWithLifecycle()
+
+    // 그날의 기분은 DayMood가 정합니다. 찍어 둔 것이 먼저고, 없으면 일기에서 봅니다.
+    // 여기서 따로 셈하면 화면과 통계가 다른 기분을 말하게 됩니다.
+    val today = LocalDate.now()
+    val todayMoodLog = remember(moodLogs, today) { DayMood.logOn(moodLogs, today) }
+    val todayMood = remember(moodLogs, diaries, today) {
+        DayMood.byDate(logs = moodLogs, diaries = diaries)[today]
+    }
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val books by viewModel.books.collectAsStateWithLifecycle()
     val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
@@ -523,6 +533,10 @@ fun AppGoodWordsApp(
                             onOpenGrowth = { pushRoute(tabRoute(AppTab.GROWTH)) },
                             memories = onThisDay,
                             moodPractice = moodPractice,
+                            todayMood = todayMood,
+                            onPickMood = { mood -> viewModel.saveTodayMood(mood) },
+                            // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
+                            onClearMood = todayMoodLog?.let { { viewModel.clearTodayMood() } },
                             // 그때 그 글을 열어 줍니다. 알려만 주면 사용자가 다시 뒤져야 합니다.
                             onOpenMemory = { memory ->
                                 when (memory.kind) {

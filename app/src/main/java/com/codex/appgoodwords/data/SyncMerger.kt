@@ -91,6 +91,14 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            // 같은 날 기분을 두 기기에서 각각 찍을 수 있습니다. 나중에 고친 쪽이 그날의 기분입니다.
+            moodLogs = mergeMutable(
+                local = local.moodLogs,
+                remote = remote.moodLogs,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }

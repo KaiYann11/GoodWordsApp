@@ -158,7 +158,8 @@ object StatsCalculator {
         zoneId: ZoneId = ZoneId.systemDefault(),
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
-        books: List<BookEntity> = emptyList()
+        books: List<BookEntity> = emptyList(),
+        moodLogs: List<MoodLogEntity> = emptyList()
     ): StatsSummary {
         val confirmedEvents = events.filter { it.eventType == ExposureEventType.CONFIRMED }
         val confirmedByDate = confirmedEvents.groupingBy { toDate(it.occurredAt, zoneId) }.eachCount()
@@ -179,7 +180,7 @@ object StatsCalculator {
             recentDays = recentDays(confirmedByDate, checksByDate, diaryByDate, todoDoneByDate, today),
             topCategories = topCategories(confirmedEvents, items),
             reading = readingSummary(books, items, today, zoneId),
-            diary = diarySummary(diaries, today),
+            diary = diarySummary(diaries, moodLogs, today),
             todo = todoSummary(todos, today)
         )
     }
@@ -203,7 +204,11 @@ object StatsCalculator {
         )
     }
 
-    private fun diarySummary(diaries: List<DiaryEntity>, today: LocalDate): DiarySummary {
+    private fun diarySummary(
+        diaries: List<DiaryEntity>,
+        moodLogs: List<MoodLogEntity>,
+        today: LocalDate
+    ): DiarySummary {
         val thisMonth = diaries.mapNotNull { parseDate(it.entryDate) }
             .filter { it.year == today.year && it.month == today.month }
             .distinct()
@@ -212,14 +217,16 @@ object StatsCalculator {
             totalCount = diaries.size,
             // 하루에 여러 번 써도 하루로 셉니다. "이 달에 며칠 썼나"가 궁금한 것입니다.
             daysThisMonth = thisMonth.size,
-            topMoods = diaries
-                .mapNotNull { it.moodOption }
+            // 며칠이 그 기분이었는지를 셉니다. 하루에 일기를 두 편 써도 하루입니다.
+            // 어느 쪽이라 할 수 없는 날은 어느 칸에도 세지 않습니다.
+            topMoods = DayMood.settledByDate(logs = moodLogs, diaries = diaries)
+                .values
                 .groupingBy { it }
                 .eachCount()
                 .entries
                 .sortedWith(compareByDescending<Map.Entry<DiaryMood, Int>> { it.value }.thenBy { it.key.ordinal })
                 .map { (mood, count) -> MoodCount(mood = mood, count = count) },
-            moodTrend = moodTrend(diaries, today)
+            moodTrend = moodTrend(diaries, moodLogs, today)
         )
     }
 
@@ -230,23 +237,19 @@ object StatsCalculator {
      * 평평해집니다. 앞으로 적어 둔 날짜(오늘보다 뒤)도 뺍니다. 가로축이 오늘에서 끝나야
      * 마지막 점이 지금의 기분으로 읽힙니다.
      */
-    private fun moodTrend(diaries: List<DiaryEntity>, today: LocalDate): MoodTrend? {
-        if (diaries.isEmpty()) return null
+    private fun moodTrend(
+        diaries: List<DiaryEntity>,
+        moodLogs: List<MoodLogEntity>,
+        today: LocalDate
+    ): MoodTrend? {
+        if (diaries.isEmpty() && moodLogs.isEmpty()) return null
         val from = today.minusDays((MOOD_TREND_DAY_COUNT - 1).toLong())
 
-        val points = diaries
-            .mapNotNull { diary ->
-                val date = parseDate(diary.entryDate) ?: return@mapNotNull null
-                if (date < from || date > today) return@mapNotNull null
-                val mood = diary.moodOption ?: return@mapNotNull null
-                Triple(date, mood, diary.createdAt)
-            }
-            .groupBy { (date, _, _) -> date }
-            // 하루에 여러 번 썼으면 그날 마지막으로 남긴 기분을 봅니다. 하루에 점 하나여야
-            // 가로축이 날짜로 읽힙니다. 아침의 기분보다 그날을 닫으며 남긴 기분이 그날에 가깝습니다.
-            .map { (date, sameDay) ->
-                MoodPoint(date = date, mood = sameDay.maxBy { (_, _, createdAt) -> createdAt }.second)
-            }
+        // 하루에 점 하나여야 가로축이 날짜로 읽힙니다. 그날의 기분이 무엇이었는지는
+        // [DayMood]가 정합니다. 여기서 따로 셈하면 화면마다 다른 기분을 말하게 됩니다.
+        val points = DayMood.byDate(logs = moodLogs, diaries = diaries)
+            .filterKeys { it >= from && it <= today }
+            .map { (date, mood) -> MoodPoint(date = date, mood = mood) }
             .sortedBy { it.date }
 
         return MoodTrend(from = from, to = today, points = points)

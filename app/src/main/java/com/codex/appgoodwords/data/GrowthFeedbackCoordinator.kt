@@ -155,6 +155,7 @@ class GrowthFeedbackCoordinator(
         items = database.contentItemDao().getAll(),
         events = database.exposureEventDao().getAll(),
         books = database.bookDao().getAll(),
+        moodLogs = database.moodLogDao().getAll(),
         includeDiaryBody = includeDiaryBody,
         // 지난번에 권한 것을 함께 실어야 고리가 닫힙니다. 이것이 없으면 매번 처음 만난 사람처럼
         // 말하고, 사용자는 같은 조언을 몇 번이고 다시 받습니다.

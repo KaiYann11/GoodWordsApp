@@ -17,9 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DiaryEntity::class,
         TodoEntity::class,
         BookEntity::class,
-        GrowthReportEntity::class
+        GrowthReportEntity::class,
+        MoodLogEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun todoDao(): TodoDao
     abstract fun bookDao(): BookDao
     abstract fun growthReportDao(): GrowthReportDao
+    abstract fun moodLogDao(): MoodLogDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -395,6 +397,32 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_growth_reports_createdAt ON growth_reports (createdAt)"
                 )
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // 일기를 쓰지 않은 날에도 기분만 남길 수 있게 하는 표입니다.
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS mood_logs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "entryDate TEXT NOT NULL, " +
+                        "mood TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                // syncId가 두 벌이면 병합이 어느 쪽인지 알 수 없게 됩니다.
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_mood_logs_syncId ON mood_logs (syncId)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_mood_logs_entryDate ON mood_logs (entryDate)"
+                )
+                // 예전 일기의 기분은 옮기지 않습니다. 일기에 딸린 것은 일기에 그대로 두고,
+                // 찍어 둔 것이 없는 날은 DayMood가 일기에서 읽습니다. 옮기면 일기를 고칠 때
+                // 두 값이 어긋나기 시작합니다.
             }
         }
     }

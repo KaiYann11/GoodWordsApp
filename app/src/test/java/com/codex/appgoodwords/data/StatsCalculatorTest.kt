@@ -99,7 +99,9 @@ class StatsCalculatorTest {
         // 하루에 두 번 써도 하루입니다. "이 달에 며칠 썼나"가 궁금한 것입니다.
         assertEquals(2, summary.diary.daysThisMonth)
         assertEquals(DiaryMood.GOOD, summary.diary.topMoods.first().mood)
-        assertEquals(2, summary.diary.topMoods.first().count)
+        // 기분도 며칠인지로 셉니다. 17일에 좋다고 두 편 썼어도 좋았던 날은 하루입니다.
+        // 톡 찍어 두는 기분이 생기면서 "몇 편"은 셀 수 있는 것이 아니게 됐습니다.
+        assertEquals(1, summary.diary.topMoods.first().count)
     }
 
     @Test

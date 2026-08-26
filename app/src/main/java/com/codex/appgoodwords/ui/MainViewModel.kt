@@ -10,10 +10,13 @@ import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
+import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.DiaryMood
+import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.FeedbackWriter
 import com.codex.appgoodwords.data.GrowthReportEntity
@@ -71,6 +74,10 @@ class MainViewModel(
     val books = container.repository.observeBooks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** 톡 찍어 둔 기분. 일기를 안 쓴 날에도 남습니다. */
+    val moodLogs = container.repository.observeMoodLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val growthReports = container.repository.observeGrowthReports()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -92,16 +99,19 @@ class MainViewModel(
         historyEvents,
         allItems,
         routineChecks,
-        combine(diaries, todos, books) { diaryList, todoList, bookList -> Triple(diaryList, todoList, bookList) }
+        combine(diaries, todos, books, moodLogs) { diaryList, todoList, bookList, logs ->
+            StatsInputs(diaryList, todoList, bookList, logs)
+        }
     ) { events, items, checks, extras ->
         StatsCalculator.build(
             events = events,
             items = items,
             routineChecks = checks,
             today = LocalDate.now(),
-            diaries = extras.first,
-            todos = extras.second,
-            books = extras.third
+            diaries = extras.diaries,
+            todos = extras.todos,
+            books = extras.books,
+            moodLogs = extras.moodLogs
         )
     }.stateIn(
         viewModelScope,
@@ -176,14 +186,36 @@ class MainViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 기분별 실천. 기분 그래프와 실천 통계를 겹쳐 본 것입니다. */
-    val moodPractice = combine(diaries, routineChecks, historyEvents, todos) { diaryList, checks, events, todoList ->
+    val moodPractice = combine(
+        diaries,
+        routineChecks,
+        historyEvents,
+        todos,
+        moodLogs
+    ) { diaryList, checks, events, todoList, logs ->
         MoodPractice.build(
             diaries = diaryList,
             routineChecks = checks,
             events = events,
-            todos = todoList
+            todos = todoList,
+            moodLogs = logs
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 오늘 기분을 남깁니다. 하루에 하나라, 다시 찍으면 그날 것을 고칩니다.
+     *
+     * 일기를 안 쓴 날에도 남길 수 있는 것이 요점입니다. 바쁘고 힘든 날일수록 일기를 못 쓰는데,
+     * 그런 날이 통째로 비면 기분 그래프도 겹쳐 보기도 정작 알고 싶은 날을 버립니다.
+     */
+    fun saveTodayMood(mood: DiaryMood) {
+        viewModelScope.launch { container.repository.saveMoodLog(LocalDate.now(), mood) }
+    }
+
+    /** 잘못 찍었을 때. 지운 표식을 남겨야 다음 병합에서 되살아나지 않습니다. */
+    fun clearTodayMood() {
+        viewModelScope.launch { container.repository.clearMoodLog(LocalDate.now()) }
+    }
 
     /** 여기저기 붙여 둔 첨부를 한자리에. 파일을 옮기지 않고 주소만 모읍니다. */
     val attachmentShots = combine(diaries, allItems) { diaryList, items ->
@@ -890,3 +922,11 @@ class MainViewModel(
         const val PRACTICE_CATEGORY = "글귀에서"
     }
 }
+
+/** combine이 한 번에 넷까지만 받아서, 통계에 넣을 것들을 한 덩어리로 묶습니다. */
+private data class StatsInputs(
+    val diaries: List<DiaryEntity>,
+    val todos: List<TodoEntity>,
+    val books: List<BookEntity>,
+    val moodLogs: List<MoodLogEntity>
+)

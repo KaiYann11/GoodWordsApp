@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 15;
+const schemaVersion = 16;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -81,6 +81,7 @@ const deletionEntityTypes = new Set([
   "TODO",
   "BOOK",
   "GROWTH_REPORT",
+  "MOOD_LOG",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
@@ -856,6 +857,7 @@ const revisionedCollections = [
   "todos",
   "books",
   "growthReports",
+  "moodLogs",
 ];
 
 async function withDb(mutator) {
@@ -937,6 +939,7 @@ function emptyDb() {
     todos: [],
     books: [],
     growthReports: [],
+    moodLogs: [],
   };
 }
 
@@ -958,6 +961,7 @@ function normalizeDb(db) {
     todos: normalizeList(db?.todos, normalizeTodo),
     books: normalizeList(db?.books, normalizeBook),
     growthReports: normalizeList(db?.growthReports, normalizeGrowthReport),
+    moodLogs: normalizeList(db?.moodLogs, normalizeMoodLog),
   };
 }
 
@@ -1015,6 +1019,7 @@ function snapshot(db, since = 0, epoch = null) {
     todoCount: normalized.todos.length,
     bookCount: normalized.books.length,
     growthReportCount: normalized.growthReports.length,
+    moodLogCount: normalized.moodLogs.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -1028,6 +1033,7 @@ function snapshot(db, since = 0, epoch = null) {
     todos: only(sortDesc(normalized.todos, "createdAt")),
     books: only(sortDesc(normalized.books, "updatedAt")),
     growthReports: only(sortDesc(normalized.growthReports, "createdAt")),
+    moodLogs: only(sortDesc(normalized.moodLogs, "createdAt")),
   };
 }
 
@@ -1052,6 +1058,7 @@ function mergeSnapshot(db, payload) {
     todos: payload?.todos,
     books: payload?.books,
     growthReports: payload?.growthReports,
+    moodLogs: payload?.moodLogs,
   });
   const current = normalizeDb(db);
 
@@ -1070,6 +1077,8 @@ function mergeSnapshot(db, payload) {
   // 책도 고칠 수 있다. 읽은 쪽수는 기기마다 달라져서 나중에 넘긴 쪽이 남아야 한다.
   db.books = mergeMutable(current.books, incoming.books, deletedAt);
   db.growthReports = mergeMutable(current.growthReports, incoming.growthReports, deletedAt);
+  // 같은 날 기분을 두 기기에서 각각 찍을 수 있다. 나중에 고친 쪽이 그날의 기분이다.
+  db.moodLogs = mergeMutable(current.moodLogs, incoming.moodLogs, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -1104,6 +1113,7 @@ function deduplicate(db) {
   const todos = resolveDuplicates(db.todos, todoFingerprint);
   const books = resolveDuplicates(db.books, bookFingerprint);
   const reports = resolveDuplicates(db.growthReports, reportFingerprint);
+  const moodLogs = resolveDuplicates(db.moodLogs, moodLogFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   db.items = items.kept.map((item) =>
@@ -1114,6 +1124,7 @@ function deduplicate(db) {
   db.todos = todos.kept;
   db.books = books.kept;
   db.growthReports = reports.kept;
+  db.moodLogs = moodLogs.kept;
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -1125,6 +1136,7 @@ function deduplicate(db) {
     [todos.movedTo, "TODO"],
     [books.movedTo, "BOOK"],
     [reports.movedTo, "GROWTH_REPORT"],
+    [moodLogs.movedTo, "MOOD_LOG"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1225,6 +1237,17 @@ function todoFingerprint(todo) {
  * 본문까지 견주면 늘 다른 것이 되어 쌓이기만 하므로 기간과 단위로만 본다.
  * 앱의 reportFingerprint와 같아야 한다.
  */
+/**
+ * 오늘 기분은 하루에 하나다.
+ *
+ * 두 기기에서 같은 날 기분을 각각 찍으면 그날의 기분이 둘이 된다. 그러면 겹쳐 보는 자리가
+ * "어느 쪽이라 할 수 없는 날"로 보고 그날을 버린다. 기분이 무엇이었는지는 견주지 않고
+ * 날짜만 본다. 그래야 나중에 고친 쪽 하나가 남는다. 앱의 moodLogFingerprint와 같아야 한다.
+ */
+function moodLogFingerprint(log) {
+  return text(log.entryDate);
+}
+
 function reportFingerprint(report) {
   return [text(report.period), text(report.periodStart), text(report.periodEnd)].join("|");
 }
@@ -1301,6 +1324,7 @@ function reindex(db) {
   db.todos = withStableIds(db.todos);
   db.books = withStableIds(db.books);
   db.growthReports = withStableIds(db.growthReports);
+  db.moodLogs = withStableIds(db.moodLogs);
 
   return db;
 }
@@ -1423,6 +1447,7 @@ function replaceSnapshot(db, payload) {
   db.growthReports = Array.isArray(payload.growthReports)
     ? payload.growthReports.map(normalizeGrowthReport).filter(Boolean)
     : [];
+  db.moodLogs = Array.isArray(payload.moodLogs) ? payload.moodLogs.map(normalizeMoodLog).filter(Boolean) : [];
   return db;
 }
 
@@ -1932,6 +1957,27 @@ function normalizeBook(book) {
  * 서버는 글을 만들어 내지 않고 받아 두기만 한다. 알맹이가 하나도 없는 것은 화면에 놓아도
  * 빈 카드만 보이므로 버린다.
  */
+/**
+ * 오늘 기분 한 줄.
+ *
+ * 날짜나 기분이 없으면 버린다. 어느 날의 무엇인지 알 수 없어 그래프에 놓을 수 없다.
+ * 기분 값은 검사하지 않는다. 선택지는 앱과 웹이 정하고, 서버는 그대로 실어 나른다.
+ */
+function normalizeMoodLog(log) {
+  if (!log) return null;
+  const entryDate = text(log.entryDate);
+  const mood = text(log.mood);
+  if (!entryDate || !mood) return null;
+  return {
+    id: positiveInt(log.id),
+    syncId: syncId(log.syncId),
+    updatedAt: integer(log.updatedAt, integer(log.createdAt, nowMs())),
+    entryDate,
+    mood,
+    createdAt: integer(log.createdAt, nowMs()),
+  };
+}
+
 function normalizeGrowthReport(report) {
   if (!report) return null;
   const normalized = {

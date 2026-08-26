@@ -20,6 +20,7 @@ data class AppDataSnapshot(
     val todos: List<TodoEntity> = emptyList(),
     val books: List<BookEntity> = emptyList(),
     val growthReports: List<GrowthReportEntity> = emptyList(),
+    val moodLogs: List<MoodLogEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -42,11 +43,11 @@ data class AppDataSnapshot(
      */
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
-            diaries.size + todos.size + books.size + growthReports.size
+            diaries.size + todos.size + books.size + growthReports.size + moodLogs.size
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 15
+    const val schemaVersion: Int = 16
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -123,6 +124,13 @@ object AppDataJson {
                 snapshot.growthReports.forEach { report -> put(report.toJson()) }
             }
         )
+        .put("moodLogCount", snapshot.moodLogs.size)
+        .put(
+            "moodLogs",
+            JSONArray().apply {
+                snapshot.moodLogs.forEach { log -> put(log.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -141,6 +149,7 @@ object AppDataJson {
             todos = payload.optJSONArray("todos").toTodos(),
             books = payload.optJSONArray("books").toBooks(),
             growthReports = payload.optJSONArray("growthReports").toGrowthReports(),
+            moodLogs = payload.optJSONArray("moodLogs").toMoodLogs(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -210,6 +219,39 @@ object AppDataJson {
         .put("guide", guide)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
+
+    private fun MoodLogEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("entryDate", entryDate)
+        .put("mood", mood)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toMoodLogs(): List<MoodLogEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val log = optJSONObject(index) ?: continue
+                val entryDate = log.optString("entryDate")
+                val mood = log.optString("mood")
+                // 날짜나 기분이 없으면 어느 날의 무엇인지 알 수 없어 그래프에 놓을 수 없습니다.
+                if (entryDate.isBlank() || mood.isBlank()) continue
+                add(
+                    MoodLogEntity(
+                        id = log.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(log.optString("syncId")),
+                        updatedAt = log.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: log.optLong("createdAt", 0L),
+                        entryDate = entryDate,
+                        mood = mood,
+                        createdAt = log.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
 
     private fun JSONArray?.toGrowthReports(): List<GrowthReportEntity> {
         if (this == null) return emptyList()

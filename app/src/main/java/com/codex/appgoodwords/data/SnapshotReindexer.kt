@@ -58,7 +58,8 @@ object SnapshotReindexer {
             diaries = snapshot.diaries.mapIndexed { index, diary -> diary.copy(id = index + 1L) },
             todos = snapshot.todos.mapIndexed { index, todo -> todo.copy(id = index + 1L) },
             books = snapshot.books.mapIndexed { index, book -> book.copy(id = index + 1L) },
-            growthReports = snapshot.growthReports.mapIndexed { index, report -> report.copy(id = index + 1L) }
+            growthReports = snapshot.growthReports.mapIndexed { index, report -> report.copy(id = index + 1L) },
+            moodLogs = snapshot.moodLogs.mapIndexed { index, log -> log.copy(id = index + 1L) }
         )
     }
 

@@ -22,6 +22,7 @@ object SyncDeduplicator {
         val todos = resolve(snapshot.todos, { it.syncId }, { it.updatedAt }, ::todoFingerprint)
         val books = resolve(snapshot.books, { it.syncId }, { it.updatedAt }, ::bookFingerprint)
         val reports = resolve(snapshot.growthReports, { it.syncId }, { it.updatedAt }, ::reportFingerprint)
+        val moodLogs = resolve(snapshot.moodLogs, { it.syncId }, { it.updatedAt }, ::moodLogFingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -34,6 +35,7 @@ object SyncDeduplicator {
             todos = todos.kept,
             books = books.kept,
             growthReports = reports.kept,
+            moodLogs = moodLogs.kept,
             events = snapshot.events.map { event ->
                 event.copy(contentItemSyncId = items.survivorOf(event.contentItemSyncId))
             },
@@ -146,6 +148,16 @@ object SyncDeduplicator {
         report.periodStart.trim(),
         report.periodEnd.trim()
     ).joinToString("|")
+
+    /**
+     * 하루에 하나입니다.
+     *
+     * 두 기기에서 같은 날 기분을 각각 찍으면 그날의 기분이 둘이 됩니다. 그러면 겹쳐 보는
+     * 자리가 "어느 쪽이라 할 수 없는 날"로 보고 그날을 버립니다. 기분이 무엇이었는지는
+     * 견주지 않고 날짜만 봅니다. 그래야 나중에 고친 쪽 하나가 남습니다.
+     * 서버 `moodLogFingerprint`와 같아야 합니다.
+     */
+    private fun moodLogFingerprint(log: MoodLogEntity): String = log.entryDate.trim()
 
     /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 봅니다. */
     private fun normalize(value: String): String = value.trim().lowercase().replace(WHITESPACE, " ")

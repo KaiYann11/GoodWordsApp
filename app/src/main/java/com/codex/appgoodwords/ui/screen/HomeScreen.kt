@@ -37,6 +37,7 @@ import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.FeedbackKind
 import com.codex.appgoodwords.data.FeedbackNote
 import com.codex.appgoodwords.data.GrowthReportEntity
+import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.MoodPracticeRow
 import com.codex.appgoodwords.data.OnThisDayMemory
 import com.codex.appgoodwords.data.RoutineCheckEntity
@@ -76,7 +77,12 @@ fun HomeScreen(
     memories: List<OnThisDayMemory> = emptyList(),
     onOpenMemory: (OnThisDayMemory) -> Unit = {},
     /** 기분별 실천. 날이 적으면 빈 목록입니다. */
-    moodPractice: List<MoodPracticeRow> = emptyList()
+    moodPractice: List<MoodPracticeRow> = emptyList(),
+    /** 오늘의 기분. 찍어 둔 것이 없고 일기에도 없으면 null입니다. */
+    todayMood: DiaryMood? = null,
+    onPickMood: (DiaryMood) -> Unit = {},
+    /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
+    onClearMood: (() -> Unit)? = null
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
@@ -91,6 +97,12 @@ fun HomeScreen(
             item {
                 DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
             }
+        }
+
+        // 걸음 바로 아래입니다. 3초짜리라 손이 가장 먼저 닿는 자리에 두어야 하고,
+        // 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
+        item {
+            TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
         }
 
         item {

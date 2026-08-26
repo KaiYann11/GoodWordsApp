@@ -19,6 +19,8 @@ data class GrowthDigest(
     val diaryLines: List<String>,
     val quoteLines: List<String>,
     val bookLines: List<String>,
+    /** 일기를 쓰지 않은 날의 기분까지. 없으면 빈 목록입니다. */
+    val moodLines: List<String> = emptyList(),
     /**
      * 지난번에 권해 받은 것.
      *
@@ -36,7 +38,8 @@ data class GrowthDigest(
             todoLines.isEmpty() &&
             diaryLines.isEmpty() &&
             quoteLines.isEmpty() &&
-            bookLines.isEmpty()
+            bookLines.isEmpty() &&
+            moodLines.isEmpty()
 }
 
 /**
@@ -91,6 +94,7 @@ object GrowthPrompt {
         items: List<ContentItemEntity>,
         events: List<ExposureEventEntity>,
         books: List<BookEntity>,
+        moodLogs: List<MoodLogEntity> = emptyList(),
         includeDiaryBody: Boolean,
         /** 바로 앞에 받은 돌아보기. 없으면 null. */
         previousReport: GrowthReportEntity? = null,
@@ -143,6 +147,14 @@ object GrowthPrompt {
                 "${book.title}: $state"
             }
 
+        // 일기를 안 쓴 날의 기분입니다. 일기가 있는 날은 그 줄에 이미 붙어 있어 두 번 싣지 않습니다.
+        val diaryDates = diaries.mapNotNull { runCatching { LocalDate.parse(it.entryDate) }.getOrNull() }.toSet()
+        val moodLines = DayMood.byDate(logs = moodLogs, diaries = diaries)
+            .filterKeys { it !in diaryDates && !it.isBefore(from) && !it.isAfter(today) }
+            .toSortedMap()
+            .map { (date, mood) -> "$date ${mood.label}" }
+            .take(MAX_LINES)
+
         val previousOn = previousReport
             ?.let { toDate(it.createdAt, zoneId) }
             ?.takeIf { it.plusDays(PREVIOUS_ADVICE_MAX_DAYS) >= today }
@@ -156,6 +168,7 @@ object GrowthPrompt {
             diaryLines = diaryLines,
             quoteLines = quoteLines,
             bookLines = bookLines,
+            moodLines = moodLines,
             previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
             previousAdviceOn = previousOn,
             previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) }
@@ -237,6 +250,9 @@ object GrowthPrompt {
         section("루틴 수행", digest.routineLines)
         section("할 일", digest.todoLines)
         section("일기", digest.diaryLines)
+        // 일기를 못 쓴 날에도 그날이 어땠는지는 남아 있습니다. 이것이 없으면 바빴던 주가
+        // 통째로 비어 보여, "아무것도 안 한 주"로 읽힙니다.
+        section("일기 없이 남긴 기분", digest.moodLines)
         section("읽은 글귀", digest.quoteLines)
         section("독서", digest.bookLines)
         if (digest.previousAdviceLines.isNotEmpty()) {

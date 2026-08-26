@@ -17,7 +17,8 @@ class AppRepository(
     private val diaryDao: DiaryDao? = null,
     private val todoDao: TodoDao? = null,
     private val bookDao: BookDao? = null,
-    private val growthReportDao: GrowthReportDao? = null
+    private val growthReportDao: GrowthReportDao? = null,
+    private val moodLogDao: MoodLogDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -390,6 +391,35 @@ class AppRepository(
         val existing = dao.getById(id) ?: return
         dao.deleteById(id)
         recordDeletion(existing.syncId, SyncEntityType.GROWTH_REPORT)
+    }
+
+    // ---- 오늘 기분 ----
+
+    fun observeMoodLogs(): Flow<List<MoodLogEntity>> =
+        moodLogDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /**
+     * 그날 기분을 남깁니다. 하루에 하나라, 이미 있으면 새로 넣지 않고 고칩니다.
+     *
+     * `syncId`를 그대로 두어야 다른 기기가 "같은 기록을 고친 것"으로 읽습니다. 새 id로 넣으면
+     * 그날 기분이 둘이 되고, 겹쳐 보는 자리가 "어느 쪽이라 할 수 없는 날"로 그날을 버립니다.
+     */
+    suspend fun saveMoodLog(date: LocalDate, mood: DiaryMood): MoodLogEntity? {
+        val dao = moodLogDao ?: return null
+        val entryDate = date.toString()
+        val existing = dao.getByDate(entryDate)
+        val saved = existing?.copy(mood = mood.name, updatedAt = System.currentTimeMillis())
+            ?: MoodLogEntity(entryDate = entryDate, mood = mood.name)
+        val id = dao.insert(saved)
+        return saved.copy(id = if (saved.id == 0L) id else saved.id)
+    }
+
+    /** 잘못 찍었을 때. 지운 표식을 남기지 않으면 다음 병합에서 되살아납니다. */
+    suspend fun clearMoodLog(date: LocalDate) {
+        val dao = moodLogDao ?: return
+        val existing = dao.getByDate(date.toString()) ?: return
+        dao.deleteById(existing.id)
+        recordDeletion(existing.syncId, SyncEntityType.MOOD_LOG)
     }
 
     fun observeBooks(): Flow<List<BookEntity>> =

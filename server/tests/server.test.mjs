@@ -55,6 +55,7 @@ function emptySnapshot(overrides = {}) {
     todos: [],
     books: [],
     growthReports: [],
+    moodLogs: [],
     ...overrides,
   };
 }
@@ -2144,6 +2145,87 @@ describe("AI 돌아보기", () => {
 
     assert.equal(response.status, 503);
     assert.ok(body.error.includes("OPENAI_API_KEY"), body.error);
+  });
+});
+
+describe("오늘 기분", () => {
+  function moodLog(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "mood-1",
+      updatedAt: 1_000,
+      entryDate: "2026-08-26",
+      mood: "TIRED",
+      createdAt: 1_000,
+      ...overrides,
+    };
+  }
+
+  it("찍어 둔 기분이 스냅샷에 그대로 남는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [moodLog()] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.moodLogs.length, 1);
+    assert.equal(stored.moodLogs[0].entryDate, "2026-08-26");
+    assert.equal(stored.moodLogs[0].mood, "TIRED");
+    assert.equal(stored.moodLogCount, 1);
+  });
+
+  it("업로드가 기분만 남겨 두지 않는다", async () => {
+    // replaceSnapshot을 빠뜨리면 그 종류만 서버에 남아, 사용자가 지운 기분이 다음 병합에 되살아난다.
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [moodLog()] }) });
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.moodLogs.length, 0);
+  });
+
+  it("날짜나 기분이 없으면 받아 두지 않는다", async () => {
+    // 어느 날의 무엇인지 알 수 없어 그래프에 놓을 수 없다.
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        moodLogs: [moodLog({ entryDate: "" }), moodLog({ id: 2, syncId: "mood-2", mood: "" })],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.moodLogs.length, 0);
+  });
+
+  it("같은 날 두 기기에서 찍은 기분은 하나로 합친다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [moodLog()] }) });
+
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        moodLogs: [moodLog({ id: 9, syncId: "mood-2", updatedAt: 2_000, createdAt: 2_000, mood: "GOOD" })],
+      }),
+    });
+    await api("/api/deduplicate", { method: "POST" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    // 그날 기분이 둘이면 겹쳐 보는 자리가 그날을 통째로 버린다.
+    assert.equal(stored.moodLogs.length, 1);
+    assert.equal(stored.moodLogs[0].mood, "GOOD");
+    assert.ok(stored.deletions.some((entry) => entry.entityType === "MOOD_LOG"));
+  });
+
+  it("다른 날 기분은 합치지 않는다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        moodLogs: [moodLog(), moodLog({ id: 2, syncId: "mood-2", entryDate: "2026-08-25", mood: "GOOD" })],
+      }),
+    });
+    await api("/api/deduplicate", { method: "POST" });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.moodLogs.length, 2);
   });
 });
 

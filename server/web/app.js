@@ -324,6 +324,7 @@ function emptySnapshot() {
     todos: [],
     books: [],
     growthReports: [],
+    moodLogs: [],
     settings: {},
   };
 }
@@ -422,6 +423,7 @@ function render() {
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
+  if (state.activeTab === "moods") renderMoods();
   if (state.activeTab === "growth") renderGrowth();
   if (state.activeTab === "history") renderHistory();
   if (state.activeTab === "settings") renderSettings();
@@ -1542,6 +1544,41 @@ function escapeHtml(value = "") {
 
 function attr(value = "") {
   return escapeHtml(value);
+}
+
+/**
+ * 톡 찍어 둔 기분.
+ *
+ * 여기서는 읽기만 합니다. 기분은 그날 그때 찍는 것이라, 나중에 웹에서 고쳐 넣으면
+ * 그때 어땠는지가 아니라 지금 기억하는 것이 남습니다.
+ */
+function renderMoods() {
+  const logs = [...(state.snapshot.moodLogs || [])].sort((a, b) =>
+    String(b.entryDate || "").localeCompare(String(a.entryDate || "")),
+  );
+  app.innerHTML = `
+    <section>
+      <h2 class="sectionTitle">기분 ${logs.length}일</h2>
+      <p class="meta">앱에서 찍어 둔 기분입니다. 일기를 쓰지 않은 날에도 남습니다.</p>
+      <div class="itemList">
+        ${logs.length ? logs.map(moodCard).join("") : empty("아직 찍어 둔 기분이 없습니다.")}
+      </div>
+    </section>
+  `;
+}
+
+function moodCard(log) {
+  const option = moodOptions.find((choice) => choice.code === log.mood);
+  return `
+    <article class="item">
+      <div class="itemHeader">
+        <div>
+          <h3>${escapeHtml(option ? `${option.emoji} ${option.label}` : log.mood || "")}</h3>
+          <div class="meta"><span class="chip">${escapeHtml(log.entryDate || "")}</span></div>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
 /**

@@ -32,18 +32,13 @@ object MoodPractice {
         routineChecks: List<RoutineCheckEntity>,
         events: List<ExposureEventEntity>,
         todos: List<TodoEntity>,
+        moodLogs: List<MoodLogEntity> = emptyList(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<MoodPracticeRow> {
-        // 같은 날 일기를 두 편 썼는데 기분이 다르면 어느 쪽이라 할 수 없어 그날은 셈에서 뺍니다.
-        val moodByDate = diaries
-            .mapNotNull { diary ->
-                val date = parseDate(diary.entryDate) ?: return@mapNotNull null
-                val mood = DiaryMood.fromCode(diary.mood) ?: return@mapNotNull null
-                date to mood
-            }
-            .groupBy({ it.first }, { it.second })
-            .mapNotNull { (date, moods) -> moods.distinct().singleOrNull()?.let { date to it } }
-            .toMap()
+        // 그날의 기분이 무엇이었는지는 [DayMood]가 정합니다. 여기서 따로 셈하면
+        // 화면마다 다른 기분을 말하게 됩니다. 어느 쪽이라 할 수 없는 날은 뺍니다.
+        // 그런 날을 한 칸에 넣으면 그 칸의 평균이 흔들립니다.
+        val moodByDate = DayMood.settledByDate(logs = moodLogs, diaries = diaries)
 
         if (moodByDate.isEmpty()) return emptyList()
 

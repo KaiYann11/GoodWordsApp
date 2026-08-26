@@ -102,12 +102,50 @@ class MoodPracticeTest {
         assertTrue(rows.isEmpty())
     }
 
+    @Test
+    fun aBusyDayWithoutADiaryNoLongerFallsOut() {
+        // 이 기록을 만든 이유입니다. 예전에는 기분이 일기에만 붙어 있어서, 바빠서 일기를 못 쓴
+        // 날은 그날의 실천까지 통째로 셈에서 빠졌습니다. 정작 가장 알고 싶은 날이었습니다.
+        val rows = build(
+            moodLogs = listOf(moodLog("2026-08-25", DiaryMood.TIRED), moodLog("2026-08-26", DiaryMood.TIRED)),
+            checks = listOf(check("2026-08-25"), check("2026-08-26"), check("2026-08-26"))
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals(DiaryMood.TIRED, rows.single().mood)
+        assertEquals(2, rows.single().dayCount)
+        assertEquals(1.5f, rows.single().averagePerDay, 0.001f)
+    }
+
+    @Test
+    fun whatWasTappedWinsOverTheDiary() {
+        // 하루의 기분을 묻는 자리에서 직접 고른 것이 그날의 기분입니다.
+        val rows = build(
+            diaries = listOf(
+                diary(1, "2026-08-25", DiaryMood.GOOD),
+                diary(2, "2026-08-26", DiaryMood.GOOD)
+            ),
+            moodLogs = listOf(moodLog("2026-08-25", DiaryMood.SAD), moodLog("2026-08-26", DiaryMood.SAD))
+        )
+
+        assertEquals(listOf(DiaryMood.SAD), rows.map { it.mood })
+    }
+
+    private fun moodLog(date: String, mood: DiaryMood) = MoodLogEntity(
+        syncId = "mood-$date",
+        updatedAt = millis(date),
+        entryDate = date,
+        mood = mood.name,
+        createdAt = millis(date)
+    )
+
     private fun build(
         diaries: List<DiaryEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList(),
         events: List<ExposureEventEntity> = emptyList(),
-        todos: List<TodoEntity> = emptyList()
-    ) = MoodPractice.build(diaries, checks, events, todos, zone)
+        todos: List<TodoEntity> = emptyList(),
+        moodLogs: List<MoodLogEntity> = emptyList()
+    ) = MoodPractice.build(diaries, checks, events, todos, moodLogs, zone)
 
     private fun diary(id: Long, date: String, mood: DiaryMood?) = DiaryEntity(
         id = id,

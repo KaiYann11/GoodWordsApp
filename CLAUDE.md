@@ -36,7 +36,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 15입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 16입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -44,11 +44,21 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 서버의 `normalizeDb`/`mergeSnapshot`/`replaceSnapshot`/`reindex`/`deduplicate` ·
 웹 `server/web`(탭·화면·`emptySnapshot`).
 특히 서버 `replaceSnapshot`을 빠뜨리면 업로드가 그 종류만 남겨 두어, 사용자가 지운 레코드가
-다음 병합에 되살아납니다.
+다음 병합에 되살아납니다. **삭제 표식 종류도 함께 늘립니다** — 앱 `SyncEntityType`와 서버
+`deletionEntityTypes`. 서버 쪽을 빠뜨리면 그 종류의 표식이 조용히 버려져, 지운 레코드가
+역시 되살아납니다. `AppDataSnapshotCountTest`에 새 종류를 한 줄 더해 두면 다음 사람이
+빠뜨렸을 때 시험이 걸립니다.
 
 **첨부 주소 형식은 앱·서버·웹 세 곳이 같아야 합니다.** `appgoodwords://attachment/{sha256}.{확장자}`이고,
 앱 `AttachmentUris.SCHEME` · 서버 `attachmentScheme` · 웹 `app.js`의 `attachmentScheme`에 각각 있습니다.
 파일은 DB JSON 밖 `attachments/` 폴더에 둡니다. DB에 넣으면 스냅샷마다 사진이 통째로 오갑니다.
+
+**그날의 기분은 `DayMood`가 정합니다.** 기분이 두 곳에 남습니다. 톡 찍어 둔 것(`MoodLogEntity`)과
+일기에 딸린 것입니다. 화면마다 각자 셈하면 통계와 그래프가 서로 다른 말을 합니다.
+찍어 둔 것이 먼저고, 없으면 일기에서 봅니다. 같은 날 일기 둘이 서로 다른 기분이면 마지막에
+남긴 것을 쓰되 `settled = false`로 표시합니다. **그래프는 `byDate`(빈 날을 만들지 않음),
+기분별 실천·상위 기분은 `settledByDate`(어느 쪽이라 할 수 없는 날은 뺌)를 씁니다.**
+그래프에서 빼면 실제로는 쓴 날이 안 쓴 날처럼 보이고, 평균에 넣으면 그 칸이 흔들립니다.
 
 **날씨·기분·일기 종류 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의
 `DiaryWeather`·`DiaryMood`·`DiaryKind`와 웹 `server/web/app.js`의

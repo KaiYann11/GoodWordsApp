@@ -141,6 +141,47 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun aWeekWithoutDiariesIsNoLongerBlank() {
+        // 기분을 일기에서 뗀 이유입니다. 바빠서 일기를 못 쓴 주는 AI에게 "아무것도 안 한 주"로
+        // 보였습니다. 정작 그런 주가 가장 알고 싶은 주입니다.
+        val prompt = GrowthPrompt.userPrompt(
+            digest(
+                moodLogs = listOf(moodLog("2026-08-21", DiaryMood.TIRED)),
+                includeDiaryBody = false
+            )
+        )
+
+        assertTrue(prompt, prompt.contains("일기 없이 남긴 기분"))
+        assertTrue(prompt, prompt.contains("2026-08-21 지침"))
+    }
+
+    @Test
+    fun aMoodIsNotSentTwiceForTheSameDay() {
+        // 일기가 있는 날은 그 줄에 기분이 이미 붙어 있습니다.
+        val prompt = GrowthPrompt.userPrompt(
+            digest(
+                diaries = listOf(diary.copy(entryDate = "2026-08-21", mood = "SAD")),
+                moodLogs = listOf(moodLog("2026-08-21", DiaryMood.TIRED)),
+                includeDiaryBody = false
+            )
+        )
+
+        assertFalse(prompt, prompt.contains("일기 없이 남긴 기분"))
+    }
+
+    @Test
+    fun aMoodAloneIsSomethingToLookBackOn() {
+        // 기분만 찍어 둔 주도 돌아볼 것이 있습니다. 값만 나가고 빈 글이 오는 것과 다릅니다.
+        assertFalse(digest(moodLogs = listOf(moodLog("2026-08-21", DiaryMood.GOOD)), includeDiaryBody = false).isEmpty)
+    }
+
+    private fun moodLog(date: String, mood: DiaryMood) = MoodLogEntity(
+        syncId = "mood-$date",
+        entryDate = date,
+        mood = mood.name
+    )
+
+    @Test
     fun theBlockToPasteCarriesTheRulesAsWellAsTheRecords() {
         // 채팅창에는 붙여넣을 자리가 하나뿐입니다. 규칙을 빠뜨리면 읽어 낼 수 없는 답이 옵니다.
         val digest = digest(includeDiaryBody = false)
@@ -182,6 +223,7 @@ class GrowthPromptTest {
         routines: List<RoutineEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
+        moodLogs: List<MoodLogEntity> = emptyList(),
         previous: GrowthReportEntity? = null,
         includeDiaryBody: Boolean
     ) = GrowthPrompt.digest(
@@ -194,6 +236,7 @@ class GrowthPromptTest {
         items = emptyList(),
         events = emptyList(),
         books = emptyList(),
+        moodLogs = moodLogs,
         includeDiaryBody = includeDiaryBody,
         previousReport = previous,
         zoneId = zone
