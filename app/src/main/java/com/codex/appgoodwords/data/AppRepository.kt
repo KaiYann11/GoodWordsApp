@@ -393,6 +393,24 @@ class AppRepository(
         recordDeletion(existing.syncId, SyncEntityType.GROWTH_REPORT)
     }
 
+    /**
+     * 여러 편을 한 번에 지웁니다.
+     *
+     * 한 장씩만 지울 수 있으면 쌓인 것을 치울 방법이 없습니다. 표식은 **한 편마다** 남깁니다.
+     * 빠뜨리면 지운 것이 다음 병합에서 되살아납니다.
+     */
+    suspend fun deleteGrowthReports(ids: List<Long>): Int {
+        val dao = growthReportDao ?: return 0
+        var removed = 0
+        ids.forEach { id ->
+            val existing = dao.getById(id) ?: return@forEach
+            dao.deleteById(id)
+            recordDeletion(existing.syncId, SyncEntityType.GROWTH_REPORT)
+            removed += 1
+        }
+        return removed
+    }
+
     // ---- 오늘 기분 ----
 
     fun observeMoodLogs(): Flow<List<MoodLogEntity>> =

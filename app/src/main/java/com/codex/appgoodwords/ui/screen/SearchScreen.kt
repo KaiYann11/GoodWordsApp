@@ -28,6 +28,7 @@ import com.codex.appgoodwords.data.AppSearch
 import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.SearchHit
 import com.codex.appgoodwords.data.SearchKind
@@ -49,19 +50,21 @@ fun SearchScreen(
     books: List<BookEntity>,
     routines: List<RoutineEntity>,
     onOpenHit: (SearchHit) -> Unit,
+    growthReports: List<GrowthReportEntity> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     var query by rememberSaveable { mutableStateOf("") }
 
     // 글자를 칠 때마다 다시 찾습니다. 목록이 기기 안에 있어 따로 늦출 이유가 없습니다.
-    val results = remember(query, items, diaries, todos, books, routines) {
+    val results = remember(query, items, diaries, todos, books, routines, growthReports) {
         AppSearch.search(
             query = query,
             items = items,
             diaries = diaries,
             todos = todos,
             books = books,
-            routines = routines
+            routines = routines,
+            growthReports = growthReports
         )
     }
 
@@ -76,7 +79,7 @@ fun SearchScreen(
                 onValueChange = { query = it },
                 label = { Text("검색") },
                 singleLine = true,
-                supportingText = { Text("글귀·일기·할 일·독서·루틴을 함께 찾습니다.") },
+                supportingText = { Text("글귀·일기·할 일·독서·루틴·돌아보기를 함께 찾습니다.") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(searchInputTag)

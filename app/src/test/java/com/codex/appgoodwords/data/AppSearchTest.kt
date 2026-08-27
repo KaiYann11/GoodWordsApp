@@ -49,13 +49,25 @@ class AppSearchTest {
         category = "건강"
     )
 
+    private val report = GrowthReportEntity(
+        id = 6,
+        syncId = "g1",
+        period = ReportPeriod.WEEKLY.name,
+        periodStart = "2026-08-17",
+        periodEnd = "2026-08-23",
+        model = "claude-opus-5",
+        improvements = listOf("자기 전 폰 내려놓기"),
+        guide = "이번 주에는 저녁을 조금 일찍 닫아 보세요."
+    )
+
     private fun search(query: String) = AppSearch.search(
         query = query,
         items = listOf(quote),
         diaries = listOf(diary),
         todos = listOf(todo),
         books = listOf(book),
-        routines = listOf(routine)
+        routines = listOf(routine),
+        growthReports = listOf(report)
     )
 
     @Test
@@ -66,6 +78,8 @@ class AppSearchTest {
         assertEquals(SearchKind.TODO, search("우체국").hits.single().kind)
         assertEquals(SearchKind.BOOK, search("습관").hits.single().kind)
         assertEquals(SearchKind.ROUTINE, search("산책").hits.single().kind)
+        // 돌아보기는 쌓이기만 하고 찾을 수 없었습니다. 목록을 끝까지 굴리는 수밖에 없었습니다.
+        assertEquals(SearchKind.GROWTH, search("내려놓기").hits.single().kind)
     }
 
     @Test
@@ -170,6 +184,16 @@ class AppSearchTest {
 
         // 한 종류가 화면을 다 차지하면 다른 종류가 밀려 나갑니다.
         assertEquals(AppSearch.LIMIT_PER_KIND, hits.size)
+    }
+
+    @Test
+    fun aReportIsFoundByWhatItAdvised() {
+        val hit = search("저녁").hits.single()
+
+        assertEquals(SearchKind.GROWTH, hit.kind)
+        // 어느 기간을 보고 쓴 글인지 알려 줘야 찾아 놓고도 무엇인지 압니다.
+        assertTrue(hit.meta, hit.meta.contains("2026-08-17"))
+        assertTrue(hit.title, hit.title.contains("한 주"))
     }
 
     @Test

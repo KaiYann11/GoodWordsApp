@@ -6,7 +6,8 @@ enum class SearchKind(val label: String) {
     DIARY("일기"),
     TODO("할 일"),
     BOOK("독서"),
-    ROUTINE("루틴")
+    ROUTINE("루틴"),
+    GROWTH("돌아보기")
 }
 
 data class SearchHit(
@@ -56,7 +57,8 @@ object AppSearch {
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
         books: List<BookEntity> = emptyList(),
-        routines: List<RoutineEntity> = emptyList()
+        routines: List<RoutineEntity> = emptyList(),
+        growthReports: List<GrowthReportEntity> = emptyList()
     ): SearchResults {
         val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return SearchResults(query = query, hits = emptyList())
@@ -155,6 +157,31 @@ object AppSearch {
                         title = routine.title,
                         snippet = snippetOf(routine.note, terms),
                         meta = routine.category
+                    )
+                }
+            )
+            // 돌아보기는 쌓이기만 하고 찾을 수 없었습니다. "봄에 뭐라고 했더라"를 찾으려면
+            // 목록을 끝까지 굴리는 수밖에 없었습니다.
+            addAll(
+                growthReports.matching(
+                    terms = terms,
+                    fields = { report ->
+                        report.strengths + report.improvements + report.suggestedRoutines +
+                            listOf(report.suggestedQuote, report.guide)
+                    }
+                ) { report ->
+                    SearchHit(
+                        kind = SearchKind.GROWTH,
+                        id = report.id,
+                        title = "${ReportPeriod.of(report.period).label} 돌아보기",
+                        snippet = snippetOf(
+                            (report.improvements + report.strengths).joinToString(" ").ifBlank { report.guide },
+                            terms
+                        ),
+                        meta = listOfNotNull(
+                            "${report.periodStart} ~ ${report.periodEnd}".takeIf { report.periodStart.isNotBlank() },
+                            report.model.takeIf { it.isNotBlank() }
+                        ).joinToString(" · ")
                     )
                 }
             )

@@ -51,6 +51,26 @@ internal const val growthRunButtonTag = "growth_run_button"
 internal const val growthPreviewButtonTag = "growth_preview_button"
 internal const val growthPasteButtonTag = "growth_paste_button"
 internal const val growthAnswerFieldTag = "growth_answer_field"
+internal const val growthTidyButtonTag = "growth_tidy_button"
+
+/** 목록 거르개. 쌓인 것을 단위로 좁혀 봅니다. */
+internal fun growthListFilterTag(name: String): String = "growth_list_filter_" + name.ifBlank { "all" }
+
+/**
+ * 목록에서 볼 단위.
+ *
+ * 화면 위쪽 칩은 "무엇을 새로 받을지" 고르는 것이라 목록과 상관이 없습니다. 쌓이고 나면
+ * 그 둘이 헷갈리므로 목록 거르개를 따로 둡니다.
+ */
+private enum class ReportListFilter(val label: String, val period: ReportPeriod?) {
+    ALL("전체", null),
+    DAILY("하루", ReportPeriod.DAILY),
+    WEEKLY("한 주", ReportPeriod.WEEKLY),
+    MONTHLY("한 달", ReportPeriod.MONTHLY);
+
+    fun matches(report: GrowthReportEntity): Boolean =
+        period == null || ReportPeriod.of(report.period) == period
+}
 
 /**
  * AI가 써 준 돌아보기를 받고 읽는 자리.
@@ -69,6 +89,8 @@ fun GrowthFeedbackScreen(
     onRequest: (ReportPeriod) -> Unit,
     onPreview: (ReportPeriod) -> Unit,
     onDeleteReport: (GrowthReportEntity) -> Unit,
+    /** 여러 편을 한 번에 지웁니다. 한 장씩 지우게 두면 쌓인 것을 치울 방법이 없습니다. */
+    onDeleteReports: (List<Long>) -> Unit = {},
     onKeepQuote: (GrowthReportEntity) -> Unit,
     onKeepRoutine: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -85,8 +107,12 @@ fun GrowthFeedbackScreen(
     var selectedPeriod by rememberSaveable { mutableStateOf(ReportPeriod.WEEKLY.name) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
     var pasting by rememberSaveable { mutableStateOf(false) }
+    var listFilter by rememberSaveable { mutableStateOf(ReportListFilter.ALL.name) }
+    var tidying by rememberSaveable { mutableStateOf(false) }
     val period = ReportPeriod.of(selectedPeriod)
     val deletingReport = reports.firstOrNull { it.id == deleting }
+    val shownFilter = ReportListFilter.entries.firstOrNull { it.name == listFilter } ?: ReportListFilter.ALL
+    val shownReports = reports.filter(shownFilter::matches)
     val clipboard = LocalClipboardManager.current
 
     if (previewText != null) {
@@ -110,6 +136,17 @@ fun GrowthFeedbackScreen(
                 pasting = false
             },
             onDismiss = { pasting = false }
+        )
+    }
+
+    if (tidying) {
+        TidyDialog(
+            reports = reports,
+            onDismiss = { tidying = false },
+            onTidy = { keep ->
+                onDeleteReports(reports.drop(keep).map { it.id })
+                tidying = false
+            }
         )
     }
 
@@ -237,15 +274,59 @@ fun GrowthFeedbackScreen(
             }
         }
 
-        if (reports.isEmpty()) {
+        // 쌓이고 나면 목록이 한 줄로 끝없이 이어집니다. 하루 주기로 돌리면 한 해에 삼백 장이
+        // 넘습니다. 단위로 좁혀 보고, 오래된 것은 한 번에 치울 수 있어야 합니다.
+        if (reports.size >= LIST_TOOLS_FROM) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(ReportListFilter.entries) { choice ->
+                            FilterChip(
+                                selected = shownFilter == choice,
+                                onClick = { listFilter = choice.name },
+                                label = { Text(choice.label) },
+                                modifier = Modifier.testTag(growthListFilterTag(choice.name))
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${shownReports.size}편",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = { tidying = true },
+                            modifier = Modifier.testTag(growthTidyButtonTag)
+                        ) {
+                            Text("오래된 것 정리")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (shownReports.isEmpty()) {
             item {
                 EmptyCard(
-                    title = "아직 받은 돌아보기가 없습니다.",
-                    body = "기간을 고르고 지금 받기를 누르면 첫 글이 도착합니다."
+                    title = if (reports.isEmpty()) {
+                        "아직 받은 돌아보기가 없습니다."
+                    } else {
+                        "${shownFilter.label} 돌아보기는 아직 없습니다."
+                    },
+                    body = if (reports.isEmpty()) {
+                        "기간을 고르고 지금 받기를 누르면 첫 글이 도착합니다."
+                    } else {
+                        "거르개를 전체로 두면 받아 둔 것이 모두 보입니다."
+                    }
                 )
             }
         } else {
-            items(reports, key = { it.id }) { report ->
+            items(shownReports, key = { it.id }) { report ->
                 GrowthReportCard(
                     report = report,
                     onDelete = { deleting = report.id },
@@ -481,6 +562,66 @@ private fun AnswerPasteDialog(
         }
     )
 }
+
+/**
+ * 오래된 것을 한 번에 치웁니다.
+ *
+ * **최근 몇 편을 남길지**로 묻습니다. "몇 편을 지울지"로 물으면 무엇이 사라지는지 세어 봐야
+ * 알 수 있고, 잘못 세면 되돌릴 수 없습니다. 남는 쪽을 말하면 손이 미끄러져도 최근 것은
+ * 그대로입니다.
+ */
+@Composable
+private fun TidyDialog(
+    reports: List<GrowthReportEntity>,
+    onTidy: (keep: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var keep by rememberSaveable { mutableStateOf(KEEP_CHOICES.first()) }
+    val removed = (reports.size - keep).coerceAtLeast(0)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("오래된 돌아보기 정리") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("최근 몇 편을 남길까요?", style = MaterialTheme.typography.bodyMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(KEEP_CHOICES) { choice ->
+                        FilterChip(
+                            selected = keep == choice,
+                            onClick = { keep = choice },
+                            label = { Text("${choice}편") }
+                        )
+                    }
+                }
+                Text(
+                    text = if (removed == 0) {
+                        "지울 것이 없습니다. 받아 둔 것이 ${reports.size}편입니다."
+                    } else {
+                        "${reports.size}편 중 오래된 ${removed}편을 지웁니다. 되돌릴 수 없습니다."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (removed == 0) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onTidy(keep) }, enabled = removed > 0) { Text("정리") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+/** 거르개와 정리를 언제부터 보여 줄지. 몇 편 없을 때는 자리만 차지합니다. */
+private const val LIST_TOOLS_FROM = 4
+
+private val KEEP_CHOICES = listOf(10, 30, 50)
 
 private fun formatDay(millis: Long): String = Instant.ofEpochMilli(millis)
     .atZone(ZoneId.systemDefault())

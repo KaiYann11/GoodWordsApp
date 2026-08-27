@@ -714,6 +714,11 @@ class MainViewModel(
         container.repository.deleteGrowthReport(reportId)
     }
 
+    /** 오래된 것을 한 번에 치웁니다. 지운 편 수를 돌려줍니다. */
+    suspend fun deleteGrowthReports(reportIds: List<Long>): Result<Int> = runCatching {
+        container.repository.deleteGrowthReports(reportIds)
+    }
+
     fun updateAiFeedbackSettings(updated: AiFeedbackSettings) {
         viewModelScope.launch {
             container.settingsStore.updateAiFeedbackSettings(updated)

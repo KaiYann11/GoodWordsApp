@@ -817,6 +817,7 @@ fun AppGoodWordsApp(
                             todos = todos,
                             books = books,
                             routines = routines,
+                            growthReports = growthReports,
                             onOpenHit = { hit ->
                                 if (hit.kind == SearchKind.QUOTE) {
                                     openItemDetail(AppTab.SEARCH, hit.id)
@@ -903,6 +904,15 @@ fun AppGoodWordsApp(
                             },
                             onDeleteReport = { report ->
                                 coroutineScope.launch { viewModel.deleteGrowthReport(report.id) }
+                            },
+                            onDeleteReports = { ids ->
+                                coroutineScope.launch {
+                                    val result = viewModel.deleteGrowthReports(ids)
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "${result.getOrDefault(0)}편을 정리했습니다."
+                                        else result.exceptionOrNull()?.message ?: "정리하지 못했습니다."
+                                    )
+                                }
                             },
                             onKeepQuote = { report ->
                                 coroutineScope.launch {
@@ -1242,6 +1252,7 @@ private fun tabOf(kind: SearchKind): AppTab = when (kind) {
     SearchKind.DIARY -> AppTab.DIARY
     SearchKind.TODO -> AppTab.TODO
     SearchKind.ROUTINE -> AppTab.ROUTINE
+    SearchKind.GROWTH -> AppTab.GROWTH
 }
 
 private fun parseRoute(route: String): AppDestination {
