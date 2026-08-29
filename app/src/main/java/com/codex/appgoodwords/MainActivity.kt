@@ -83,6 +83,9 @@ class MainActivity : FragmentActivity() {
         val recordView = intent?.getBooleanExtra(AppNotifications.extraRecordView, true) ?: true
 
         viewModel.handleSharedText(sharedText)
+        if (intent?.getBooleanExtra(AppNotifications.extraCaptureIdea, false) == true) {
+            viewModel.handleCaptureIdeaRequest()
+        }
         if (contentId > 0L) {
             viewModel.handleOpenItemRequest(
                 itemId = contentId,

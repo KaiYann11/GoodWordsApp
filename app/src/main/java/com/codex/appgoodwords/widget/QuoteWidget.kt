@@ -163,6 +163,14 @@ internal fun WidgetContent(
             modifier = GlanceModifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Horizontal.End
         ) {
+            // 번뜩인 것은 폰을 켜고 앱을 찾아 들어가는 사이에 날아갑니다. 여기서 한 번에 갑니다.
+            Text(
+                text = "적기",
+                modifier = GlanceModifier
+                    .clickable(actionStartActivity(captureIdeaIntent()))
+                    .padding(top = 8.dp, end = 12.dp),
+                style = TextStyle(color = GlanceTheme.colors.primary)
+            )
             Text(
                 text = "다음 글귀",
                 modifier = GlanceModifier
@@ -172,6 +180,11 @@ internal fun WidgetContent(
             )
         }
     }
+}
+
+/** 위젯의 적기를 누르면 앱이 열리면서 번뜩인 것 담는 칸이 바로 뜬다. */
+private fun captureIdeaIntent(): Intent = launchAppIntent().apply {
+    putExtra(AppNotifications.extraCaptureIdea, true)
 }
 
 /** 위젯을 누르면 알림과 같은 방식으로 해당 항목 상세로 들어간다. */

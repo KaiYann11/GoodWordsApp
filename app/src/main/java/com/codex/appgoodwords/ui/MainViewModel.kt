@@ -246,6 +246,23 @@ class MainViewModel(
     private val _openItemRequest = MutableStateFlow<Long?>(null)
     val openItemRequest: StateFlow<Long?> = _openItemRequest.asStateFlow()
 
+    /**
+     * 위젯의 적기 버튼으로 들어왔는지.
+     *
+     * 앱을 열자마자 담는 칸이 떠야 합니다. 열어 놓고 사용자가 다시 찾아 들어가면
+     * 폰 홈에서 한 번에 담으려던 뜻이 없어집니다.
+     */
+    private val _captureIdeaRequest = MutableStateFlow(false)
+    val captureIdeaRequest: StateFlow<Boolean> = _captureIdeaRequest.asStateFlow()
+
+    fun handleCaptureIdeaRequest() {
+        _captureIdeaRequest.value = true
+    }
+
+    fun consumeCaptureIdeaRequest() {
+        _captureIdeaRequest.value = false
+    }
+
     private val _confirmedTodayIds = MutableStateFlow<Set<Long>>(emptySet())
     val confirmedTodayIds: StateFlow<Set<Long>> = _confirmedTodayIds.asStateFlow()
 

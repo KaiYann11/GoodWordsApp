@@ -34,6 +34,8 @@ object AppNotifications {
     const val extraRecordView = "extra_record_view"
     const val extraNotificationId = "extra_notification_id"
     const val extraTodoId = "extra_todo_id"
+    /** 위젯의 적기 버튼. 앱을 열자마자 번뜩인 것 담는 칸을 띄웁니다. */
+    const val extraCaptureIdea = "extra_capture_idea"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

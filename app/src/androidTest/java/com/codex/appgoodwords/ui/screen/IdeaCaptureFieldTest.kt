@@ -3,10 +3,12 @@ package com.codex.appgoodwords.ui.screen
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -68,6 +70,37 @@ class IdeaCaptureFieldTest {
         compose.onNodeWithTag(ideaCaptureSaveTag).performClick()
 
         assertEquals("띄어쓴 것", captured)
+    }
+
+    @Test
+    fun theDialogCapturesAndCloses() {
+        // 홈에서 왼쪽으로 밀거나 위젯의 적기를 누르면 뜨는 자리입니다.
+        var captured: String? = null
+        var dismissed = false
+        compose.setContent {
+            IdeaCaptureDialog(onCapture = { captured = it }, onDismiss = { dismissed = true })
+        }
+
+        compose.onNodeWithTag(ideaCaptureFieldTag).performTextInput("밀어서 적은 것")
+        compose.onNodeWithTag(ideaCaptureSaveTag).performClick()
+
+        assertEquals("밀어서 적은 것", captured)
+        // 담고 나면 보던 자리로 돌아갑니다. 닫는 것을 또 눌러야 하면 걸음이 하나 늘어납니다.
+        assertTrue(dismissed)
+    }
+
+    @Test
+    fun theDialogCanBeLeftWithoutWriting() {
+        var captured: String? = null
+        var dismissed = false
+        compose.setContent {
+            IdeaCaptureDialog(onCapture = { captured = it }, onDismiss = { dismissed = true })
+        }
+
+        compose.onNodeWithText("닫기").performClick()
+
+        assertEquals(null, captured)
+        assertTrue(dismissed)
     }
 
     @Test

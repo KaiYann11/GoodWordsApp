@@ -1,6 +1,9 @@
 package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -14,6 +17,8 @@ import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.StatsSummary
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -88,11 +93,50 @@ class HomeScreenTest {
         assertEquals(DailyStep.QUOTE, opened)
     }
 
+    @Test
+    fun swipingLeftOpensTheCaptureField() {
+        // 번뜩인 것은 담으러 들어가는 사이에 날아갑니다. 홈에서 바로 열립니다.
+        var swiped = false
+        compose.setContent { homeScreen(onSwipeToCapture = { swiped = true }) }
+
+        compose.onNodeWithTag(homeListTag).performTouchInput {
+            swipeLeft(startX = right - 10f, endX = left + 10f)
+        }
+
+        assertTrue(swiped)
+    }
+
+    @Test
+    fun aShortDragDoesNotOpenIt() {
+        // 굴리다 손가락이 옆으로 흐르는 것만으로 뜨면 성가십니다.
+        var swiped = false
+        compose.setContent { homeScreen(onSwipeToCapture = { swiped = true }) }
+
+        compose.onNodeWithTag(homeListTag).performTouchInput {
+            swipeLeft(startX = centerX + 20f, endX = centerX - 20f)
+        }
+
+        assertFalse(swiped)
+    }
+
+    @Test
+    fun swipingRightDoesNothing() {
+        var swiped = false
+        compose.setContent { homeScreen(onSwipeToCapture = { swiped = true }) }
+
+        compose.onNodeWithTag(homeListTag).performTouchInput {
+            swipeRight(startX = left + 10f, endX = right - 10f)
+        }
+
+        assertFalse(swiped)
+    }
+
     @androidx.compose.runtime.Composable
     private fun homeScreen(
         notes: List<FeedbackNote> = emptyList(),
         dailyLoop: DailyProgress? = null,
-        onOpenStep: (DailyStep) -> Unit = {}
+        onOpenStep: (DailyStep) -> Unit = {},
+        onSwipeToCapture: () -> Unit = {}
     ) {
         HomeScreen(
             summary = emptySummary,
@@ -100,7 +144,8 @@ class HomeScreenTest {
             routines = emptyList(),
             checks = emptyList(),
             dailyLoop = dailyLoop,
-            onOpenStep = onOpenStep
+            onOpenStep = onOpenStep,
+            onSwipeToCapture = onSwipeToCapture
         )
     }
 }

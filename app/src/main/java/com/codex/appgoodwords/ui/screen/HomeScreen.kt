@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -59,6 +61,8 @@ internal const val moodPracticeCardTag = "home_mood_practice"
  * 오늘 할 일(오늘의 걸음), 짚어 주는 문구, 그리고 통계 순서입니다. 앞에서부터 시간의 폭이
  * 넓어지도록 두어, 위에서 아래로 읽으면 오늘에서 지난 달까지 자연스럽게 이어집니다.
  */
+internal const val homeListTag = "home_list"
+
 @Composable
 fun HomeScreen(
     summary: StatsSummary,
@@ -84,13 +88,31 @@ fun HomeScreen(
     /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
     onClearMood: (() -> Unit)? = null,
     /** 번뜩인 것을 한 줄로 담습니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
-    onCaptureIdea: (String) -> Unit = {}
+    onCaptureIdea: (String) -> Unit = {},
+    /** 왼쪽으로 밀었을 때. 담는 칸을 띄웁니다. */
+    onSwipeToCapture: () -> Unit = {}
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag(homeListTag)
+            // 왼쪽으로 밀면 담는 칸이 뜹니다. 세로로 굴리는 목록이라 가로 몸짓과 부딪히지 않습니다.
+            // 문턱을 두는 이유는, 굴리다 손가락이 옆으로 흐르는 것만으로 뜨면 성가시기 때문입니다.
+            .pointerInput(Unit) {
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onDragEnd = {
+                        if (dragged <= -SWIPE_TO_CAPTURE_PX) onSwipeToCapture()
+                    }
+                ) { change, amount ->
+                    dragged += amount
+                    change.consume()
+                }
+            },
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -118,7 +140,8 @@ fun HomeScreen(
                     Text("번뜩인 것", style = MaterialTheme.typography.titleMedium)
                     IdeaCaptureField(onCapture = onCaptureIdea)
                     Text(
-                        text = "보관함 아이디어에 담깁니다. 익으면 루틴이나 할 일로 옮기면 됩니다.",
+                        text = "화면을 왼쪽으로 밀어도 이 칸이 뜹니다. " +
+                            "보관함 아이디어에 담기고, 익으면 루틴이나 할 일로 옮기면 됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -411,3 +434,6 @@ private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
         }
     }
 }
+
+/** 이만큼은 밀어야 담는 칸이 뜹니다. 굴리다 손가락이 흐르는 것으로는 뜨지 않게 합니다. */
+private const val SWIPE_TO_CAPTURE_PX = 220f

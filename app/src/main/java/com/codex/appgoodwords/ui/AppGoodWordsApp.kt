@@ -83,6 +83,7 @@ import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
+import com.codex.appgoodwords.ui.screen.IdeaCaptureDialog
 import com.codex.appgoodwords.ui.screen.IdeaCaptureField
 import com.codex.appgoodwords.ui.screen.LibraryScreen
 import com.codex.appgoodwords.ui.screen.LibraryTab
@@ -161,6 +162,9 @@ fun AppGoodWordsApp(
     val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
     val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
     val moodLogs by viewModel.moodLogs.collectAsStateWithLifecycle()
+    val captureIdeaRequest by viewModel.captureIdeaRequest.collectAsStateWithLifecycle()
+    // 위젯의 적기로 들어왔거나 홈에서 왼쪽으로 밀었을 때 뜹니다.
+    var capturingIdea by remember { mutableStateOf(false) }
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
@@ -353,6 +357,22 @@ fun AppGoodWordsApp(
         if (!sharedText.isNullOrBlank() && destination.editingItemId == null && navStack.last() != addRoute()) {
             pushRoute(addRoute())
         }
+    }
+
+    // 위젯의 적기로 들어오면 앱이 열리자마자 담는 칸이 떠야 합니다. 열어 놓고 다시 찾아
+    // 들어가게 하면 폰 홈에서 한 번에 담으려던 뜻이 없어집니다.
+    LaunchedEffect(captureIdeaRequest) {
+        if (captureIdeaRequest) {
+            capturingIdea = true
+            viewModel.consumeCaptureIdeaRequest()
+        }
+    }
+
+    if (capturingIdea) {
+        IdeaCaptureDialog(
+            onCapture = { title -> captureIdea(title) },
+            onDismiss = { capturingIdea = false }
+        )
     }
 
     LaunchedEffect(openItemRequest, allItems, currentTab) {
@@ -557,6 +577,7 @@ fun AppGoodWordsApp(
                             moodPractice = moodPractice,
                             todayMood = todayMood,
                             onCaptureIdea = { title -> captureIdea(title) },
+                            onSwipeToCapture = { capturingIdea = true },
                             onPickMood = { mood -> viewModel.saveTodayMood(mood) },
                             // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
                             onClearMood = todayMoodLog?.let { { viewModel.clearTodayMood() } },
