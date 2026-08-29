@@ -45,18 +45,25 @@ interface ContentItemDao {
      * 기준은 항목의 lastSurfacedAt이다. 노출 이력 테이블을 조인하면 사용자가 이력을 지웠을 때
      * 순환이 초기화되므로 항목에 직접 기록한다. showCount는 "확인한 횟수"라 쓸 수 없다.
      * 한 번도 노출되지 않은 항목은 COALESCE로 0이 되어 가장 먼저 뽑힌다.
+     *
+     * **번뜩인 것([ContentType.IDEA])은 빼고 고른다.** 알림과 위젯이 말하는 것은 "오늘의 글귀"인데,
+     * 내가 방금 적어 둔 생각이 거기 뜨면 남의 좋은 말인 척 돌아온다. 게다가 새로 담은 것은
+     * lastSurfacedAt이 없어 COALESCE로 0이 되므로 **가장 먼저** 뽑힌다.
      */
     @Query(
         "SELECT * FROM (" +
             "SELECT * FROM content_items " +
             "WHERE (:category = '' OR category = :category) " +
+            "AND type <> :excluded " +
             "ORDER BY COALESCE(lastSurfacedAt, 0) ASC, showCount ASC " +
             "LIMIT :poolSize" +
             ") ORDER BY RANDOM() LIMIT 1"
     )
     suspend fun pickLeastRecentlySurfaced(
         category: String,
-        poolSize: Int
+        poolSize: Int,
+        /** 떠올리지 않을 종류. 내가 적은 것은 "오늘의 글귀"가 아닙니다. */
+        excluded: ContentType = ContentType.IDEA
     ): ContentItemEntity?
 
     @Query("UPDATE content_items SET lastSurfacedAt = :surfacedAt WHERE id = :id")

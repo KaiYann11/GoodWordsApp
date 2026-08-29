@@ -83,7 +83,9 @@ import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
+import com.codex.appgoodwords.ui.screen.IdeaCaptureField
 import com.codex.appgoodwords.ui.screen.LibraryScreen
+import com.codex.appgoodwords.ui.screen.LibraryTab
 import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
@@ -297,6 +299,22 @@ fun AppGoodWordsApp(
     ) {
         viewModel.recordContentViewed(itemId, trigger)
         pushRoute(detailRoute(tab, itemId))
+    }
+
+    /**
+     * 번뜩인 것을 그 자리에서 담습니다.
+     *
+     * 담는 화면으로 데려가지 않습니다. 화면이 바뀌면 방금 떠오른 것을 붙들고 있어야 하는데,
+     * 그 사이에 날아가는 것이 번뜩인 것입니다.
+     */
+    fun captureIdea(title: String) {
+        coroutineScope.launch {
+            val result = viewModel.captureIdea(title)
+            snackbarHostState.showSnackbar(
+                if (result.isSuccess) "보관함 아이디어에 담았습니다."
+                else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+            )
+        }
     }
 
     fun openFreshAddForm() {
@@ -538,6 +556,7 @@ fun AppGoodWordsApp(
                             memories = onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,
+                            onCaptureIdea = { title -> captureIdea(title) },
                             onPickMood = { mood -> viewModel.saveTodayMood(mood) },
                             // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
                             onClearMood = todayMoodLog?.let { { viewModel.clearTodayMood() } },
@@ -553,7 +572,7 @@ fun AppGoodWordsApp(
                         AppTab.LIBRARY -> LibraryTabsScreen(
                             modifier = Modifier.padding(innerPadding),
                             // 검색에서 책을 골라 왔으면 독서 쪽을 열어 줍니다.
-                            requestedTab = if (destination.focusKind == SearchKind.BOOK) 1 else null,
+                            requestedTab = if (destination.focusKind == SearchKind.BOOK) LibraryTab.BOOK else null,
                             requestKey = destination.focusId,
                             bookContent = {
                                 BookScreen(
@@ -608,9 +627,30 @@ fun AppGoodWordsApp(
                                     }
                                 )
                             },
+                            // 번뜩인 것은 아이디어 탭에서 봅니다. 글귀 목록에 섞으면 둘 다 흐려집니다.
+                            ideaContent = {
+                                LibraryScreen(
+                                    items = remember(allItems) {
+                                        allItems.filter { it.type == ContentType.IDEA }
+                                    },
+                                    categories = categories,
+                                    confirmedTodayIds = confirmedTodayIds,
+                                    showTypeFilter = false,
+                                    header = {
+                                        IdeaCaptureField(onCapture = { title -> captureIdea(title) })
+                                    },
+                                    onToggleFavorite = { item ->
+                                        viewModel.toggleFavorite(item.id, !item.isFavorite)
+                                    },
+                                    onConfirmItem = { item -> toggleConfirmed(item, showMessage = false) },
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) },
+                                    onAddContent = { openFreshAddForm() },
+                                    onResetTodayConfirmed = { }
+                                )
+                            },
                             quoteContent = {
                         LibraryScreen(
-                            items = allItems,
+                            items = remember(allItems) { allItems.filter { it.type != ContentType.IDEA } },
                             categories = categories,
                             confirmedTodayIds = confirmedTodayIds,
                             shuffleSeed = shuffleSeed,

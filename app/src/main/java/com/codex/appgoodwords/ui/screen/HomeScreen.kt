@@ -82,7 +82,9 @@ fun HomeScreen(
     todayMood: DiaryMood? = null,
     onPickMood: (DiaryMood) -> Unit = {},
     /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
-    onClearMood: (() -> Unit)? = null
+    onClearMood: (() -> Unit)? = null,
+    /** 번뜩인 것을 한 줄로 담습니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
+    onCaptureIdea: (String) -> Unit = {}
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
@@ -103,6 +105,25 @@ fun HomeScreen(
         // 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
         item {
             TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
+        }
+
+        // 번뜩인 것은 언제 올지 모릅니다. 담으러 들어가는 사이에 날아가므로,
+        // 앱을 열면 바로 보이는 자리에 한 줄 칸을 둡니다.
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("번뜩인 것", style = MaterialTheme.typography.titleMedium)
+                    IdeaCaptureField(onCapture = onCaptureIdea)
+                    Text(
+                        text = "보관함 아이디어에 담깁니다. 익으면 루틴이나 할 일로 옮기면 됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         item {

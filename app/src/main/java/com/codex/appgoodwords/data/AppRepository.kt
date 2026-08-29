@@ -101,7 +101,8 @@ class AppRepository(
     private suspend fun pickCandidate(category: String): ContentItemEntity? {
         return contentItemDao.pickLeastRecentlySurfaced(
             category = category,
-            poolSize = SURFACE_POOL_SIZE
+            poolSize = SURFACE_POOL_SIZE,
+            excluded = ContentType.IDEA
         )
     }
 

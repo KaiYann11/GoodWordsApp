@@ -727,6 +727,18 @@ class MainViewModel(
     }
 
     /**
+     * 번뜩인 것을 한 줄로 담습니다.
+     *
+     * 담는 화면까지 들어가면 여섯 걸음이라 그 사이에 날아갑니다. 제목만 받고 나머지는
+     * 비워 둡니다. 길게 풀 것이 있으면 담긴 뒤에 눌러 들어가 이어 쓰면 됩니다.
+     */
+    suspend fun captureIdea(title: String): Result<Unit> = runCatching {
+        val trimmed = title.trim()
+        require(trimmed.isNotBlank()) { "적은 것이 없습니다." }
+        container.repository.saveContent(ContentDraft(type = ContentType.IDEA, title = trimmed))
+    }
+
+    /**
      * 글귀를 오늘부터 밟을 루틴으로 옮깁니다.
      *
      * 모아 두는 것과 실천하는 것이 한 앱에 있는데, 그 사이를 잇는 길이 AI 추천에만 있었습니다.

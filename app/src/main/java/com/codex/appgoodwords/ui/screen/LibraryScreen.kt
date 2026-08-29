@@ -74,7 +74,6 @@ private enum class ContentFilter(
 ) {
     ALL("전체"),
     QUOTE("글귀"),
-    IDEA("아이디어"),
     LINK("링크"),
     VIDEO("영상");
 
@@ -82,7 +81,6 @@ private enum class ContentFilter(
         return when (this) {
             ALL -> true
             QUOTE -> item.type == ContentType.QUOTE
-            IDEA -> item.type == ContentType.IDEA
             LINK -> item.type == ContentType.LINK
             VIDEO -> item.type == ContentType.VIDEO
         }
@@ -128,7 +126,15 @@ fun LibraryScreen(
     /** 섞는 씨앗. 앱을 켤 때마다 달라집니다([ContentShuffle]). */
     shuffleSeed: Long = 0L,
     /** 지금 바로 다시 섞습니다. */
-    onShuffle: () -> Unit = {}
+    onShuffle: () -> Unit = {},
+    /**
+     * 종류 고르개를 둘지.
+     *
+     * 아이디어 탭처럼 한 종류만 담기는 자리에서는 고르개가 늘 같은 답만 냅니다.
+     */
+    showTypeFilter: Boolean = true,
+    /** 목록 맨 위에 둘 것. 아이디어 탭의 한 줄 담기 칸이 여기로 옵니다. */
+    header: (@Composable () -> Unit)? = null
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selectedCategory by rememberSaveable { mutableStateOf("") }
@@ -195,6 +201,10 @@ fun LibraryScreen(
             contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // 아이디어 탭에서는 한 줄 담기 칸이 맨 위입니다. 번뜩인 것은 적으러 들어가는
+            // 사이에 날아가므로, 목록보다 담는 자리가 먼저 보여야 합니다.
+            header?.let { top -> item { top() } }
+
             item {
                 OutlinedTextField(
                     value = query,
@@ -264,12 +274,15 @@ fun LibraryScreen(
             if (showFilters) {
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(ContentFilter.entries) { filter ->
-                            FilterChip(
-                                selected = selectedFilter == filter.name,
-                                onClick = { selectedFilter = filter.name },
-                                label = { Text(filter.label) }
-                            )
+                        // 한 종류만 담기는 자리에서는 고르개가 늘 같은 답만 냅니다.
+                        if (showTypeFilter) {
+                            items(ContentFilter.entries) { filter ->
+                                FilterChip(
+                                    selected = selectedFilter == filter.name,
+                                    onClick = { selectedFilter = filter.name },
+                                    label = { Text(filter.label) }
+                                )
+                            }
                         }
                         item {
                             FilterChip(
