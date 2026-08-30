@@ -27,6 +27,35 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 
 에뮬레이터에서 호스트 PC 주소는 `http://10.0.2.2:8765`입니다.
 
+**실기기가 붙어 있을 때 `connectedDebugAndroidTest`를 돌리지 마세요.** AGP가 붙어 있는 기기
+**전부**를 대상으로 삼고, 끝난 뒤 앱을 지웁니다. 사용자 DB가 함께 사라집니다. 실기기가
+연결된 동안에는 에뮬레이터를 지정해 직접 부릅니다.
+
+```bash
+adb -s emulator-5554 install -r -t app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s emulator-5554 shell am instrument -w com.codex.appgoodwords.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+**묶음 사이에 `pm clear`를 넣습니다.** 백업 파일이 앱 안에 쌓여서, 이어 돌리면
+`SyncStatusRefreshTest`처럼 목록 개수를 보는 시험이 옛 파일 때문에 깨집니다.
+계측 전체를 한 번에 돌리면 에뮬레이터가 자주 죽으므로 종류별로 나눠 부르는 편이 낫습니다.
+
+**실기기에 설치하기 전에 DB를 먼저 빼 둡니다.** 마이그레이션이 틀리면
+`fallbackToDestructiveMigration()`이 조용히 전부 지웁니다.
+
+```bash
+adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-words.db > backup.db
+```
+
+설치 뒤에는 `user_version`과 레코드 수를 대조합니다. 통째로 지워졌으면 파일이 급격히
+작아지므로 크기만 봐도 대개 드러납니다. 기기에는 `sqlite3`가 없으니 뺀 파일을
+에뮬레이터로 밀어 넣고 거기서 셉니다. Git Bash는 `/data/...`를 윈도 경로로 바꾸므로
+`MSYS_NO_PATHCONV=1`을 붙여야 합니다.
+
+**스키마를 바꿨으면 서버도 새 코드로 다시 띄웁니다.** `schemaVersion`이 다르면 앱이
+동기화를 막고, 계측의 앱↔서버 시험이 통째로 깨집니다.
+
 ## 규칙
 
 **PowerShell로 소스 파일을 일괄 치환하지 마세요.** Windows PowerShell 5.1은 UTF-8 파일을 ANSI로 읽어서
@@ -165,3 +194,6 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 서명 정보(`keystore.properties`, `*.jks`)는 커밋하지 않습니다. `keystore.properties.example`을 참고하세요.
 
 동기화 규칙과 서버 운용은 `server/README.md`에 자세히 적혀 있습니다.
+
+어디까지 왔고 무엇이 남았는지는 `BACKLOG.md`에 있습니다. 미룬 것과 그 이유도 거기 적습니다.
+이 파일은 지켜야 할 규칙만 담습니다 — 어겼을 때 조용히 망가지는 것들입니다.
