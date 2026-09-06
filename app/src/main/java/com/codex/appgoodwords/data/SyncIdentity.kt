@@ -22,6 +22,7 @@ enum class SyncEntityType {
     ROUTINE,
     ROUTINE_CHECK,
     ROUTINE_MEMO,
+    CONTENT_MEMO,
     DIARY,
     TODO,
     BOOK,

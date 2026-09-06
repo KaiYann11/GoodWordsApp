@@ -21,6 +21,8 @@ data class AppDataSnapshot(
     val books: List<BookEntity> = emptyList(),
     val growthReports: List<GrowthReportEntity> = emptyList(),
     val moodLogs: List<MoodLogEntity> = emptyList(),
+    /** 글귀에 달아 둔 메모. 루틴 메모와 같은 자리이되 붙는 곳이 다릅니다. */
+    val contentMemos: List<ContentMemoEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -43,11 +45,12 @@ data class AppDataSnapshot(
      */
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
-            diaries.size + todos.size + books.size + growthReports.size + moodLogs.size
+            contentMemos.size + diaries.size + todos.size + books.size + growthReports.size +
+            moodLogs.size
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 16
+    const val schemaVersion: Int = 17
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -131,6 +134,13 @@ object AppDataJson {
                 snapshot.moodLogs.forEach { log -> put(log.toJson()) }
             }
         )
+        .put("contentMemoCount", snapshot.contentMemos.size)
+        .put(
+            "contentMemos",
+            JSONArray().apply {
+                snapshot.contentMemos.forEach { memo -> put(memo.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -142,6 +152,7 @@ object AppDataJson {
             routines = payload.optJSONArray("routines").toRoutines(),
             routineChecks = payload.optJSONArray("routineChecks").toRoutineChecks(),
             routineMemos = payload.optJSONArray("routineMemos").toRoutineMemos(),
+            contentMemos = payload.optJSONArray("contentMemos").toContentMemos(),
             settings = settings,
             settingsUpdatedAt = payload.optLong("settingsUpdatedAt", 0L),
             deletions = payload.optJSONArray("deletions").toDeletions(),
@@ -460,6 +471,7 @@ object AppDataJson {
         .put("note", note)
         .put("category", category)
         .put("orderIndex", orderIndex)
+        .put("sourceContentSyncId", sourceContentSyncId)
         .put("reminderEnabled", reminderEnabled)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
@@ -480,6 +492,17 @@ object AppDataJson {
         .put("routineId", routineId)
         .put("routineSyncId", routineSyncId)
         .put("routineTitle", routineTitle)
+        .put("body", body)
+        .put("createdAt", createdAt)
+        .put("createdAtText", formatTimestamp(createdAt))
+
+    private fun ContentMemoEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("contentItemId", contentItemId)
+        .put("contentItemSyncId", contentItemSyncId)
+        .put("contentTitle", contentTitle)
         .put("body", body)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
@@ -578,6 +601,8 @@ object AppDataJson {
                         category = routine.optString("category"),
                         // 순서를 모르던 시절의 백업에는 없다. 0으로 두면 만든 순서대로 줄을 선다.
                         orderIndex = routine.optInt("orderIndex", 0).coerceAtLeast(0),
+                        // 글귀에서 뽑기 전의 백업에는 없다. 없으면 직접 만든 루틴으로 본다.
+                        sourceContentSyncId = routine.optString("sourceContentSyncId").trim(),
                         reminderEnabled = routine.optBoolean("reminderEnabled", true),
                         createdAt = routine.optLong("createdAt", System.currentTimeMillis())
                     )
@@ -626,6 +651,35 @@ object AppDataJson {
                         routineId = routineId,
                         routineSyncId = routineSyncId,
                         routineTitle = memo.optString("routineTitle"),
+                        body = body,
+                        createdAt = memo.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
+
+    private fun JSONArray?.toContentMemos(): List<ContentMemoEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val memo = optJSONObject(index) ?: continue
+                val contentItemId = memo.optLong("contentItemId", 0L)
+                val contentItemSyncId = memo.optString("contentItemSyncId").trim()
+                val body = memo.optString("body").trim()
+                // 어느 쪽으로도 글귀를 가리키지 못하는 메모는 화면에 붙을 곳이 없다.
+                if ((contentItemId <= 0L && contentItemSyncId.isBlank()) || body.isBlank()) continue
+
+                add(
+                    ContentMemoEntity(
+                        id = memo.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(memo.optString("syncId")),
+                        updatedAt = memo.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: memo.optLong("createdAt", 0L),
+                        contentItemId = contentItemId,
+                        contentItemSyncId = contentItemSyncId,
+                        contentTitle = memo.optString("contentTitle"),
                         body = body,
                         createdAt = memo.optLong("createdAt", System.currentTimeMillis())
                     )

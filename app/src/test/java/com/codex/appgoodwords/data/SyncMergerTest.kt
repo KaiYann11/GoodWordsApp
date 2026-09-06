@@ -133,6 +133,26 @@ class SyncMergerTest {
     }
 
     @Test
+    fun contentMemosFollowTheSameRulesAsRoutineMemos() {
+        val local = snapshot(contentMemos = listOf(contentMemo("cm1", body = "로컬 메모", updatedAt = 100)))
+        val remote = snapshot(contentMemos = listOf(contentMemo("cm1", body = "서버 메모", updatedAt = 400)))
+
+        val merged = SyncMerger.merge(local, remote)
+
+        assertEquals("서버 메모", merged.contentMemos.single().body)
+    }
+
+    @Test
+    fun aDeletedContentMemoDoesNotComeBack() {
+        val local = snapshot(deletions = listOf(deletion("cm1", deletedAt = 500)))
+        val remote = snapshot(contentMemos = listOf(contentMemo("cm1", body = "서버에 남은 메모", updatedAt = 100)))
+
+        val merged = SyncMerger.merge(local, remote)
+
+        assertTrue(merged.contentMemos.isEmpty())
+    }
+
+    @Test
     fun settingsFollowTheMoreRecentlyTouchedSide() {
         val local = snapshot(
             settings = ReminderSettings(intervalMinutes = 60),
@@ -182,6 +202,7 @@ class SyncMergerTest {
         routines: List<RoutineEntity> = emptyList(),
         routineChecks: List<RoutineCheckEntity> = emptyList(),
         routineMemos: List<RoutineMemoEntity> = emptyList(),
+        contentMemos: List<ContentMemoEntity> = emptyList(),
         settings: ReminderSettings = ReminderSettings(),
         settingsUpdatedAt: Long = 0L,
         deletions: List<DeletionEntity> = emptyList()
@@ -191,6 +212,7 @@ class SyncMergerTest {
         routines = routines,
         routineChecks = routineChecks,
         routineMemos = routineMemos,
+        contentMemos = contentMemos,
         settings = settings,
         settingsUpdatedAt = settingsUpdatedAt,
         deletions = deletions
@@ -232,6 +254,15 @@ class SyncMergerTest {
         updatedAt = updatedAt,
         routineId = 1L,
         routineTitle = "루틴",
+        body = body
+    )
+
+    private fun contentMemo(syncId: String, body: String = "메모", updatedAt: Long = 0L) = ContentMemoEntity(
+        syncId = syncId,
+        updatedAt = updatedAt,
+        contentItemId = 1L,
+        contentItemSyncId = "a",
+        contentTitle = "제목",
         body = body
     )
 

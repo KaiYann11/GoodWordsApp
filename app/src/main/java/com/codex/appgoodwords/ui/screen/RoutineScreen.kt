@@ -739,6 +739,14 @@ private fun RoutineCard(
                             color = MaterialTheme.colorScheme.secondary
                         )
                     }
+                    if (routine.sourceContentSyncId.isNotBlank()) {
+                        // 어디서 비롯됐는지 적어 둡니다. 위의 메모가 그 글귀 본문입니다.
+                        Text(
+                            text = "글귀에서 뽑음",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     if (latestMemo != null) {
                         Text(
                             text = "최근 메모: ${latestMemo.body}",

@@ -26,7 +26,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,7 +54,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.SubcomposeAsyncImage
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.ContentMemoEntity
 import com.codex.appgoodwords.data.ContentType
+import com.codex.appgoodwords.data.RoutineEntity
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -63,6 +70,12 @@ fun DetailScreen(
     onConfirm: (ContentItemEntity) -> Unit,
     onToggleFavorite: (ContentItemEntity) -> Unit,
     modifier: Modifier = Modifier,
+    /** 이 글귀에 달아 둔 메모. 최근 것이 위로 옵니다. */
+    memos: List<ContentMemoEntity> = emptyList(),
+    onSaveMemo: (String) -> Unit = {},
+    onDeleteMemo: (ContentMemoEntity) -> Unit = {},
+    /** 이 글귀에서 뽑아낸 루틴. 두 번 뽑지 않도록 보여 줍니다. */
+    routinesFromItem: List<RoutineEntity> = emptyList(),
     /** 이 글귀를 오늘부터 밟을 루틴으로 옮깁니다. */
     onMakeRoutine: (String) -> Unit = {},
     /** 이 글귀를 할 일 하나로 옮깁니다. */
@@ -71,6 +84,8 @@ fun DetailScreen(
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var practiceKind by remember { mutableStateOf<PracticeKind?>(null) }
+    var memoText by rememberSaveable(item.id) { mutableStateOf("") }
+    val sortedMemos = remember(memos) { memos.sortedByDescending { it.createdAt } }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -96,7 +111,9 @@ fun DetailScreen(
     }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag(detailListTag),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -356,6 +373,47 @@ fun DetailScreen(
         }
 
         item {
+            // 글귀 본문은 남이 쓴 말이라 고칠 수 없습니다. 그런데 읽을 때마다 드는 생각은
+            // 다릅니다. 루틴처럼 옆에 붙여 두면 언제 무슨 생각을 했는지가 함께 남습니다.
+            SectionCard(title = "메모 ${memos.size}") {
+                OutlinedTextField(
+                    value = memoText,
+                    onValueChange = { memoText = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(detailMemoFieldTag),
+                    label = { Text("이 글귀에 남길 생각") },
+                    minLines = 2
+                )
+                Button(
+                    onClick = {
+                        onSaveMemo(memoText)
+                        memoText = ""
+                    },
+                    enabled = memoText.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(detailSaveMemoTag)
+                ) {
+                    Text("메모 저장")
+                }
+
+                if (sortedMemos.isEmpty()) {
+                    Text(
+                        text = "아직 메모가 없습니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    // 바깥이 이미 LazyColumn이라 여기서 또 스크롤을 두면 서로 잡아먹습니다.
+                    sortedMemos.forEach { memo ->
+                        ContentMemoRow(memo = memo, onDelete = { onDeleteMemo(memo) })
+                    }
+                }
+            }
+        }
+
+        item {
             // 읽고 마는 대신 실천으로 옮기는 자리입니다. 모아 두는 것과 실천하는 것이 한 앱에
             // 있는데 그 사이를 잇는 길이 AI 추천에만 있었습니다.
             SectionCard(title = "실천으로 옮기기") {
@@ -364,6 +422,33 @@ fun DetailScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (routinesFromItem.isNotEmpty()) {
+                    // 이미 뽑아 둔 것을 알려 주지 않으면 같은 글귀로 같은 루틴을 또 만듭니다.
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "이 글귀에서 뽑은 루틴",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            routinesFromItem.forEach { routine ->
+                                Text(
+                                    text = "· ${routine.title}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -408,6 +493,53 @@ fun DetailScreen(
 internal const val detailMakeRoutineTag = "detail_make_routine"
 internal const val detailMakeTodoTag = "detail_make_todo"
 internal const val practiceTitleFieldTag = "practice_title_field"
+internal const val detailMemoFieldTag = "detail_memo_field"
+internal const val detailSaveMemoTag = "detail_save_memo"
+internal const val detailMemoBodyTag = "detail_memo_body"
+
+/** 화면이 LazyColumn이라, 시험이 아직 안 그려진 자리로 굴러가려면 목록을 집어야 합니다. */
+internal const val detailListTag = "detail_list"
+
+@Composable
+private fun ContentMemoRow(
+    memo: ContentMemoEntity,
+    onDelete: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = memo.body,
+                    modifier = Modifier.testTag(detailMemoBodyTag),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = formatDateTime(memo.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = "메모 삭제"
+                )
+            }
+        }
+    }
+}
 
 private enum class PracticeKind(val label: String) {
     ROUTINE("루틴"),
@@ -445,7 +577,7 @@ private fun PracticeDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = if (kind == PracticeKind.ROUTINE) {
-                        "하루에 밟는 차례 맨 뒤에 붙습니다."
+                        "하루에 밟는 차례 맨 뒤에 붙습니다. 글귀 본문은 루틴 메모로 함께 옮깁니다."
                     } else {
                         "오늘 할 일로 담습니다. 날짜는 할 일 화면에서 바꿀 수 있습니다."
                     },

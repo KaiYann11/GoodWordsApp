@@ -127,6 +127,35 @@ class ReminderScheduler(
         )
     }
 
+    /**
+     * 오래 돌아보지 않았을 때 알리는 예약.
+     *
+     * [syncGrowthFeedback]과 따로 겁니다. 그쪽은 주기를 켜 둔 사람에게만 돌지만, 이쪽은
+     * **자동 실행을 꺼 둔 사람에게 더 필요합니다.** 손으로만 돌리는 사람이 잊는 것이니까요.
+     * 인터넷도 필요 없습니다. 아무것도 만들지 않고 알리기만 하기 때문입니다.
+     */
+    fun syncGrowthNudge(settings: AiFeedbackSettings) {
+        val workManager = WorkManager.getInstance(context)
+
+        if (!settings.nudgeEnabled) {
+            workManager.cancelUniqueWork(growthNudgeWorkName)
+            return
+        }
+
+        val request = PeriodicWorkRequestBuilder<GrowthNudgeWorker>(24, TimeUnit.HOURS)
+            .setInitialDelay(
+                calculateDailyDelay(hour = settings.hour, minute = settings.minute).toMillis(),
+                TimeUnit.MILLISECONDS
+            )
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            growthNudgeWorkName,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request
+        )
+    }
+
     // 계산은 ReminderSchedule에 있습니다. 시각을 인자로 받아야 테스트할 수 있어서입니다.
     private fun calculateRepeatingDelay(settings: ReminderSettings): Duration =
         ReminderSchedule.nextReminderDelay(settings, LocalDateTime.now())
@@ -141,5 +170,6 @@ class ReminderScheduler(
         const val summaryWorkName = "good_words_daily_summary"
         const val autoSyncWorkName = "good_words_auto_sync"
         const val growthFeedbackWorkName = "good_words_growth_feedback"
+        const val growthNudgeWorkName = "good_words_growth_nudge"
     }
 }

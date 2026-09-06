@@ -79,7 +79,21 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
+        <!--
+            공유에서 이 앱을 고르면 화면 없이 바로 담습니다.
+            보이는 화면이 없어 NoDisplay 테마를 쓰고, 최근 목록에도 남기지 않습니다.
+            담는 화면을 다시 거치게 하려면 이 거르개를 MainActivity로 되돌리면 됩니다.
+        -->
+        <activity
+            android:name=".ShareTargetActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/share_target_label"
+            android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
 

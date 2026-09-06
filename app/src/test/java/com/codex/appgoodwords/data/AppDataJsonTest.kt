@@ -22,6 +22,7 @@ class AppDataJsonTest {
         assertEquals(original.routines, restored.routines)
         assertEquals(original.routineChecks, restored.routineChecks)
         assertEquals(original.routineMemos, restored.routineMemos)
+        assertEquals(original.contentMemos, restored.contentMemos)
         assertEquals(original.settings, restored.settings)
     }
 
@@ -90,6 +91,7 @@ class AppDataJsonTest {
         assertEquals("routine-sync-1", restored.routines.single().syncId)
         assertEquals("check-sync-1", restored.routineChecks.single().syncId)
         assertEquals("memo-sync-1", restored.routineMemos.single().syncId)
+        assertEquals("content-memo-sync-1", restored.contentMemos.single().syncId)
         assertEquals(snapshot.settingsUpdatedAt, restored.settingsUpdatedAt)
         assertEquals(snapshot.deletions, restored.deletions)
     }
@@ -136,6 +138,23 @@ class AppDataJsonTest {
         assertEquals(snapshot.routines.size, payload.getInt("routineCount"))
         assertEquals(snapshot.routineChecks.size, payload.getInt("routineCheckCount"))
         assertEquals(snapshot.routineMemos.size, payload.getInt("routineMemoCount"))
+        assertEquals(snapshot.contentMemos.size, payload.getInt("contentMemoCount"))
+    }
+
+    @Test
+    fun fromJsonText_dropsContentMemoThatPointsAtNothing() {
+        // 어느 쪽으로도 글귀를 가리키지 못하면 화면에 붙을 곳이 없다.
+        val json = """
+            {"contentMemos": [
+              {"id": 1, "contentItemId": 3, "contentItemSyncId": "i", "body": "메모"},
+              {"id": 2, "contentItemId": 0, "contentItemSyncId": "", "body": "떠도는 메모"},
+              {"id": 3, "contentItemId": 3, "contentItemSyncId": "i", "body": "   "}
+            ]}
+        """.trimIndent()
+
+        val restored = AppDataJson.fromJsonText(json)
+
+        assertEquals(listOf(1L), restored.contentMemos.map { it.id })
     }
 
     @Test
@@ -263,8 +282,9 @@ class AppDataJsonTest {
                 title = "아침 스트레칭",
                 note = "10분",
                 category = "건강",
-                // 기본값을 쓰면 차례가 빠져도 왕복 시험이 통과해 버린다.
+                // 기본값을 쓰면 차례가 빠져도 왕복 시험이 통과해 버린다. 출처도 같은 이유로 채운다.
                 orderIndex = 2,
+                sourceContentSyncId = "item-sync-1",
                 reminderEnabled = false,
                 createdAt = 1_700_000_700_000L
             )
@@ -289,6 +309,18 @@ class AppDataJsonTest {
                 routineTitle = "아침 스트레칭",
                 body = "허리가 한결 편해졌다.",
                 createdAt = 1_700_000_900_000L
+            )
+        ),
+        contentMemos = listOf(
+            ContentMemoEntity(
+                id = 61L,
+                syncId = "content-memo-sync-1",
+                updatedAt = 1_700_001_050_000L,
+                contentItemId = 11L,
+                contentItemSyncId = "item-sync-1",
+                contentTitle = "기록하는 습관",
+                body = "세 번째 읽으니 다르게 들린다.",
+                createdAt = 1_700_001_000_000L
             )
         ),
         settings = ReminderSettings(

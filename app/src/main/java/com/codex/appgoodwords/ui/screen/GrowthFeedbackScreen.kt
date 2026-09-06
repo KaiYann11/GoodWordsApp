@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.GrowthCadence
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.PendingGrowthPrompt
 import com.codex.appgoodwords.data.ReportPeriod
@@ -55,6 +57,45 @@ internal const val growthTidyButtonTag = "growth_tidy_button"
 
 /** 목록 거르개. 쌓인 것을 단위로 좁혀 봅니다. */
 internal fun growthListFilterTag(name: String): String = "growth_list_filter_" + name.ifBlank { "all" }
+
+internal const val growthLastReviewedTag = "growth_last_reviewed"
+
+/**
+ * 마지막으로 돌아본 것이 언제인지 한 줄로.
+ *
+ * 뜸해지면 눈에 띄게 적습니다. 알림은 하루 한 번뿐이고 놓치면 그만이라, 이 화면을 열었을 때는
+ * 늘 보여야 합니다. 며칠인지는 [GrowthCadence]가 셉니다 — 화면에서 따로 셈하면
+ * 알림과 화면이 다른 날수를 말하게 됩니다.
+ */
+@Composable
+private fun LastReviewedLine(reports: List<GrowthReportEntity>) {
+    val now = System.currentTimeMillis()
+    val days = remember(reports) { GrowthCadence.daysSince(reports, now) }
+    val lastAt = remember(reports) { GrowthCadence.lastReviewedAt(reports) }
+    val overdue = days != null && days >= GrowthCadence.OVERDUE_DAYS
+
+    val text = when {
+        days == null -> "아직 돌아본 적이 없습니다."
+        days == 0L -> "마지막 돌아보기: 오늘"
+        else -> "마지막 돌아보기: ${days}일 전 · ${formatDate(lastAt!!)}"
+    }
+
+    Text(
+        text = if (overdue) "$text — 한번 살펴볼 때가 됐습니다" else text,
+        modifier = Modifier.testTag(growthLastReviewedTag),
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = if (overdue) FontWeight.Bold else FontWeight.Normal,
+        color = if (overdue) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    )
+}
+
+private fun formatDate(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
+    .atZone(ZoneId.systemDefault())
+    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
 
 /**
  * 목록에서 볼 단위.
@@ -192,6 +233,10 @@ fun GrowthFeedbackScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    // 언제 돌아봤는지가 설정 화면 깊숙이에만 있어서, 정작 이 화면에서는
+                    // 목록 날짜를 뒤져야 알 수 있었습니다.
+                    LastReviewedLine(reports = reports)
 
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(ReportPeriod.entries.filter { it != ReportPeriod.MANUAL }) { choice ->

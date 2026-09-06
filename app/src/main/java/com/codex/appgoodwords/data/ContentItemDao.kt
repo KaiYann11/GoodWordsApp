@@ -23,6 +23,10 @@ interface ContentItemDao {
     @Query("SELECT * FROM content_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): ContentItemEntity?
 
+    /** 같은 주소를 이미 담아 뒀는지. 공유로 들어온 것을 두 번 담지 않으려는 것입니다. */
+    @Query("SELECT * FROM content_items WHERE sourceUrl = :sourceUrl LIMIT 1")
+    suspend fun findBySourceUrl(sourceUrl: String): ContentItemEntity?
+
     @Query("DELETE FROM content_items WHERE id = :id")
     suspend fun deleteById(id: Long)
 

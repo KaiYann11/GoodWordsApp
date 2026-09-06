@@ -18,6 +18,8 @@ object SnapshotReindexer {
         val routineSyncIdByOldId = snapshot.routines.oldIdToSyncId({ it.id }, { it.syncId })
 
         val items = snapshot.items.mapIndexed { index, item -> item.copy(id = index + 1L) }
+        // 루틴이 뽑아낸 글귀를 가리키지만 숫자 id가 아니라 sourceContentSyncId로 가리켜서
+        // 번호가 바뀌어도 그대로다.
         val routines = snapshot.routines.mapIndexed { index, routine -> routine.copy(id = index + 1L) }
         val itemIdBySyncId = items.associate { it.syncId to it.id }
         val routineIdBySyncId = routines.associate { it.syncId to it.id }
@@ -51,6 +53,15 @@ object SnapshotReindexer {
                         .ifBlank { routineSyncIdByOldId[memo.routineId].orEmpty() }
                     val routineId = routineIdBySyncId[parentSyncId] ?: return@mapNotNull null
                     memo.copy(routineSyncId = parentSyncId, routineId = routineId)
+                }
+                .mapIndexed { index, memo -> memo.copy(id = index + 1L) },
+            // 글귀 메모도 같습니다. 붙을 글귀가 없으면 어디에도 그릴 수 없습니다.
+            contentMemos = snapshot.contentMemos
+                .mapNotNull { memo ->
+                    val parentSyncId = memo.contentItemSyncId
+                        .ifBlank { itemSyncIdByOldId[memo.contentItemId].orEmpty() }
+                    val itemId = itemIdBySyncId[parentSyncId] ?: return@mapNotNull null
+                    memo.copy(contentItemSyncId = parentSyncId, contentItemId = itemId)
                 }
                 .mapIndexed { index, memo -> memo.copy(id = index + 1L) },
             // 일기·할 일·책은 딸린 자식이 없어 번호만 다시 매기면 된다.

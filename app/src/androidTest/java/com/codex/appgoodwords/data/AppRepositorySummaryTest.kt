@@ -29,6 +29,7 @@ class AppRepositorySummaryTest {
             routineDao = database.routineDao(),
             routineCheckDao = database.routineCheckDao(),
             routineMemoDao = database.routineMemoDao(),
+            contentMemoDao = database.contentMemoDao(),
             linkMetadataFetcher = LinkMetadataFetcher()
         )
     }

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.GrowthCadence
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.ServerSyncSettings
@@ -1048,6 +1049,22 @@ private fun AiFeedbackSection(
                     "일기 본문이 그대로 AI에 전달됩니다. 피드백은 구체적이지만, 가장 사적인 글이 밖으로 나갑니다."
                 } else {
                     "일기는 날짜·기분·날씨·글자 수만 보냅니다. 본문은 이 기기를 떠나지 않습니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            SettingSwitchRow(
+                title = "오래 안 하면 알리기",
+                checked = settings.nudgeEnabled,
+                onCheckedChange = { onChanged(settings.copy(nudgeEnabled = it)) }
+            )
+            Text(
+                text = if (settings.nudgeEnabled) {
+                    "${GrowthCadence.OVERDUE_DAYS}일 넘게 돌아보지 않으면 알립니다. " +
+                        "알리기만 하고 아무것도 만들지 않아 값이 들지 않습니다."
+                } else {
+                    "뜸해져도 알리지 않습니다. 마지막으로 돌아본 날은 돌아보기 화면에 늘 적혀 있습니다."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

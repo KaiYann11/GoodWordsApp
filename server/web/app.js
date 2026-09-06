@@ -133,6 +133,8 @@ app.addEventListener("submit", async (event) => {
       await submitRoutine(form);
     } else if (form.dataset.form === "memo") {
       await submitMemo(form);
+    } else if (form.dataset.form === "contentMemo") {
+      await submitContentMemo(form);
     } else if (form.dataset.form === "diary") {
       await submitDiary(form);
     } else if (form.dataset.form === "todo") {
@@ -195,6 +197,14 @@ app.addEventListener("click", async (event) => {
       await loadSnapshot(false);
     } else if (action === "delete-memo") {
       await api(`/api/routine-memos/${id}`, { method: "DELETE" });
+      await loadSnapshot(false);
+    } else if (action === "delete-content-memo") {
+      await api(`/api/content-memos/${id}`, { method: "DELETE" });
+      await loadSnapshot(false);
+    } else if (action === "make-routine") {
+      // 이름과 메모는 서버가 글귀에서 뽑습니다. 앱에서 뽑은 것과 같은 모양이 되게 하려는 것입니다.
+      const routine = await api(`/api/content/${id}/routines`, { method: "POST", body: {} });
+      showToast(`루틴 "${routine.title}"을 만들었습니다.`);
       await loadSnapshot(false);
     } else if (action === "edit-diary") {
       state.editingDiaryId = id;
@@ -320,6 +330,7 @@ function emptySnapshot() {
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    contentMemos: [],
     diaries: [],
     todos: [],
     books: [],
@@ -1081,7 +1092,8 @@ function renderSettings() {
           ${stat("항목", state.snapshot.items.length)}
           ${stat("루틴", state.snapshot.routines.length)}
           ${stat("체크", state.snapshot.routineChecks.length)}
-          ${stat("메모", state.snapshot.routineMemos.length)}
+          ${stat("루틴 메모", state.snapshot.routineMemos.length)}
+          ${stat("글귀 메모", state.snapshot.contentMemos.length)}
           ${stat("일기", state.snapshot.diaries.length)}
           ${stat("할 일", state.snapshot.todos.length)}
           ${stat("책", state.snapshot.books.length)}
@@ -1174,6 +1186,18 @@ async function submitMemo(form) {
   await loadSnapshot(false);
 }
 
+/** 글귀에 다는 메모. 루틴 메모와 달리 체크를 남기지 않습니다. */
+async function submitContentMemo(form) {
+  const data = new FormData(form);
+  const itemId = Number(data.get("contentItemId"));
+  await api(`/api/content/${itemId}/memos`, {
+    method: "POST",
+    body: { body: data.get("body") },
+  });
+  showToast("메모를 저장했습니다.");
+  await loadSnapshot(false);
+}
+
 async function submitDiary(form) {
   const data = new FormData(form);
   const kind = data.get("kind") || "FREE";
@@ -1255,6 +1279,10 @@ async function submitBookQuote(form) {
 
 function contentCard(item) {
   const confirmed = todaySummary().confirmedIds.has(item.id);
+  // 최근 것이 위로. 앱 상세 화면과 같은 줄로 보여야 합니다.
+  const memos = state.snapshot.contentMemos
+    .filter((memo) => memo.contentItemId === item.id)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   return `
     <article class="item">
       <div class="itemHeader">
@@ -1274,10 +1302,34 @@ function contentCard(item) {
       ${item.tags?.length ? `<div class="chips">${item.tags.map((tag) => `<span class="chip">#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
       <div class="actions">
         <button type="button" data-action="confirm" data-id="${item.id}">${confirmed ? "확인 취소" : "오늘 확인"}</button>
+        <button type="button" data-action="make-routine" data-id="${item.id}">루틴으로</button>
         <button type="button" data-action="edit-content" data-id="${item.id}">수정</button>
         <button class="danger" type="button" data-action="delete-content" data-id="${item.id}">삭제</button>
       </div>
+      <form class="formGrid" data-form="contentMemo">
+        <input type="hidden" name="contentItemId" value="${item.id}">
+        <div class="field full">
+          <label for="contentMemo-${item.id}">메모</label>
+          <textarea id="contentMemo-${item.id}" name="body" required></textarea>
+        </div>
+        <div class="actions field full">
+          <button type="submit">메모 저장</button>
+        </div>
+      </form>
+      ${memos.length ? `<div class="itemList">${memos.slice(0, 4).map(contentMemoCard).join("")}</div>` : ""}
     </article>
+  `;
+}
+
+function contentMemoCard(memo) {
+  return `
+    <div class="item">
+      <p>${escapeHtml(memo.body)}</p>
+      <div class="actions">
+        <span class="chip">${formatDate(memo.createdAt)}</span>
+        <button class="danger" type="button" data-action="delete-content-memo" data-id="${memo.id}">삭제</button>
+      </div>
+    </div>
   `;
 }
 
@@ -1292,6 +1344,7 @@ function routineCard(routine, checksByRoutine, memosByRoutine, index, total) {
           <h3>${index + 1}. ${escapeHtml(routine.title)}</h3>
           <div class="meta">
             ${routine.category ? `<span class="chip">${escapeHtml(routine.category)}</span>` : ""}
+            ${routine.sourceContentSyncId ? `<span class="chip">글귀에서 뽑음</span>` : ""}
             <span class="chip">오늘 ${todayCount}회</span>
             <span class="chip">전체 ${checks.length}회</span>
           </div>

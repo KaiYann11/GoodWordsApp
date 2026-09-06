@@ -50,6 +50,7 @@ function emptySnapshot(overrides = {}) {
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    contentMemos: [],
     deletions: [],
     diaries: [],
     todos: [],
@@ -2284,5 +2285,261 @@ describe("날짜 없는 할 일", () => {
     const stored = await (await api("/api/snapshot")).json();
 
     assert.equal(stored.todos.length, 0);
+  });
+});
+
+describe("글귀 메모와 루틴 뽑기", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+  }
+
+  async function createQuote(title = "오늘의 기준", body = "행동은 감정을 기다리지 않는다.") {
+    return (await api("/api/content", { method: "POST", body: { type: "QUOTE", title, body } })).json();
+  }
+
+  function quote(syncId, title, body, updatedAt = 1000) {
+    return { syncId, updatedAt, type: "QUOTE", title, body, createdAt: updatedAt };
+  }
+
+  it("글귀에 메모를 달면 부모를 syncId로 가리킨다", async () => {
+    await resetServer();
+    const item = await createQuote();
+
+    const response = await api(`/api/content/${item.id}/memos`, {
+      method: "POST",
+      body: { body: "세 번째 읽으니 다르게 들린다." },
+    });
+    const memo = await response.json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(response.status, 201);
+    assert.equal(memo.body, "세 번째 읽으니 다르게 들린다.");
+    assert.equal(stored.contentMemos.length, 1);
+    assert.equal(stored.contentMemos[0].contentItemId, item.id);
+    assert.equal(stored.contentMemos[0].contentItemSyncId, item.syncId);
+    // 루틴 메모와 달리 실천으로 세지 않는다. 여기 적는 것은 생각이다.
+    assert.equal(stored.routineChecks.length, 0);
+  });
+
+  it("빈 메모는 저장하지 않는다", async () => {
+    await resetServer();
+    const item = await createQuote();
+
+    const response = await api(`/api/content/${item.id}/memos`, { method: "POST", body: { body: "   " } });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(response.status, 400);
+    assert.equal(stored.contentMemos.length, 0);
+  });
+
+  it("메모를 지우면 표식을 남겨 다음 병합에 되살아나지 않는다", async () => {
+    await resetServer();
+    const item = await createQuote();
+    const memo = await (
+      await api(`/api/content/${item.id}/memos`, { method: "POST", body: { body: "지울 메모" } })
+    ).json();
+
+    const deleted = await api(`/api/content-memos/${memo.id}`, { method: "DELETE" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(deleted.status, 200);
+    assert.equal(stored.contentMemos.length, 0);
+    assert.ok(stored.deletions.some((entry) => entry.entityType === "CONTENT_MEMO"));
+
+    // 옛 사본을 들고 있던 기기가 붙어도 되살아나면 안 된다.
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          contentMemos: [
+            {
+              id: 1,
+              syncId: memo.syncId,
+              updatedAt: memo.updatedAt,
+              contentItemId: item.id,
+              contentItemSyncId: item.syncId,
+              contentTitle: item.title,
+              body: "지울 메모",
+              createdAt: memo.createdAt,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.contentMemos.length, 0);
+  });
+
+  it("글귀를 지우면 달아 둔 메모도 표식과 함께 사라진다", async () => {
+    await resetServer();
+    const item = await createQuote();
+    await api(`/api/content/${item.id}/memos`, { method: "POST", body: { body: "첫 메모" } });
+    await api(`/api/content/${item.id}/memos`, { method: "POST", body: { body: "둘째 메모" } });
+
+    await api(`/api/content/${item.id}`, { method: "DELETE" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.contentMemos.length, 0, "주인 없는 메모가 남았습니다.");
+    assert.equal(stored.deletions.filter((entry) => entry.entityType === "CONTENT_MEMO").length, 2);
+  });
+
+  it("업로드가 서버의 글귀 메모까지 갈아엎는다", async () => {
+    // 여기서 빠뜨리면 그 종류만 서버에 남아, 사용자가 지운 메모가 다음 병합에 되살아난다.
+    await resetServer();
+    const item = await createQuote();
+    await api(`/api/content/${item.id}/memos`, { method: "POST", body: { body: "지워질 메모" } });
+
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.contentMemos.length, 0);
+  });
+
+  it("붙을 글귀가 없는 메모는 버린다", async () => {
+    await resetServer();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          contentMemos: [
+            {
+              id: 1,
+              syncId: "떠도는-메모",
+              updatedAt: 1000,
+              contentItemId: 7,
+              contentItemSyncId: "사라진-글귀",
+              contentTitle: "제목",
+              body: "메모",
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.contentMemos.length, 0);
+  });
+
+  it("사라진 쪽을 가리키던 메모는 남은 글귀로 옮겨 붙는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("server-1", "제목", "본문", 2000)] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("app-1", "제목", "본문", 1000)],
+          contentMemos: [
+            {
+              id: 1,
+              syncId: "memo-1",
+              updatedAt: 1000,
+              contentItemId: 1,
+              contentItemSyncId: "app-1",
+              contentTitle: "제목",
+              body: "메모",
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    const survivor = merged.items.find((entry) => entry.syncId === "server-1");
+    assert.ok(survivor, "최근에 손댄 쪽이 남아야 합니다.");
+    assert.equal(merged.contentMemos[0].contentItemSyncId, "server-1");
+    assert.equal(merged.contentMemos[0].contentItemId, survivor.id);
+  });
+
+  it("글귀에서 루틴을 뽑으면 출처와 본문이 함께 남는다", async () => {
+    await resetServer();
+    const item = await createQuote();
+
+    const response = await api(`/api/content/${item.id}/routines`, { method: "POST", body: {} });
+    const routine = await response.json();
+
+    assert.equal(response.status, 201);
+    // 이름은 글귀에서 뽑고, 본문은 루틴 메모로 옮긴다. 앱의 extractRoutineFromContent와 같아야 한다.
+    assert.equal(routine.title, "오늘의 기준");
+    assert.equal(routine.note, "행동은 감정을 기다리지 않는다.");
+    assert.equal(routine.category, "글귀에서");
+    assert.equal(routine.sourceContentSyncId, item.syncId);
+  });
+
+  it("뽑을 때 이름을 직접 줄 수 있다", async () => {
+    await resetServer();
+    const item = await createQuote();
+
+    const routine = await (
+      await api(`/api/content/${item.id}/routines`, {
+        method: "POST",
+        body: { title: "아침에 한 가지 먼저 하기" },
+      })
+    ).json();
+
+    assert.equal(routine.title, "아침에 한 가지 먼저 하기");
+    assert.equal(routine.sourceContentSyncId, item.syncId);
+  });
+
+  it("뽑아낸 루틴은 하루의 맨 뒤에 붙는다", async () => {
+    await resetServer();
+    await api("/api/routines", { method: "POST", body: { title: "이미 밟고 있는 것" } });
+    const item = await createQuote();
+
+    await api(`/api/content/${item.id}/routines`, { method: "POST", body: {} });
+    const listed = await (await api("/api/routines")).json();
+
+    assert.deepEqual(listed.routines.map((routine) => routine.title), ["이미 밟고 있는 것", "오늘의 기준"]);
+  });
+
+  it("글귀를 지워도 뽑아낸 루틴은 남는다", async () => {
+    // 밟기로 한 것은 그 글귀와 별개로 이미 내 것이다.
+    await resetServer();
+    const item = await createQuote();
+    await api(`/api/content/${item.id}/routines`, { method: "POST", body: {} });
+
+    await api(`/api/content/${item.id}`, { method: "DELETE" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.items.length, 0);
+    assert.equal(stored.routines.length, 1);
+  });
+
+  it("사라진 쪽을 가리키던 루틴의 출처도 남은 글귀로 옮겨 붙는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [quote("server-1", "제목", "본문", 2000)] }) });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [quote("app-1", "제목", "본문", 1000)],
+          routines: [
+            {
+              id: 1,
+              syncId: "routine-1",
+              updatedAt: 1000,
+              title: "물 마시기",
+              note: "",
+              category: "글귀에서",
+              orderIndex: 0,
+              sourceContentSyncId: "app-1",
+              reminderEnabled: true,
+              createdAt: 1000,
+            },
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.routines[0].sourceContentSyncId, "server-1");
+  });
+
+  it("직접 만든 루틴의 출처는 빈 채로 둔다", async () => {
+    await resetServer();
+    const routine = await (await api("/api/routines", { method: "POST", body: { title: "손으로 만든 것" } })).json();
+
+    assert.equal(routine.sourceContentSyncId, "");
   });
 });

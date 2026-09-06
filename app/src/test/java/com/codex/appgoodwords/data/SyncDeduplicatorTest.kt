@@ -68,6 +68,56 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun contentMemosFollowTheSurvivor() {
+        val merged = snapshotOf(
+            items = listOf(
+                item("server-1", "오늘의 기준", "본문", updatedAt = 2_000L),
+                item("app-1", "오늘의 기준", "본문", updatedAt = 1_000L)
+            ),
+            contentMemos = listOf(contentMemo("cm-1", contentItemSyncId = "app-1"))
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(
+            "사라진 쪽을 가리키면 메모가 붙을 글귀를 잃습니다.",
+            "server-1",
+            result.contentMemos.single().contentItemSyncId
+        )
+    }
+
+    @Test
+    fun anExtractedRoutineFollowsTheSurvivingQuote() {
+        // 안 옮기면 루틴이 어디서 비롯됐는지를 잃고, 그 글귀 쪽에서도 "뽑은 루틴"이 안 보입니다.
+        val merged = snapshotOf(
+            items = listOf(
+                item("server-1", "오늘의 기준", "본문", updatedAt = 2_000L),
+                item("app-1", "오늘의 기준", "본문", updatedAt = 1_000L)
+            ),
+            routines = listOf(
+                routine("r-1", "물 마시기", updatedAt = 1_000L).copy(sourceContentSyncId = "app-1")
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals("server-1", result.routines.single().sourceContentSyncId)
+    }
+
+    @Test
+    fun aRoutineMadeByHandKeepsAnEmptySource() {
+        // 빈 값을 승자 표에서 찾으면 엉뚱한 글귀가 붙습니다.
+        val merged = snapshotOf(
+            items = listOf(item("server-1", "제목", "본문", updatedAt = 1_000L)),
+            routines = listOf(routine("r-1", "물 마시기", updatedAt = 1_000L))
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals("", result.routines.single().sourceContentSyncId)
+    }
+
+    @Test
     fun historyIsNeverCollapsed() {
         // 같은 글귀를 두 번 본 것은 진짜로 두 번 본 것이다.
         val merged = snapshotOf(
@@ -347,12 +397,23 @@ class SyncDeduplicatorTest {
         occurredAt = 1_000L
     )
 
+    private fun contentMemo(syncId: String, contentItemSyncId: String) = ContentMemoEntity(
+        syncId = syncId,
+        updatedAt = 1_000L,
+        contentItemId = 0L,
+        contentItemSyncId = contentItemSyncId,
+        contentTitle = "제목",
+        body = "메모",
+        createdAt = 1_000L
+    )
+
     private fun snapshotOf(
         items: List<ContentItemEntity> = emptyList(),
         events: List<ExposureEventEntity> = emptyList(),
         routines: List<RoutineEntity> = emptyList(),
         routineChecks: List<RoutineCheckEntity> = emptyList(),
         routineMemos: List<RoutineMemoEntity> = emptyList(),
+        contentMemos: List<ContentMemoEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList()
     ) = AppDataSnapshot(
@@ -361,6 +422,7 @@ class SyncDeduplicatorTest {
         routines = routines,
         routineChecks = routineChecks,
         routineMemos = routineMemos,
+        contentMemos = contentMemos,
         settings = ReminderSettings(),
         diaries = diaries,
         todos = todos

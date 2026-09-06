@@ -5,6 +5,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 
+/** 공유해 온 것을 담고 나서 사용자에게 뭐라고 알릴지. */
+data class SharedSaveResult(
+    val title: String,
+    /** 같은 주소가 이미 있어서 담지 않았으면 true. */
+    val alreadyKept: Boolean
+)
+
 class AppRepository(
     private val database: AppDatabase,
     private val contentItemDao: ContentItemDao,
@@ -12,6 +19,7 @@ class AppRepository(
     private val routineDao: RoutineDao,
     private val routineCheckDao: RoutineCheckDao,
     private val routineMemoDao: RoutineMemoDao,
+    private val contentMemoDao: ContentMemoDao,
     private val linkMetadataFetcher: LinkMetadataFetcher,
     private val deletionDao: DeletionDao? = null,
     private val diaryDao: DiaryDao? = null,
@@ -44,6 +52,8 @@ class AppRepository(
 
     fun observeRoutineMemos(): Flow<List<RoutineMemoEntity>> = routineMemoDao.observeAll()
 
+    fun observeContentMemos(): Flow<List<ContentMemoEntity>> = contentMemoDao.observeAll()
+
     fun observeRoutineCheckCounts(start: Long, end: Long): Flow<List<RoutineCheckCount>> {
         return routineCheckDao.observeCountsBetween(start, end)
     }
@@ -75,10 +85,72 @@ class AppRepository(
         )
     }
 
+    /**
+     * 다른 앱에서 공유해 온 것을 보관함에 바로 담습니다.
+     *
+     * 담는 화면을 거치지 않으므로 [ContentNormalizer]를 여기서 부릅니다. 안 부르면 종류를
+     * 알아내지 못해 유튜브 링크가 영상이 아니라 글귀로 담깁니다.
+     *
+     * **같은 주소를 두 번 담지 않습니다.** 공유는 손이 가벼워서 같은 영상을 여러 번 보내게
+     * 되는데, 그때마다 쌓이면 보관함이 같은 것으로 채워집니다. 병합이 나중에 합쳐 주기는
+     * 하지만(`SyncDeduplicator`), 그전까지는 목록에 두 벌로 보입니다.
+     */
+    suspend fun saveSharedContent(draft: ContentDraft): SharedSaveResult {
+        val normalized = ContentNormalizer.normalize(draft)
+        ContentNormalizer.validate(normalized)
+
+        val existing = normalized.sourceUrl
+            .takeIf { it.isNotBlank() }
+            ?.let { contentItemDao.findBySourceUrl(it) }
+        if (existing != null) {
+            return SharedSaveResult(
+                title = existing.title.ifBlank { existing.body.take(24) },
+                alreadyKept = true
+            )
+        }
+
+        saveContent(normalized)
+        return SharedSaveResult(title = normalized.title, alreadyKept = false)
+    }
+
     suspend fun deleteContent(id: Long) {
         val existing = contentItemDao.getById(id)
+        // 글귀를 지우면 옆에 달아 둔 메모도 함께 사라지므로 표식을 함께 남긴다.
+        // 빠뜨리면 지운 메모가 다음 병합에서 되살아나 주인 없는 메모로 떠돈다.
+        val memos = contentMemoDao.getByContentItemId(id)
         contentItemDao.deleteById(id)
+        memos.forEach { contentMemoDao.deleteById(it.id) }
         existing?.let { recordDeletion(it.syncId, SyncEntityType.CONTENT_ITEM) }
+        memos.forEach { recordDeletion(it.syncId, SyncEntityType.CONTENT_MEMO) }
+    }
+
+    /**
+     * 글귀에 메모를 답니다.
+     *
+     * 루틴 메모와 달리 체크를 남기지 않습니다. 여기 적는 것은 실천이 아니라 생각이라,
+     * 하루의 실천 수를 늘리면 통계가 한 일보다 부풀어 보입니다.
+     */
+    suspend fun saveContentMemo(contentItemId: Long, body: String): Long {
+        val normalized = body.trim()
+        return database.withTransaction {
+            val item = contentItemDao.getById(contentItemId) ?: error("글귀를 찾을 수 없습니다.")
+            require(normalized.isNotBlank()) { "메모 내용을 입력해 주세요." }
+            contentMemoDao.insert(
+                ContentMemoEntity(
+                    contentItemId = item.id,
+                    contentItemSyncId = item.syncId,
+                    contentTitle = item.title.ifBlank { item.body.take(24) },
+                    body = normalized
+                )
+            )
+        }
+    }
+
+    suspend fun deleteContentMemo(id: Long): Int {
+        val existing = contentMemoDao.getById(id)
+        val removed = contentMemoDao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.CONTENT_MEMO) }
+        return removed
     }
 
     suspend fun fetchLinkMetadata(url: String): LinkMetadata = linkMetadataFetcher.fetch(url)
@@ -246,10 +318,50 @@ class AppRepository(
                 category = draft.category.trim(),
                 // 새 루틴은 맨 뒤에 붙는다. 이름을 고칠 때 차례가 움직이면 하루 흐름이 흐트러진다.
                 orderIndex = existing?.orderIndex ?: RoutineOrder.nextIndex(routineDao.maxOrderIndex()),
+                // 어디서 뽑아냈는지는 한 번 정해지면 바뀌지 않는다. 이름만 고쳐도 출처가 지워지지
+                // 않도록, 이미 붙어 있는 값을 먼저 지킨다.
+                sourceContentSyncId = existing?.sourceContentSyncId
+                    .orEmpty()
+                    .ifBlank { draft.sourceContentSyncId.trim() },
                 reminderEnabled = draft.reminderEnabled,
                 createdAt = existing?.createdAt ?: System.currentTimeMillis()
             )
         )
+    }
+
+    /**
+     * 글귀를 오늘부터 밟을 루틴으로 뽑아냅니다.
+     *
+     * 책에서 글귀를 뽑는 것([extractQuoteFromBook])과 같은 자리입니다. 모아 두는 것과
+     * 실천하는 것이 한 앱에 있는데, 그 사이를 잇는 길이 AI 추천에만 있었습니다.
+     *
+     * **글귀 본문을 루틴 메모로 함께 옮깁니다.** 이름만 남기면 며칠 뒤에 왜 이걸 하기로 했는지
+     * 알 수 없습니다. 뽑아낸 글귀는 `sourceContentSyncId`로 가리켜 두어, 나중에 그 글귀 쪽에서도
+     * "이 글귀로 만든 루틴"을 볼 수 있습니다.
+     */
+    suspend fun extractRoutineFromContent(
+        contentItemId: Long,
+        title: String,
+        note: String = ""
+    ): RoutineEntity {
+        val item = contentItemDao.getById(contentItemId) ?: error("글귀를 찾을 수 없습니다.")
+        val trimmedTitle = title.trim()
+        require(trimmedTitle.isNotBlank()) { "루틴 이름을 입력해 주세요." }
+
+        val now = System.currentTimeMillis()
+        val routine = RoutineEntity(
+            syncId = SyncIdentity.newId(),
+            updatedAt = now,
+            title = trimmedTitle,
+            note = note.trim().ifBlank { item.body.trim().ifBlank { item.title.trim() } },
+            category = PRACTICE_CATEGORY,
+            // 새 루틴은 하루의 맨 뒤에 붙습니다. 앞에 끼우면 이미 밟고 있는 차례가 흐트러집니다.
+            orderIndex = RoutineOrder.nextIndex(routineDao.maxOrderIndex()),
+            sourceContentSyncId = item.syncId,
+            createdAt = now
+        )
+        val id = routineDao.insert(routine)
+        return routine.copy(id = id)
     }
 
     /** 루틴을 한 칸 위/아래로 옮깁니다. 옮길 곳이 없으면 아무것도 하지 않고 false. */
@@ -713,5 +825,8 @@ class AppRepository(
 
         /** 책에서 뽑은 글귀에 붙는 카테고리. 보관함에서 한데 모아 보려는 것입니다. */
         const val BOOK_CATEGORY = "독서"
+
+        /** 글귀에서 뽑아낸 실천에 붙는 카테고리. 어디서 비롯됐는지 나중에 알아보려는 것입니다. */
+        const val PRACTICE_CATEGORY = "글귀에서"
     }
 }

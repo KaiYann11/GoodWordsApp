@@ -32,7 +32,16 @@ data class AiFeedbackSettings(
     /** 마지막으로 피드백을 만든 시각. 주기가 돌아왔는지 볼 때 씁니다. */
     val lastRunAt: Long = 0L,
     /** 마지막 실패 사유. 배경에서 돌다 실패하면 화면에 뜨지 않아 따로 남깁니다. */
-    val lastError: String = ""
+    val lastError: String = "",
+    /**
+     * 오래 돌아보지 않았을 때 알릴지.
+     *
+     * 주기 자동 실행([schedule])과 별개입니다. 자동 실행은 값이 드는 요청을 저절로 보내는 것이고,
+     * 이쪽은 "직접 한번 돌아보라"고 알리기만 합니다. 자동을 꺼 둔 사람에게 더 필요합니다.
+     */
+    val nudgeEnabled: Boolean = true,
+    /** 마지막으로 알린 시각. 뜸해진 뒤 매일 알리면 잔소리가 되므로 이만큼 쉽니다. */
+    val lastNudgedAt: Long = 0L
 ) {
     val activeProvider: AiProvider
         get() = AiProvider.of(provider)
