@@ -112,6 +112,16 @@ class SyncDeltaTest {
                     body = "메모"
                 )
             ),
+            contentMemos = listOf(
+                ContentMemoEntity(
+                    syncId = "cm",
+                    updatedAt = 1_000L,
+                    contentItemId = 1,
+                    contentItemSyncId = "i",
+                    contentTitle = "글귀",
+                    body = "메모"
+                )
+            ),
             settings = ReminderSettings(),
             diaries = listOf(DiaryEntity(syncId = "d", updatedAt = 1_000L, entryDate = "2026-08-17")),
             todos = listOf(TodoEntity(syncId = "t", updatedAt = 1_000L, title = "할 일", dueDate = "2026-08-17")),
@@ -125,6 +135,7 @@ class SyncDeltaTest {
         assertTrue(delta.routines.isEmpty())
         assertTrue(delta.routineChecks.isEmpty())
         assertTrue(delta.routineMemos.isEmpty())
+        assertTrue(delta.contentMemos.isEmpty())
         assertTrue(delta.diaries.isEmpty())
         assertTrue(delta.todos.isEmpty())
         assertTrue(delta.books.isEmpty())

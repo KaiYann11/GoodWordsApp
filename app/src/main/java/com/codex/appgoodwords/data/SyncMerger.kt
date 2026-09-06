@@ -56,6 +56,14 @@ object SyncMerger {
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
             ),
+            // 글귀에 달아 둔 메모도 루틴 메모와 같은 규칙입니다.
+            contentMemos = mergeMutable(
+                local = local.contentMemos,
+                remote = remote.contentMemos,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
+            ),
             // 설정은 레코드가 아니라 화면 전체가 하나라 최근에 손댄 쪽을 통째로 쓴다.
             settings = if (remote.settingsUpdatedAt > local.settingsUpdatedAt) remote.settings else local.settings,
             settingsUpdatedAt = maxOf(local.settingsUpdatedAt, remote.settingsUpdatedAt),

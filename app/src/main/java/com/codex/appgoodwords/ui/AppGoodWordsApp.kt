@@ -78,6 +78,7 @@ import com.codex.appgoodwords.ui.screen.AppLockScreen
 import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
+import com.codex.appgoodwords.ui.screen.DaySummaryDialog
 import com.codex.appgoodwords.ui.screen.DetailScreen
 import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
@@ -153,6 +154,10 @@ fun AppGoodWordsApp(
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
     val routineTodayCounts by viewModel.routineTodayCounts.collectAsStateWithLifecycle()
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
+    val contentMemos by viewModel.contentMemos.collectAsStateWithLifecycle()
+    val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
+    val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
+    val openedDayDigest by viewModel.openedDayDigest.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val feedbackNotes by viewModel.feedbackNotes.collectAsStateWithLifecycle()
     val onThisDay by viewModel.onThisDay.collectAsStateWithLifecycle()
@@ -375,6 +380,15 @@ fun AppGoodWordsApp(
         )
     }
 
+    // 그날 요약. 홈의 점수 카드나 그래프 막대에서 엽니다.
+    openedDayDigest?.let { digest ->
+        DaySummaryDialog(
+            digest = digest,
+            onMove = { date -> viewModel.openDay(date) },
+            onDismiss = { viewModel.closeDay() }
+        )
+    }
+
     LaunchedEffect(openItemRequest, allItems, currentTab) {
         val targetId = openItemRequest ?: return@LaunchedEffect
         if (allItems.any { it.id == targetId }) {
@@ -516,9 +530,36 @@ fun AppGoodWordsApp(
                             pushRoute(editRoute(currentTab, item.id))
                             addFormVersion += 1
                         },
+                        // 이 글귀에 달린 것만 골라 넘깁니다. 화면은 자기 글귀 것만 그립니다.
+                        memos = contentMemos.filter { it.contentItemId == selectedItem.id },
+                        onSaveMemo = { body ->
+                            coroutineScope.launch {
+                                val result = viewModel.saveContentMemo(selectedItem.id, body)
+                                if (result.isFailure) {
+                                    snackbarHostState.showSnackbar(
+                                        result.exceptionOrNull()?.message ?: "메모를 저장하지 못했습니다."
+                                    )
+                                }
+                            }
+                        },
+                        onDeleteMemo = { memo ->
+                            coroutineScope.launch {
+                                val result = viewModel.deleteContentMemo(memo.id)
+                                if (result.isFailure) {
+                                    snackbarHostState.showSnackbar(
+                                        result.exceptionOrNull()?.message ?: "메모를 지우지 못했습니다."
+                                    )
+                                }
+                            }
+                        },
+                        // 기기 간 식별자는 syncId뿐입니다. 숫자 id로 이으면 다른 기기에서 엉뚱한 글귀가 됩니다.
+                        routinesFromItem = routines.filter {
+                            it.sourceContentSyncId.isNotBlank() &&
+                                it.sourceContentSyncId == selectedItem.syncId
+                        },
                         onMakeRoutine = { title ->
                             coroutineScope.launch {
-                                val result = viewModel.makeRoutineFromQuote(title)
+                                val result = viewModel.makeRoutineFromQuote(selectedItem.id, title)
                                 snackbarHostState.showSnackbar(
                                     if (result.isSuccess) "루틴에 추가했습니다."
                                     else result.exceptionOrNull()?.message ?: "루틴을 만들지 못했습니다."
@@ -573,6 +614,10 @@ fun AppGoodWordsApp(
                             },
                             latestReport = growthReports.firstOrNull(),
                             onOpenGrowth = { pushRoute(tabRoute(AppTab.GROWTH)) },
+                            // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
+                            todayScore = todayScore,
+                            scoreTrend = scoreTrend,
+                            onOpenDay = { date -> viewModel.openDay(date) },
                             memories = onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,

@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 16;
+const schemaVersion = 17;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -78,6 +78,7 @@ const deletionEntityTypes = new Set([
   "ROUTINE",
   "ROUTINE_CHECK",
   "ROUTINE_MEMO",
+  "CONTENT_MEMO",
   "DIARY",
   "TODO",
   "BOOK",
@@ -90,6 +91,8 @@ const bookStatuses = new Set(["READING", "FINISHED"]);
 const reportPeriods = new Set(["DAILY", "WEEKLY", "MONTHLY", "MANUAL"]);
 /** 책에서 뽑은 글귀에 붙는 카테고리. 앱 AppRepository.BOOK_CATEGORY와 같아야 한다. */
 const bookCategory = "독서";
+/** 글귀에서 뽑은 루틴에 붙는 카테고리. 앱 AppRepository.PRACTICE_CATEGORY와 같아야 한다. */
+const practiceCategory = "글귀에서";
 
 const defaultSettings = {
   remindersEnabled: true,
@@ -297,6 +300,10 @@ async function route(request, response) {
     await routeMemoMember(method, parts, response);
     return;
   }
+  if (parts[0] === "api" && parts[1] === "content-memos" && parts[2]) {
+    await routeContentMemoMember(method, parts, response);
+    return;
+  }
   if (parts[0] === "api" && parts[1] === "diaries" && parts[2]) {
     await routeDiaryMember(method, parts, request, response);
     return;
@@ -337,8 +344,40 @@ async function routeContentMember(method, parts, request, response) {
     return;
   }
   if (method === "DELETE" && !action) {
-    const result = await withDb((db) => deleteWithTombstone(db, db.items, [itemId], "CONTENT_ITEM"));
+    const result = await withDb((db) => {
+      const deleted = deleteWithTombstone(db, db.items, [itemId], "CONTENT_ITEM").deleted;
+      // 표식을 안 남기면 지운 메모가 다음 병합에 되살아나 주인 없는 메모로 떠돈다.
+      deleteWithTombstone(
+        db,
+        db.contentMemos,
+        db.contentMemos.filter((memo) => memo.contentItemId === itemId).map((memo) => memo.id),
+        "CONTENT_MEMO",
+      );
+      return { deleted };
+    });
     sendJson(response, 200, { deleted: result.deleted });
+    return;
+  }
+  if (method === "POST" && action === "routines") {
+    const payload = await readJson(request, true);
+    const routine = await withDb((db) => {
+      const item = requireItem(db, itemId);
+      return extractRoutineFromContent(db, item, payload);
+    });
+    sendJson(response, 201, routine);
+    return;
+  }
+  if (method === "POST" && action === "memos") {
+    const payload = await readJson(request);
+    const memo = await withDb((db) => {
+      const item = requireItem(db, itemId);
+      return saveContentMemo(db, {
+        ...payload,
+        contentItemId: item.id,
+        contentTitle: item.title || item.body.slice(0, 24),
+      });
+    });
+    sendJson(response, 201, memo);
     return;
   }
   if (method === "POST" && action === "favorite") {
@@ -611,6 +650,16 @@ async function routeMemoMember(method, parts, response) {
   sendJson(response, 200, { deleted: result.deleted });
 }
 
+async function routeContentMemoMember(method, parts, response) {
+  const memoId = Number(parts[2]);
+  if (method !== "DELETE") {
+    sendJson(response, 405, { error: "지원하지 않는 메서드입니다." });
+    return;
+  }
+  const result = await withDb((db) => deleteWithTombstone(db, db.contentMemos, [memoId], "CONTENT_MEMO"));
+  sendJson(response, 200, { deleted: result.deleted });
+}
+
 async function routeDiaryMember(method, parts, request, response) {
   const diaryId = Number(parts[2]);
   if (!Number.isFinite(diaryId) || diaryId <= 0) {
@@ -853,6 +902,7 @@ const revisionedCollections = [
   "routines",
   "routineChecks",
   "routineMemos",
+  "contentMemos",
   "deletions",
   "diaries",
   "todos",
@@ -935,6 +985,7 @@ function emptyDb() {
     routines: [],
     routineChecks: [],
     routineMemos: [],
+    contentMemos: [],
     deletions: [],
     diaries: [],
     todos: [],
@@ -957,6 +1008,7 @@ function normalizeDb(db) {
     routines: normalizeList(db?.routines, normalizeRoutine),
     routineChecks: normalizeList(db?.routineChecks, normalizeRoutineCheck),
     routineMemos: normalizeList(db?.routineMemos, normalizeRoutineMemo),
+    contentMemos: normalizeList(db?.contentMemos, normalizeContentMemo),
     deletions: normalizeList(db?.deletions, normalizeDeletion),
     diaries: normalizeList(db?.diaries, normalizeDiary),
     todos: normalizeList(db?.todos, normalizeTodo),
@@ -1016,6 +1068,7 @@ function snapshot(db, since = 0, epoch = null) {
     routineCount: normalized.routines.length,
     routineCheckCount: normalized.routineChecks.length,
     routineMemoCount: normalized.routineMemos.length,
+    contentMemoCount: normalized.contentMemos.length,
     diaryCount: normalized.diaries.length,
     todoCount: normalized.todos.length,
     bookCount: normalized.books.length,
@@ -1029,6 +1082,7 @@ function snapshot(db, since = 0, epoch = null) {
     routines: only(sortedRoutines(normalized.routines)),
     routineChecks: only(sortDesc(normalized.routineChecks, "checkedAt")),
     routineMemos: only(sortDesc(normalized.routineMemos, "createdAt")),
+    contentMemos: only(sortDesc(normalized.contentMemos, "createdAt")),
     deletions: only(sortDesc(normalized.deletions, "deletedAt")),
     diaries: only(sortDesc(normalized.diaries, "createdAt")),
     todos: only(sortDesc(normalized.todos, "createdAt")),
@@ -1054,6 +1108,7 @@ function mergeSnapshot(db, payload) {
     routines: payload?.routines,
     routineChecks: payload?.routineChecks,
     routineMemos: payload?.routineMemos,
+    contentMemos: payload?.contentMemos,
     deletions: payload?.deletions,
     diaries: payload?.diaries,
     todos: payload?.todos,
@@ -1070,6 +1125,8 @@ function mergeSnapshot(db, payload) {
   db.items = mergeMutable(current.items, incoming.items, deletedAt);
   db.routines = mergeMutable(current.routines, incoming.routines, deletedAt);
   db.routineMemos = mergeMutable(current.routineMemos, incoming.routineMemos, deletedAt);
+  // 글귀에 달아 둔 메모도 루틴 메모와 같은 규칙이다.
+  db.contentMemos = mergeMutable(current.contentMemos, incoming.contentMemos, deletedAt);
   db.exposureEvents = mergeAppendOnly(current.exposureEvents, incoming.exposureEvents, deletedAt);
   db.routineChecks = mergeAppendOnly(current.routineChecks, incoming.routineChecks, deletedAt);
   // 일기와 할 일은 고칠 수 있다. 특히 할 일의 완료 표시는 한쪽에서 눌러도 양쪽에 반영되어야 한다.
@@ -1120,7 +1177,12 @@ function deduplicate(db) {
   db.items = items.kept.map((item) =>
     item.bookSyncId ? { ...item, bookSyncId: books.movedTo.get(item.bookSyncId) || item.bookSyncId } : item,
   );
-  db.routines = routines.kept;
+  // 사라진 글귀를 가리키던 루틴도 남은 글귀로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
+  db.routines = routines.kept.map((routine) =>
+    routine.sourceContentSyncId
+      ? { ...routine, sourceContentSyncId: items.movedTo.get(routine.sourceContentSyncId) || routine.sourceContentSyncId }
+      : routine,
+  );
   db.diaries = diaries.kept;
   db.todos = todos.kept;
   db.books = books.kept;
@@ -1156,6 +1218,10 @@ function deduplicate(db) {
   db.routineMemos = db.routineMemos.map((memo) => ({
     ...memo,
     routineSyncId: routines.movedTo.get(memo.routineSyncId) || memo.routineSyncId,
+  }));
+  db.contentMemos = db.contentMemos.map((memo) => ({
+    ...memo,
+    contentItemSyncId: items.movedTo.get(memo.contentItemSyncId) || memo.contentItemSyncId,
   }));
 
   return db;
@@ -1298,6 +1364,10 @@ function reindex(db) {
     ...memo,
     routineSyncId: parentOf(memo, "routineSyncId", "routineId", routineSyncIdByOldId),
   }));
+  const contentMemos = db.contentMemos.map((memo) => ({
+    ...memo,
+    contentItemSyncId: parentOf(memo, "contentItemSyncId", "contentItemId", itemSyncIdByOldId),
+  }));
 
   db.items = withStableIds(db.items);
   db.routines = withStableIds(db.routines);
@@ -1319,8 +1389,14 @@ function reindex(db) {
     ...memo,
     routineId: routineIds.get(memo.routineSyncId),
   }));
+  // 글귀 메모도 같다. 붙을 글귀가 없으면 어디에도 그릴 수 없다.
+  db.contentMemos = withStableIds(contentMemos.filter((memo) => itemIds.has(memo.contentItemSyncId))).map((memo) => ({
+    ...memo,
+    contentItemId: itemIds.get(memo.contentItemSyncId),
+  }));
   // 일기·할 일·책은 딸린 자식이 없어 번호만 보면 된다.
-  // 글귀가 책을 가리키지만 숫자 id가 아니라 bookSyncId로 가리켜서 번호가 바뀌어도 그대로다.
+  // 글귀가 책을(bookSyncId), 루틴이 뽑아낸 글귀를(sourceContentSyncId) 가리키지만
+  // 숫자 id가 아니라 syncId로 가리켜서 번호가 바뀌어도 그대로다.
   db.diaries = withStableIds(db.diaries);
   db.todos = withStableIds(db.todos);
   db.books = withStableIds(db.books);
@@ -1439,6 +1515,9 @@ function replaceSnapshot(db, payload) {
     : [];
   db.routineMemos = Array.isArray(payload.routineMemos)
     ? payload.routineMemos.map(normalizeRoutineMemo).filter(Boolean)
+    : [];
+  db.contentMemos = Array.isArray(payload.contentMemos)
+    ? payload.contentMemos.map(normalizeContentMemo).filter(Boolean)
     : [];
   // 업로드는 서버를 기기 데이터로 통째로 바꾸는 동작이다.
   // 여기서 빠뜨리면 그 종류만 서버에 남아, 사용자가 지운 일기가 다음 병합에 되살아난다.
@@ -1707,6 +1786,58 @@ function saveRoutineMemo(db, payload) {
   return normalized;
 }
 
+/**
+ * 글귀를 오늘부터 밟을 루틴으로 뽑아냅니다.
+ *
+ * 책에서 글귀를 뽑는 것(extractQuoteFromBook)과 같은 자리입니다. 앱의
+ * AppRepository.extractRoutineFromContent와 같은 규칙이어야 합니다.
+ *
+ * **글귀 본문을 루틴 메모로 함께 옮깁니다.** 이름만 남기면 며칠 뒤에 왜 이걸 하기로 했는지
+ * 알 수 없습니다. 뽑아낸 글귀는 sourceContentSyncId로 가리켜 둡니다.
+ */
+function extractRoutineFromContent(db, item, payload) {
+  const title = text(payload?.title) || practiceTitleOf(item);
+  if (!title) throw new HttpError(400, "루틴 이름을 입력해 주세요.");
+  return saveRoutine(db, {
+    title,
+    note: text(payload?.note) || text(item.body) || text(item.title),
+    category: practiceCategory,
+    sourceContentSyncId: item.syncId,
+  });
+}
+
+/**
+ * 글귀에서 실천 이름을 뽑습니다. 앱 DetailScreen.practiceTitleOf와 같은 규칙입니다.
+ *
+ * 본문을 그대로 쓰지 않습니다. 글귀는 대개 한 문단이라 루틴 이름으로는 너무 길고,
+ * 목록에서 잘려 무엇인지 알 수 없게 됩니다.
+ */
+function practiceTitleOf(item) {
+  const source = text(item.title) || text(item.body);
+  return source.split("\n")[0].trim().slice(0, 30).trim();
+}
+
+/**
+ * 글귀에 메모를 답니다.
+ *
+ * 루틴 메모와 달리 체크를 남기지 않습니다. 여기 적는 것은 실천이 아니라 생각이라,
+ * 하루의 실천 수를 늘리면 통계가 한 일보다 부풀어 보입니다.
+ */
+function saveContentMemo(db, payload) {
+  const item = db.items.find((entry) => entry.id === positiveInt(payload.contentItemId));
+  const normalized = normalizeContentMemo({
+    ...payload,
+    id: payload.id || nextId(db.contentMemos),
+    contentItemSyncId: payload.contentItemSyncId || item?.syncId,
+    createdAt: payload.createdAt || nowMs(),
+  });
+  if (normalized.contentItemId <= 0 || !normalized.body) {
+    throw new HttpError(400, "메모를 저장할 글귀와 내용이 필요합니다.");
+  }
+  upsert(db.contentMemos, normalized);
+  return normalized;
+}
+
 function recordContentEvent(db, itemId, eventType, trigger, incrementRead) {
   const item = requireItem(db, itemId);
   const occurredAt = nowMs();
@@ -1849,6 +1980,8 @@ function normalizeRoutine(routine) {
     category: text(routine.category),
     // 하루에 밟는 차례. 작을수록 먼저다. 순서를 모르던 시절의 기기는 보내지 않으므로 0이 된다.
     orderIndex: positiveInt(routine.orderIndex),
+    // 이 루틴을 뽑아낸 글귀. 숫자 id가 아니라 syncId로 가리킨다. 직접 만든 루틴이면 빈 문자열이다.
+    sourceContentSyncId: text(routine.sourceContentSyncId),
     reminderEnabled: routine.reminderEnabled !== false,
     createdAt: integer(routine.createdAt, nowMs()),
   };
@@ -1875,6 +2008,21 @@ function normalizeRoutineMemo(memo) {
     routineId: positiveInt(memo.routineId),
     routineSyncId: text(memo.routineSyncId),
     routineTitle: text(memo.routineTitle),
+    body: text(memo.body),
+    createdAt: integer(memo.createdAt, nowMs()),
+  };
+}
+
+function normalizeContentMemo(memo) {
+  if (!memo) return null;
+  return {
+    id: positiveInt(memo.id),
+    syncId: syncId(memo.syncId),
+    updatedAt: integer(memo.updatedAt, integer(memo.createdAt, nowMs())),
+    contentItemId: positiveInt(memo.contentItemId),
+    // 숫자 id는 기기마다 따로 증가하므로, 기기 간에는 이 값으로 글귀를 가리킨다.
+    contentItemSyncId: text(memo.contentItemSyncId),
+    contentTitle: text(memo.contentTitle),
     body: text(memo.body),
     createdAt: integer(memo.createdAt, nowMs()),
   };

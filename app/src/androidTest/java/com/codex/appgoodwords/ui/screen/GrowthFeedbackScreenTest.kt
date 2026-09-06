@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -86,6 +87,43 @@ class GrowthFeedbackScreenTest {
 
         // 무엇을 복사해 갔는지 적어 두어야 돌아와서 답을 넣을 자리를 압니다.
         assertTrue(copiedFor.toString(), copiedFor == ReportPeriod.WEEKLY)
+    }
+
+    @Test
+    fun neverReviewedSaysSo() {
+        compose.setContent { growthScreen(reports = emptyList()) }
+
+        compose.onNodeWithTag(growthLastReviewedTag).assertTextContains("아직 돌아본 적이 없습니다.")
+    }
+
+    @Test
+    fun theLastReviewIsShownInDays() {
+        // 언제 했는지가 설정 화면 깊숙이에만 있어서, 정작 이 화면에서는 목록 날짜를 뒤져야 했습니다.
+        val threeDaysAgo = System.currentTimeMillis() - 3 * DAY_MILLIS
+
+        compose.setContent { growthScreen(reports = listOf(report(threeDaysAgo))) }
+
+        compose.onNodeWithTag(growthLastReviewedTag).assertTextContains("3일 전", substring = true)
+    }
+
+    @Test
+    fun beingOverdueIsSaidOutLoud() {
+        // 알림은 놓치면 그만이라, 화면을 열었을 때는 늘 보여야 합니다.
+        val longAgo = System.currentTimeMillis() - 9 * DAY_MILLIS
+
+        compose.setContent { growthScreen(reports = listOf(report(longAgo))) }
+
+        compose.onNodeWithTag(growthLastReviewedTag).assertTextContains("살펴볼 때가 됐습니다", substring = true)
+    }
+
+    private fun report(createdAt: Long) = GrowthReportEntity(
+        syncId = "r-$createdAt",
+        period = ReportPeriod.WEEKLY.name,
+        createdAt = createdAt
+    )
+
+    private companion object {
+        const val DAY_MILLIS = 24L * 60 * 60 * 1000
     }
 
     @androidx.compose.runtime.Composable

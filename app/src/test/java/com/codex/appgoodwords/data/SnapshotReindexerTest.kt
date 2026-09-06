@@ -116,6 +116,53 @@ class SnapshotReindexerTest {
     }
 
     @Test
+    fun reindex_rewiresContentMemos() {
+        val merged = snapshot(
+            items = listOf(
+                item(id = 1L, syncId = "a-1", title = "A기기 글귀"),
+                item(id = 1L, syncId = "b-1", title = "B기기 글귀")
+            ),
+            contentMemos = listOf(contentMemo(contentItemId = 1L, contentItemSyncId = "b-1"))
+        )
+
+        val result = SnapshotReindexer.reindex(merged)
+
+        val target = result.items.first { it.syncId == "b-1" }
+        assertEquals(
+            "메모는 원래 달아 둔 글귀를 계속 가리켜야 합니다.",
+            target.id,
+            result.contentMemos.single().contentItemId
+        )
+    }
+
+    @Test
+    fun reindex_dropsContentMemoWithoutAnItem() {
+        // 글귀 메모는 상세 화면 안에서만 보이므로 붙을 글귀가 없으면 볼 방법이 없다.
+        val merged = snapshot(
+            items = emptyList(),
+            contentMemos = listOf(contentMemo(contentItemId = 3L, contentItemSyncId = "사라진-글귀"))
+        )
+
+        val result = SnapshotReindexer.reindex(merged)
+
+        assertTrue(result.contentMemos.isEmpty())
+    }
+
+    @Test
+    fun reindex_keepsWhereARoutineWasExtractedFrom() {
+        // 루틴은 뽑아낸 글귀를 syncId로 가리키므로 번호를 다시 매겨도 그대로여야 합니다.
+        val merged = snapshot(
+            items = listOf(item(id = 90L, syncId = "quote-1")),
+            routines = listOf(routine(id = 55L, syncId = "r").copy(sourceContentSyncId = "quote-1"))
+        )
+
+        val result = SnapshotReindexer.reindex(merged)
+
+        assertEquals("quote-1", result.routines.single().sourceContentSyncId)
+        assertEquals(1L, result.items.single().id)
+    }
+
+    @Test
     fun reindex_givesEveryTableGaplessIdsStartingAtOne() {
         val merged = snapshot(
             items = listOf(item(id = 90L, syncId = "a"), item(id = 12L, syncId = "b")),
@@ -198,18 +245,31 @@ class SnapshotReindexerTest {
         createdAt = 1_000L
     )
 
+    private fun contentMemo(contentItemId: Long, contentItemSyncId: String) = ContentMemoEntity(
+        id = 1L,
+        syncId = "content-memo-$contentItemSyncId",
+        updatedAt = 1_000L,
+        contentItemId = contentItemId,
+        contentItemSyncId = contentItemSyncId,
+        contentTitle = "글귀",
+        body = "메모",
+        createdAt = 1_000L
+    )
+
     private fun snapshot(
         items: List<ContentItemEntity> = emptyList(),
         events: List<ExposureEventEntity> = emptyList(),
         routines: List<RoutineEntity> = emptyList(),
         routineChecks: List<RoutineCheckEntity> = emptyList(),
-        routineMemos: List<RoutineMemoEntity> = emptyList()
+        routineMemos: List<RoutineMemoEntity> = emptyList(),
+        contentMemos: List<ContentMemoEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = events,
         routines = routines,
         routineChecks = routineChecks,
         routineMemos = routineMemos,
+        contentMemos = contentMemos,
         settings = ReminderSettings()
     )
 }

@@ -33,6 +33,7 @@ class ContentRotationTest {
             routineDao = database.routineDao(),
             routineCheckDao = database.routineCheckDao(),
             routineMemoDao = database.routineMemoDao(),
+            contentMemoDao = database.contentMemoDao(),
             linkMetadataFetcher = LinkMetadataFetcher(),
             deletionDao = database.deletionDao()
         )

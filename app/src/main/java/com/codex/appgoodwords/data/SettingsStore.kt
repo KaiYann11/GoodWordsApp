@@ -60,6 +60,8 @@ class SettingsStore(
         val aiIncludeDiaryBody = booleanPreferencesKey("ai_include_diary_body")
         val aiLastRunAt = longPreferencesKey("ai_last_run_at")
         val aiLastError = stringPreferencesKey("ai_last_error")
+        val aiNudgeEnabled = booleanPreferencesKey("ai_nudge_enabled")
+        val aiLastNudgedAt = longPreferencesKey("ai_last_nudged_at")
         /**
          * 하루의 축으로 삼을 걸음들. 이름을 쉼표로 이어 둡니다.
          *
@@ -129,7 +131,10 @@ class SettingsStore(
             minute = preferences[Keys.aiMinute] ?: 0,
             includeDiaryBody = preferences[Keys.aiIncludeDiaryBody] ?: false,
             lastRunAt = preferences[Keys.aiLastRunAt] ?: 0L,
-            lastError = preferences[Keys.aiLastError].orEmpty()
+            lastError = preferences[Keys.aiLastError].orEmpty(),
+            // 알림은 기본으로 켭니다. 오래 뜸해졌다는 것은 알려 주는 편이 낫고, 값도 들지 않습니다.
+            nudgeEnabled = preferences[Keys.aiNudgeEnabled] ?: true,
+            lastNudgedAt = preferences[Keys.aiLastNudgedAt] ?: 0L
         )
     }
 
@@ -190,6 +195,7 @@ class SettingsStore(
             preferences[Keys.aiHour] = settings.hour.coerceIn(0, 23)
             preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
             preferences[Keys.aiIncludeDiaryBody] = settings.includeDiaryBody
+            preferences[Keys.aiNudgeEnabled] = settings.nudgeEnabled
         }
     }
 
@@ -230,6 +236,13 @@ class SettingsStore(
         context.dataStore.edit { preferences ->
             preferences[Keys.aiLastRunAt] = runAt
             preferences[Keys.aiLastError] = error
+        }
+    }
+
+    /** 오래 뜸하다고 알린 시각. 한 번 알린 뒤에는 이 값을 보고 쉽니다. */
+    suspend fun recordGrowthNudge(nudgedAt: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.aiLastNudgedAt] = nudgedAt
         }
     }
 

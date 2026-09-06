@@ -13,6 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RoutineEntity::class,
         RoutineCheckEntity::class,
         RoutineMemoEntity::class,
+        ContentMemoEntity::class,
         DeletionEntity::class,
         DiaryEntity::class,
         TodoEntity::class,
@@ -20,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GrowthReportEntity::class,
         MoodLogEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun routineDao(): RoutineDao
     abstract fun routineCheckDao(): RoutineCheckDao
     abstract fun routineMemoDao(): RoutineMemoDao
+    abstract fun contentMemoDao(): ContentMemoDao
     abstract fun deletionDao(): DeletionDao
     abstract fun diaryDao(): DiaryDao
     abstract fun todoDao(): TodoDao
@@ -423,6 +425,47 @@ abstract class AppDatabase : RoomDatabase() {
                 // 예전 일기의 기분은 옮기지 않습니다. 일기에 딸린 것은 일기에 그대로 두고,
                 // 찍어 둔 것이 없는 날은 DayMood가 일기에서 읽습니다. 옮기면 일기를 고칠 때
                 // 두 값이 어긋나기 시작합니다.
+            }
+        }
+
+        /**
+         * 글귀에 메모를 달고, 글귀에서 루틴을 뽑을 수 있게 합니다.
+         *
+         * 새 표(`content_memos`)와 루틴의 출처 열을 함께 붙입니다. 기존 표의 내용은 건드리지
+         * 않으므로 이미 담아 둔 글귀와 루틴은 그대로 남습니다. 출처를 모르던 시절의 루틴은
+         * 빈 문자열이 되어, 화면에서는 그냥 직접 만든 루틴으로 보입니다.
+         */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS content_memos (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "contentItemId INTEGER NOT NULL, " +
+                        // 숫자 id는 기기마다 따로 증가해서 기기 간에는 이 값으로 글귀를 가리킨다.
+                        "contentItemSyncId TEXT NOT NULL, " +
+                        "contentTitle TEXT NOT NULL, " +
+                        "body TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                // syncId가 두 벌이면 병합이 어느 쪽인지 알 수 없게 됩니다.
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_content_memos_syncId ON content_memos (syncId)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_content_memos_createdAt ON content_memos (createdAt)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_content_memos_contentItemId_createdAt " +
+                        "ON content_memos (contentItemId, createdAt)"
+                )
+
+                // 이 루틴을 뽑아낸 글귀. 책을 가리키는 bookSyncId와 같은 이유로 syncId를 씁니다.
+                database.execSQL(
+                    "ALTER TABLE routines ADD COLUMN sourceContentSyncId TEXT NOT NULL DEFAULT ''"
+                )
             }
         }
     }

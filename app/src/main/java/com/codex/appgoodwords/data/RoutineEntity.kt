@@ -23,6 +23,15 @@ data class RoutineEntity(
      * 기기마다 같은 차례를 보여야 해서 동기화 대상입니다.
      */
     val orderIndex: Int = 0,
+    /**
+     * 이 루틴을 뽑아낸 글귀. 글귀에서 뽑지 않았으면 빈 문자열입니다.
+     *
+     * 숫자 id가 아니라 syncId로 가리킵니다. 숫자 id는 기기마다 따로 증가해서
+     * 다른 기기로 넘어가면 엉뚱한 글귀를 가리킵니다.
+     *
+     * 글귀를 지워도 뽑아 둔 루틴은 남깁니다. 밟기로 한 것은 그 글귀와 별개로 이미 내 것입니다.
+     */
+    val sourceContentSyncId: String = "",
     val reminderEnabled: Boolean = true,
     val createdAt: Long = System.currentTimeMillis()
 )

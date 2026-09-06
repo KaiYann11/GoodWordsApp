@@ -13,7 +13,13 @@ class AppGoodWordsApplication : Application() {
         AppContainer(this)
     }
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * 화면보다 오래 사는 일에 씁니다.
+     *
+     * 공유로 바로 담는 [ShareTargetActivity]는 곧바로 사라지므로, 화면에 매인 코루틴에 걸면
+     * 저장이 도중에 끊깁니다.
+     */
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()

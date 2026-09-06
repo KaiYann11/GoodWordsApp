@@ -379,6 +379,41 @@ object AppNotifications {
         NotificationManagerCompat.from(context).notify(9_004, notification)
     }
 
+    /**
+     * 오래 돌아보지 않았다고 알립니다.
+     *
+     * 새 피드백이 도착했다는 알림과 다릅니다. 이쪽은 **아무것도 만들지 않고** 알리기만 합니다.
+     * 값이 드는 요청을 사용자 몰래 보내면 안 되기 때문입니다. 누르면 앱이 열리고,
+     * 돌아볼지는 거기서 정합니다.
+     */
+    fun showGrowthNudgeNotification(
+        context: Context,
+        daysSince: Long,
+        soundEnabled: Boolean
+    ) {
+        if (!hasNotificationPermission(context)) return
+
+        val openAppIntent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            9_005,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, summaryChannelFor(soundEnabled))
+            .setSmallIcon(android.R.drawable.ic_menu_agenda)
+            .setContentTitle("${daysSince}일째 돌아보지 않았습니다")
+            .setContentText("그동안 쌓인 것을 한번 살펴볼까요?")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setSilent(!soundEnabled)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(9_006, notification)
+    }
+
     private fun contentChannelFor(settings: ReminderSettings): String {
         return if (settings.notificationSoundEnabled) contentChannelId else contentSilentChannelId
     }

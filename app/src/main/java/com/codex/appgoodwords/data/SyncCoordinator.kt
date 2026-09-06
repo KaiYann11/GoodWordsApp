@@ -27,6 +27,7 @@ class SyncCoordinator(
         routines = database.routineDao().getAll(),
         routineChecks = database.routineCheckDao().getAll(),
         routineMemos = database.routineMemoDao().getAll(),
+        contentMemos = database.contentMemoDao().getAll(),
         settings = settingsStore.getSettings(),
         settingsUpdatedAt = settingsStore.getSettingsUpdatedAt(),
         // 삭제 표식을 함께 보내야 다른 기기에서 지운 항목이 되살아나지 않는다.

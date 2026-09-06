@@ -11,6 +11,7 @@ data class AppImportResult(
     val routineCount: Int,
     val routineCheckCount: Int,
     val routineMemoCount: Int,
+    val contentMemoCount: Int = 0,
     val diaryCount: Int = 0,
     val todoCount: Int = 0,
     val bookCount: Int = 0,
@@ -60,6 +61,7 @@ class AppDataImporter(
         val itemDao = database.contentItemDao()
         val routineDao = database.routineDao()
         val memoDao = database.routineMemoDao()
+        val contentMemoDao = database.contentMemoDao()
         val checkDao = database.routineCheckDao()
         val eventDao = database.exposureEventDao()
         val diaryDao = database.diaryDao()
@@ -80,6 +82,7 @@ class AppDataImporter(
                 routineDao.deleteBySyncIds(deletedSyncIds)
                 checkDao.deleteBySyncIds(deletedSyncIds)
                 memoDao.deleteBySyncIds(deletedSyncIds)
+                contentMemoDao.deleteBySyncIds(deletedSyncIds)
                 diaryDao.deleteBySyncIds(deletedSyncIds)
                 todoDao.deleteBySyncIds(deletedSyncIds)
                 bookDao.deleteBySyncIds(deletedSyncIds)
@@ -130,6 +133,19 @@ class AppDataImporter(
                     }
             )
 
+            val localContentMemoIds = contentMemoDao.getAll().associate { it.syncId to it.id }
+            contentMemoDao.insertAll(
+                // 붙을 글귀가 없는 메모는 상세 화면에서 볼 방법이 없습니다.
+                incoming.contentMemos
+                    .filter { itemIdBySyncId.containsKey(it.contentItemSyncId) }
+                    .map { memo ->
+                        memo.copy(
+                            id = localContentMemoIds[memo.syncId] ?: 0L,
+                            contentItemId = itemIdBySyncId.getValue(memo.contentItemSyncId)
+                        )
+                    }
+            )
+
             val localDiaryIds = diaryDao.getAll().associate { it.syncId to it.id }
             diaryDao.insertAll(incoming.diaries.map { it.copy(id = localDiaryIds[it.syncId] ?: 0L) })
 
@@ -167,6 +183,7 @@ class AppDataImporter(
             routineCount = incoming.routines.size,
             routineCheckCount = incoming.routineChecks.size,
             routineMemoCount = incoming.routineMemos.size,
+            contentMemoCount = incoming.contentMemos.size,
             diaryCount = incoming.diaries.size,
             todoCount = incoming.todos.size,
             bookCount = incoming.books.size,
@@ -195,6 +212,7 @@ class AppDataImporter(
             database.bookDao().clearAll()
             database.todoDao().clearAll()
             database.diaryDao().clearAll()
+            database.contentMemoDao().clearAll()
             database.routineMemoDao().clearAll()
             database.routineCheckDao().clearAll()
             database.routineDao().clearAll()
@@ -224,6 +242,10 @@ class AppDataImporter(
 
             if (snapshot.routineMemos.isNotEmpty()) {
                 database.routineMemoDao().insertAll(snapshot.routineMemos)
+            }
+
+            if (snapshot.contentMemos.isNotEmpty()) {
+                database.contentMemoDao().insertAll(snapshot.contentMemos)
             }
 
             if (snapshot.diaries.isNotEmpty()) {
@@ -276,6 +298,7 @@ class AppDataImporter(
             routineCount = snapshot.routines.size,
             routineCheckCount = snapshot.routineChecks.size,
             routineMemoCount = snapshot.routineMemos.size,
+            contentMemoCount = snapshot.contentMemos.size,
             diaryCount = snapshot.diaries.size,
             todoCount = snapshot.todos.size,
             bookCount = snapshot.books.size,

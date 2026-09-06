@@ -65,7 +65,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 16입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 17입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -98,7 +98,20 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 **보관함 종류(`ContentType`)는 앱·서버·웹이 같아야 합니다.** 앱 `ContentType` · 서버 `contentTypes` ·
 웹 `app.js`의 종류 고르개와 이름표. 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 담아 둔 것이
 보관함에서 그 종류로 골라지지 않습니다. **`IDEA`는 담는 사람이 짚어 줍니다** — 주소로 종류를
-알아내는 `detectContentType`이 번뜩인 것은 알아볼 수 없습니다.
+알아내는 `ContentNormalizer.detectType`이 번뜩인 것은 알아볼 수 없습니다.
+
+**담기 전에 다듬는 규칙은 `ContentNormalizer` 한 곳에만 둡니다.** 담는 길이 둘입니다 —
+담는 화면(`MainViewModel.saveContent`)과 다른 앱에서 공유해 온 것(`ShareTargetActivity`).
+한쪽에 규칙을 따로 두면 같은 유튜브 링크가 담는 길에 따라 영상이 되기도 하고 링크가 되기도 합니다.
+
+**공유로 들어온 것은 화면 없이 바로 담깁니다.** `AndroidManifest.xml`의 SEND 거르개가
+`ShareTargetActivity`에 붙어 있습니다. 유튜브는 **제목 한 줄과 주소를 함께** 보내므로
+"http로 시작하면 주소"라고 보면 안 됩니다 — 제목이 앞에 붙어 있어 주소가 본문에 통째로 박히고,
+종류를 못 알아내 영상이 아니라 글귀가 됩니다. 나누는 규칙은 `SharedText`에 있습니다.
+**주소가 없으면 글을 본문에 담습니다** — 제목만 채우면 "본문·링크·사진·영상 중 하나는 있어야
+한다"는 `validate`에 걸려 조용히 담기지 않습니다. 저장은 화면이 아니라
+`AppGoodWordsApplication.applicationScope`에 겁니다. 이 화면은 곧바로 사라져서, 화면에 매인
+코루틴에 걸면 저장이 도중에 끊깁니다.
 
 **날씨·기분·일기 종류 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의
 `DiaryWeather`·`DiaryMood`·`DiaryKind`와 웹 `server/web/app.js`의
@@ -127,14 +140,24 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 **`SyncDeduplicator`(앱)와 서버 `deduplicate()`는 규칙이 같아야 합니다.** 판정 기준과 승자 선택
 (최신 `updatedAt`, 같으면 큰 `syncId`)이 어긋나면 두 기기가 병합할 때마다 서로를 고쳐 끝나지 않습니다.
 
-**글귀는 뽑아낸 책을 `bookSyncId`로 가리킵니다.** 숫자 id로 가리키면 다른 기기에서 엉뚱한 책이 됩니다.
-같은 내용 합치기로 책이 하나로 줄면 사라진 책을 가리키던 글귀를 남은 책으로 옮겨 붙여야 합니다
-(앱 `SyncDeduplicator`, 서버 `deduplicate`). 책을 지워도 뽑아 둔 글귀는 남깁니다.
+**글귀는 뽑아낸 책을 `bookSyncId`로, 루틴은 뽑아낸 글귀를 `sourceContentSyncId`로 가리킵니다.**
+숫자 id로 가리키면 다른 기기에서 엉뚱한 것이 됩니다. 같은 내용 합치기로 부모가 하나로 줄면
+사라진 쪽을 가리키던 것을 남은 쪽으로 옮겨 붙여야 합니다(앱 `SyncDeduplicator`, 서버 `deduplicate`).
+**부모를 지워도 뽑아 둔 것은 남깁니다** — 책을 지워도 글귀는, 글귀를 지워도 루틴은 남습니다.
+밟기로 한 것은 그 글귀와 별개로 이미 내 것입니다. **이름을 고쳐도 출처는 지우지 않습니다** —
+편집 화면이 출처를 실어 보내지 않을 수 있어서 `AppRepository.saveRoutine`이 기존 값을 먼저 지킵니다.
+
+**글귀에 다는 메모(`ContentMemoEntity`)는 실천으로 세지 않습니다.** 루틴 메모는 저장할 때 체크를
+함께 남기지만(`saveRoutineMemo`), 글귀 메모는 남기지 않습니다. 여기 적는 것은 실천이 아니라
+생각이라, 체크를 남기면 `routineChecks`를 "실천했다"로 세는 다섯 곳(`DailyLoop` · `StatsSummary` ·
+`FeedbackWriter` · `MoodPractice` · `GrowthPrompt`)이 한 일보다 부풀어 보입니다.
 
 **기기 간 식별자는 `syncId`뿐입니다.** Room의 숫자 id는 기기마다 따로 증가해서 A기기 id=5와 B기기 id=5가
-서로 다른 레코드입니다. 자식은 부모를 `contentItemSyncId`(이벤트) 또는 `routineSyncId`(체크·메모)로
-가리키고, 저장 직전에 `SnapshotReindexer`(앱)와 `reindex()`(서버)가 숫자 id를 다시 매깁니다.
-병합 결과를 숫자 id 그대로 넣으면 서로를 덮어씁니다.
+서로 다른 레코드입니다. 자식은 부모를 `contentItemSyncId`(이벤트·글귀 메모) 또는
+`routineSyncId`(체크·루틴 메모)로 가리키고, 저장 직전에 `SnapshotReindexer`(앱)와 `reindex()`(서버)가
+숫자 id를 다시 매깁니다. 병합 결과를 숫자 id 그대로 넣으면 서로를 덮어씁니다.
+**부모를 못 찾는 메모는 버립니다** — 화면이 부모 안에서만 그리므로 남겨도 볼 방법이 없습니다.
+이력은 예외로 남깁니다(제목만으로도 읽힙니다).
 
 **삭제 표식 보관 기간은 양쪽이 같아야 합니다.** 앱 `SyncCoordinator.DELETION_RETENTION_DAYS`와
 서버 `deletionRetentionDays`(현재 90일). 한쪽만 바꾸면 다른 쪽이 매번 되돌려 줍니다.
@@ -151,12 +174,32 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_KEY`)에만 두고,
 스냅샷·백업에는 넣지 않습니다.
 
+**"언제 돌아봤는지"는 남아 있는 돌아보기로 셉니다(`GrowthCadence`).** 설정의
+`AiFeedbackSettings.lastRunAt`은 이 기기에만 남는 값이라, 다른 기기에서 돌렸거나 백업을 되넣으면
+실제와 어긋납니다. 돌아보기는 동기화되므로 기록을 보면 어느 기기에서 돌렸든 같은 답이 나옵니다.
+날수는 시간 차가 아니라 **날짜 차로** 셉니다 — 어젯밤에 돌렸으면 "어제"입니다.
+화면(`GrowthFeedbackScreen`)과 알림(`GrowthNudgeWorker`)이 같은 함수를 써야 합니다.
+한쪽에서 따로 셈하면 "3일 전"이라 적힌 화면을 보며 "7일째"라는 알림을 받게 됩니다.
+
+**뜸하다고 알리는 것은 아무것도 만들지 않습니다.** `GrowthNudgeWorker`는 알리기만 하고,
+피드백을 만드는 `GrowthFeedbackWorker`와 예약도 따로 겁니다. 값이 드는 요청을 사용자 몰래
+보내면 안 됩니다. 그래서 자동 실행을 꺼 둔 사람에게도 돌고, **오히려 그런 사람에게 더 필요합니다.**
+한 번 알린 뒤에는 `lastNudgedAt`을 보고 같은 기간만큼 쉽니다. 매일 알리면 잔소리가 됩니다.
+**한 편도 없으면 알리지 않습니다** — 앱을 막 깐 사람에게 첫날부터 알리면 그저 성가십니다.
+
 **하루의 걸음은 고정이 아닙니다.** 무엇을 축으로 삼을지는 설정에서 고릅니다
 (`DailyStep` · `SettingsStore.dailySteps`). `DailyStep.entries`를 화면이나 셈에 그대로 쓰지 말고
 `DailyProgress.steps`를 쓰세요. 안 고른 걸음이 남으면 채울 수 없는 하나 때문에 이어 온 날이
 매일 끊깁니다. **연속 날수는 저장하지 않고 기록에서 다시 셉니다.** 그래서 축을 바꾸면 지난
 날수도 곧바로 새 기준이 됩니다. 저장해 두면 옛 기준으로 쌓인 숫자와 새 기준이 섞입니다.
 걸음을 늘리면 `DailyLoopCalculator`의 `daysByStep`과 앱의 탭 이동(`selectTab`)을 함께 늘립니다.
+
+**하루 점수(`DayScore`)에 기분을 넣지 않습니다.** 슬픈 날이 낮은 점수가 되면 앱이 감정을
+잘못한 일로 세는 셈이고, 힘든 날일수록 열기 싫어집니다. 기분은 점수 **곁에** 둡니다.
+점수의 뼈대는 사용자가 고른 걸음(`DailyStep`)입니다 — 앱이 따로 정한 잣대로 매기면 자기가
+고른 축과 점수가 어긋납니다. 걸음을 넘겨 더 한 것은 덤으로 세되 상한을 둡니다. 끝없이 오르면
+개수 채우기가 됩니다. **점수도 저장하지 않고 기록에서 다시 셉니다** — 연속 날수와 같은
+이유입니다. 걸음을 바꾸면 지난날 점수도 곧바로 새 기준이 됩니다.
 
 **돌아보기는 쌓이는 것을 전제로 둡니다.** 하루 주기로 돌리면 한 해에 삼백 장이 넘습니다.
 검색(`AppSearch`의 `SearchKind.GROWTH`) · 목록 거르개 · 한 번에 정리 셋이 함께 있어야 합니다.

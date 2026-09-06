@@ -49,6 +49,16 @@ class AppDataSnapshotCountTest {
         ),
         moodLogs = listOf(
             MoodLogEntity(id = 1, syncId = "mo1", entryDate = "2026-08-26", mood = DiaryMood.TIRED.name)
+        ),
+        contentMemos = listOf(
+            ContentMemoEntity(
+                id = 1,
+                syncId = "cm1",
+                contentItemId = 1,
+                contentItemSyncId = "i1",
+                contentTitle = "글귀",
+                body = "이 문장이 오늘 눈에 들어왔다."
+            )
         )
     )
 
@@ -69,12 +79,14 @@ class AppDataSnapshotCountTest {
         assertEquals("오늘 기분이 파일에 담기지 않았습니다.", 1, restored.moodLogs.size)
         assertEquals("2026-08-26", restored.moodLogs.single().entryDate)
         assertEquals(DiaryMood.TIRED, restored.moodLogs.single().moodOption)
+        assertEquals("글귀 메모가 파일에 담기지 않았습니다.", 1, restored.contentMemos.size)
+        assertEquals("i1", restored.contentMemos.single().contentItemSyncId)
     }
 
     @Test
     fun theCountAddsUpEveryKind() {
         // 새 종류를 만들고 recordCount에 더하지 않으면 여기서 걸립니다.
-        assertEquals(10, snapshot.recordCount)
+        assertEquals(11, snapshot.recordCount)
     }
 
     @Test

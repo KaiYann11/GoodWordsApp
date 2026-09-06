@@ -20,6 +20,7 @@ object SyncDelta {
             items = snapshot.items.filter { it.updatedAt > since },
             routines = snapshot.routines.filter { it.updatedAt > since },
             routineMemos = snapshot.routineMemos.filter { it.updatedAt > since },
+            contentMemos = snapshot.contentMemos.filter { it.updatedAt > since },
             diaries = snapshot.diaries.filter { it.updatedAt > since },
             todos = snapshot.todos.filter { it.updatedAt > since },
             books = snapshot.books.filter { it.updatedAt > since },

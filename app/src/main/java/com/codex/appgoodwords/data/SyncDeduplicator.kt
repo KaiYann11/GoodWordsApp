@@ -30,7 +30,11 @@ object SyncDeduplicator {
                 if (item.bookSyncId.isBlank()) item
                 else item.copy(bookSyncId = books.survivorOf(item.bookSyncId))
             },
-            routines = routines.kept,
+            // 사라진 글귀를 가리키던 루틴은 남은 글귀로 옮겨 붙입니다. 안 옮기면 출처를 잃습니다.
+            routines = routines.kept.map { routine ->
+                if (routine.sourceContentSyncId.isBlank()) routine
+                else routine.copy(sourceContentSyncId = items.survivorOf(routine.sourceContentSyncId))
+            },
             diaries = diaries.kept,
             todos = todos.kept,
             books = books.kept,
@@ -44,6 +48,9 @@ object SyncDeduplicator {
             },
             routineMemos = snapshot.routineMemos.map { memo ->
                 memo.copy(routineSyncId = routines.survivorOf(memo.routineSyncId))
+            },
+            contentMemos = snapshot.contentMemos.map { memo ->
+                memo.copy(contentItemSyncId = items.survivorOf(memo.contentItemSyncId))
             }
         )
     }

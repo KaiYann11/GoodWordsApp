@@ -12,12 +12,15 @@ import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.ContentDraft
+import com.codex.appgoodwords.data.ContentNormalizer
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.MoodLogEntity
+import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureTrigger
+import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.FeedbackWriter
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.LinkMetadata
@@ -30,6 +33,9 @@ import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DayScore
+import com.codex.appgoodwords.data.DayScoreCalculator
+import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
@@ -92,6 +98,10 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val routineMemos = container.repository.observeRoutineMemos()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 글귀 옆에 덧붙여 둔 메모. 상세 화면이 자기 글귀 것만 골라 씁니다. */
+    val contentMemos = container.repository.observeContentMemos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // 다섯 가지를 다 봅니다. 글귀와 루틴만 세면 앱이 하는 일의 절반만 돌아보는 셈입니다.
@@ -162,6 +172,103 @@ class MainViewModel(
 
     fun setDailySteps(steps: List<DailyStep>) {
         viewModelScope.launch { container.settingsStore.setDailySteps(steps) }
+    }
+
+    /**
+     * 최근 네 주의 점수 흐름.
+     *
+     * 저장하지 않고 그때그때 기록에서 셉니다. 하루의 축을 바꾸면 지난날 점수도 곧바로
+     * 새 기준이 됩니다([DayScoreCalculator]).
+     */
+    val scoreTrend = combine(
+        historyEvents,
+        routineChecks,
+        todos,
+        diaries,
+        container.settingsStore.dailyStepsFlow
+    ) { events, checks, todoList, diaryList, steps ->
+        DayScoreCalculator.trend(
+            today = LocalDate.now(),
+            events = events,
+            routineChecks = checks,
+            todos = todoList,
+            diaries = diaryList,
+            steps = steps
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        ScoreTrend(points = emptyList(), thisWeekAverage = 0, lastWeekAverage = 0)
+    )
+
+    /** 오늘 점수. 홈 카드가 씁니다. 흐름의 마지막 점과 같은 규칙으로 셈합니다. */
+    val todayScore = combine(
+        combine(historyEvents, routineChecks, todos, diaries) { events, checks, todoList, diaryList ->
+            DayInputs(events, checks, todoList, diaryList)
+        },
+        moodLogs,
+        container.settingsStore.dailyStepsFlow
+    ) { inputs, logs, steps ->
+        DayScoreCalculator.digest(
+            date = LocalDate.now(),
+            events = inputs.events,
+            routineChecks = inputs.routineChecks,
+            todos = inputs.todos,
+            diaries = inputs.diaries,
+            moodLogs = logs,
+            steps = steps
+        ).score
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        DayScore(
+            date = LocalDate.now(),
+            steps = DailyStep.DEFAULTS,
+            doneSteps = emptySet(),
+            routineChecks = 0,
+            todosDone = 0,
+            diaries = 0,
+            quotesRead = 0
+        )
+    )
+
+    /** 펼쳐 보고 있는 하루. null이면 닫힌 상태입니다. */
+    private val _openedDay = MutableStateFlow<LocalDate?>(null)
+
+    /**
+     * 펼쳐 본 하루의 요약.
+     *
+     * 날짜가 바뀌거나 그날 기록이 바뀌면 다시 셈합니다. 화면에서 셈하지 않고 여기서 만들어
+     * 내려보내야 [DayScoreCalculator]를 기기 없이 시험할 수 있습니다.
+     */
+    val openedDayDigest = combine(
+        _openedDay,
+        combine(historyEvents, routineChecks, todos, diaries) { events, checks, todoList, diaryList ->
+            DayInputs(events, checks, todoList, diaryList)
+        },
+        moodLogs,
+        container.settingsStore.dailyStepsFlow
+    ) { date, inputs, logs, steps ->
+        date?.let {
+            DayScoreCalculator.digest(
+                date = it,
+                events = inputs.events,
+                routineChecks = inputs.routineChecks,
+                todos = inputs.todos,
+                diaries = inputs.diaries,
+                moodLogs = logs,
+                steps = steps
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun openDay(date: LocalDate) {
+        // 오지 않은 날에 점수를 매길 수는 없습니다.
+        _openedDay.value = minOf(date, LocalDate.now())
+    }
+
+    fun closeDay() {
+        _openedDay.value = null
     }
 
     /**
@@ -324,7 +431,9 @@ class MainViewModel(
             reloadSyncBackups()
             // 앱을 다시 깔거나 기기를 껐다 켜면 예약이 사라질 수 있어 시작할 때 맞춰 둔다.
             container.reminderScheduler.syncAutoSync(container.settingsStore.getServerSyncSettings())
-            container.reminderScheduler.syncGrowthFeedback(container.settingsStore.getAiFeedbackSettings())
+            val aiSettings = container.settingsStore.getAiFeedbackSettings()
+            container.reminderScheduler.syncGrowthFeedback(aiSettings)
+            container.reminderScheduler.syncGrowthNudge(aiSettings)
             _lockState.value = if (container.settingsStore.appLockEnabledFlow.first()) {
                 AppLockState.LOCKED
             } else {
@@ -572,7 +681,8 @@ class MainViewModel(
                 eventCount = serverSnapshot.events.size,
                 routineCount = serverSnapshot.routines.size,
                 routineCheckCount = serverSnapshot.routineChecks.size,
-                routineMemoCount = serverSnapshot.routineMemos.size
+                routineMemoCount = serverSnapshot.routineMemos.size,
+                contentMemoCount = serverSnapshot.contentMemos.size
             ),
             backup = backup
         )
@@ -740,6 +850,7 @@ class MainViewModel(
         viewModelScope.launch {
             container.settingsStore.updateAiFeedbackSettings(updated)
             container.reminderScheduler.syncGrowthFeedback(updated)
+            container.reminderScheduler.syncGrowthNudge(updated)
         }
     }
 
@@ -756,15 +867,19 @@ class MainViewModel(
     }
 
     /**
-     * 글귀를 오늘부터 밟을 루틴으로 옮깁니다.
+     * 글귀를 오늘부터 밟을 루틴으로 뽑아냅니다.
      *
      * 모아 두는 것과 실천하는 것이 한 앱에 있는데, 그 사이를 잇는 길이 AI 추천에만 있었습니다.
+     * 뽑아낸 글귀를 함께 적어 두어, 나중에 루틴 쪽에서도 글귀 쪽에서도 이어진 것이 보입니다.
      */
-    suspend fun makeRoutineFromQuote(title: String): Result<Unit> = runCatching {
-        val trimmed = title.trim()
-        require(trimmed.isNotBlank()) { "루틴 이름이 비어 있습니다." }
-        container.repository.saveRoutine(RoutineDraft(title = trimmed, category = PRACTICE_CATEGORY))
-    }
+    suspend fun makeRoutineFromQuote(itemId: Long, title: String, note: String = ""): Result<Unit> =
+        runCatching {
+            container.repository.extractRoutineFromContent(
+                contentItemId = itemId,
+                title = title,
+                note = note
+            )
+        }
 
     /** 글귀를 오늘 할 일로 옮깁니다. 날짜는 할 일 화면에서 바꿉니다. */
     suspend fun makeTodoFromQuote(title: String): Result<Unit> = runCatching {
@@ -811,6 +926,15 @@ class MainViewModel(
         container.repository.deleteRoutineMemo(memoId)
     }
 
+    /** 글귀에 메모를 답니다. 루틴 메모와 달리 실천으로 세지 않습니다. */
+    suspend fun saveContentMemo(contentItemId: Long, body: String): Result<Long> = runCatching {
+        container.repository.saveContentMemo(contentItemId, body)
+    }
+
+    suspend fun deleteContentMemo(memoId: Long): Result<Int> = runCatching {
+        container.repository.deleteContentMemo(memoId)
+    }
+
     suspend fun deleteHistoryEvents(eventIds: Set<Long>): Result<Int> = runCatching {
         require(eventIds.isNotEmpty()) { "삭제할 이력이 없습니다." }
         val removedCount = container.repository.deleteExposureEvents(eventIds)
@@ -833,8 +957,10 @@ class MainViewModel(
     }
 
     suspend fun saveContent(draft: ContentDraft): Result<Unit> = runCatching {
-        val normalized = normalizeDraft(draft)
-        validate(normalized)
+        // 공유로 바로 담는 길(ShareTargetActivity)과 같은 규칙을 씁니다.
+        // 여기에 따로 두면 같은 링크가 담는 길에 따라 다른 종류가 됩니다.
+        val normalized = ContentNormalizer.normalize(draft)
+        ContentNormalizer.validate(normalized)
         container.repository.saveContent(normalized)
     }
 
@@ -877,58 +1003,6 @@ class MainViewModel(
         container.repository.fetchLinkMetadata(url.trim())
     }
 
-    private fun normalizeDraft(draft: ContentDraft): ContentDraft {
-        val generatedTitle = when {
-            draft.title.isNotBlank() -> draft.title.trim()
-            draft.body.isNotBlank() -> draft.body.trim().take(24)
-            draft.sourceUrl.isNotBlank() -> draft.sourceUrl.trim()
-            draft.imageUris.isNotEmpty() -> displayNameFromUri(draft.imageUris.first())
-            draft.videoUris.isNotEmpty() -> displayNameFromUri(draft.videoUris.first())
-            else -> ""
-        }
-
-        return draft.copy(
-            type = detectContentType(draft),
-            title = generatedTitle,
-            body = draft.body.trim(),
-            author = draft.author.trim(),
-            sourceUrl = draft.sourceUrl.trim(),
-            thumbnailUrl = draft.thumbnailUrl.trim(),
-            category = draft.category.trim(),
-            tags = draft.tags.map(String::trim).filter(String::isNotBlank),
-            imageUris = draft.imageUris.map(String::trim).filter(String::isNotBlank).distinct(),
-            videoUris = draft.videoUris.map(String::trim).filter(String::isNotBlank).distinct()
-        )
-    }
-
-    private fun validate(draft: ContentDraft) {
-        require(
-            draft.body.isNotBlank() ||
-                draft.sourceUrl.isNotBlank() ||
-                draft.imageUris.isNotEmpty() ||
-                draft.videoUris.isNotEmpty()
-        ) { "본문, 링크, 사진, 영상 중 하나는 넣어야 합니다." }
-    }
-
-    private fun detectContentType(draft: ContentDraft): ContentType {
-        // 번뜩인 것은 겉모습으로 알 수 없습니다. 담는 사람이 짚어 준 것을 덮어쓰지 않습니다.
-        if (draft.type == ContentType.IDEA) return ContentType.IDEA
-        val url = draft.sourceUrl.trim().lowercase()
-        return when {
-            url.contains("youtube.com") ||
-                url.contains("youtu.be") ||
-                url.contains("vimeo.com") ||
-                url.contains("tiktok.com") -> ContentType.VIDEO
-            url.isNotBlank() -> ContentType.LINK
-            else -> ContentType.QUOTE
-        }
-    }
-
-    private fun displayNameFromUri(uriString: String): String {
-        val lastSegment = Uri.parse(uriString).lastPathSegment.orEmpty()
-        return lastSegment.substringAfterLast('/').substringAfterLast(':').ifBlank { "새 게시글" }
-    }
-
     private fun applyConfirmedState(
         base: Set<Long>,
         itemId: Long,
@@ -961,11 +1035,16 @@ class MainViewModel(
 
         /** AI가 권해서 담은 것에 붙는 카테고리. 나중에 골라 보기 쉽게 표시해 둡니다. */
         const val AI_CATEGORY = "AI 추천"
-
-        /** 글귀에서 옮겨 온 실천에 붙는 카테고리. 어디서 비롯됐는지 나중에 알아보려는 것입니다. */
-        const val PRACTICE_CATEGORY = "글귀에서"
     }
 }
+
+/** 하루 요약에 넣을 기록들. combine이 한 번에 넷까지만 받아서 묶습니다. */
+private data class DayInputs(
+    val events: List<ExposureEventEntity>,
+    val routineChecks: List<RoutineCheckEntity>,
+    val todos: List<TodoEntity>,
+    val diaries: List<DiaryEntity>
+)
 
 /** combine이 한 번에 넷까지만 받아서, 통계에 넣을 것들을 한 덩어리로 묶습니다. */
 private data class StatsInputs(

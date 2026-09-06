@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.DayScore
+import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.FeedbackKind
 import com.codex.appgoodwords.data.FeedbackNote
 import com.codex.appgoodwords.data.GrowthReportEntity
@@ -90,7 +92,12 @@ fun HomeScreen(
     /** 번뜩인 것을 한 줄로 담습니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
     onCaptureIdea: (String) -> Unit = {},
     /** 왼쪽으로 밀었을 때. 담는 칸을 띄웁니다. */
-    onSwipeToCapture: () -> Unit = {}
+    onSwipeToCapture: () -> Unit = {},
+    /** 오늘 점수와 최근 흐름. null이면 카드를 두지 않습니다. */
+    todayScore: DayScore? = null,
+    scoreTrend: ScoreTrend? = null,
+    /** 그날 요약을 펼칩니다. 그래프의 막대를 눌러도 옵니다. */
+    onOpenDay: (LocalDate) -> Unit = {}
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
@@ -123,7 +130,19 @@ fun HomeScreen(
             }
         }
 
-        // 걸음 바로 아래입니다. 3초짜리라 손이 가장 먼저 닿는 자리에 두어야 하고,
+        // 걸음이 "오늘 무엇을 할까"라면 점수는 "요즘 어떻게 가고 있나"입니다.
+        // 걸음 바로 아래에 두어, 오늘 한 걸음이 흐름의 어디에 놓이는지 이어서 읽힙니다.
+        if (todayScore != null && scoreTrend != null) {
+            item {
+                DayScoreCard(
+                    todayScore = todayScore,
+                    trend = scoreTrend,
+                    onOpenDay = onOpenDay
+                )
+            }
+        }
+
+        // 3초짜리라 손이 가장 먼저 닿는 자리에 두어야 하고,
         // 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
         item {
             TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
