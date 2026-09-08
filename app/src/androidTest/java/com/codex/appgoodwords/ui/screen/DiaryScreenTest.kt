@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -316,6 +317,77 @@ class DiaryScreenTest {
 
         // 접혀 있어도 첨부가 있다는 것은 알려 줘야 열어 볼지 정할 수 있습니다.
         compose.onNodeWithText("2026-08-17  ·  사진 2").assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingAPhotoOpensItFullScreen() {
+        // 미리보기는 96dp 정사각형으로 잘라서 보여 줍니다. 가로로 긴 사진이나 글씨가 든
+        // 사진은 그 안에서 무엇인지 알아볼 수 없습니다.
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        title = "제목",
+                        imageUris = listOf("content://a", "content://b")
+                    )
+                )
+            )
+        }
+
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+        compose.onNodeWithTag(attachmentThumbnailTag("content://a")).performClick()
+
+        compose.onNodeWithTag(attachmentViewerTag).assertIsDisplayed()
+        // 몇 장 중 몇 번째인지 알려 주지 않으면 옆으로 밀 수 있다는 것을 모릅니다.
+        compose.onNodeWithTag(attachmentViewerCountTag, useUnmergedTree = true).assertTextEquals("1 / 2")
+    }
+
+    @Test
+    fun theViewerOpensAtThePhotoThatWasTapped() {
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        title = "제목",
+                        imageUris = listOf("content://a", "content://b", "content://c")
+                    )
+                )
+            )
+        }
+
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+        compose.onNodeWithTag(attachmentThumbnailTag("content://c")).performClick()
+
+        // 누른 자리에서 열려야 합니다. 늘 첫 장부터 열면 다시 밀어 찾아가야 합니다.
+        compose.onNodeWithTag(attachmentViewerCountTag, useUnmergedTree = true).assertTextEquals("3 / 3")
+    }
+
+    @Test
+    fun aVideoThumbnailDoesNotOpenThePhotoViewer() {
+        // 사진 보기로 열면 첫 프레임도 없이 검은 화면만 뜹니다.
+        compose.setContent {
+            diaryScreen(
+                diaries = listOf(
+                    DiaryEntity(
+                        id = 1,
+                        syncId = "diary-1",
+                        entryDate = "2026-08-17",
+                        title = "제목",
+                        videoUris = listOf("content://movie")
+                    )
+                )
+            )
+        }
+
+        compose.onNodeWithTag(diaryCardTag(1)).performClick()
+
+        compose.onNodeWithTag(attachmentThumbnailTag("content://movie")).assertDoesNotExist()
     }
 
     @Test

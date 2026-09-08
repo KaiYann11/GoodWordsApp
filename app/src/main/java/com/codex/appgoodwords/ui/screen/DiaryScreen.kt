@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -116,6 +117,8 @@ fun DiaryScreen(
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
+    /** 크게 보고 있는 사진. null이면 닫힌 상태입니다. */
+    var viewing by remember { mutableStateOf<ViewedAttachments?>(null) }
     /**
      * 펼쳐 둔 일기.
      *
@@ -273,9 +276,13 @@ fun DiaryScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             AttachmentThumbnails(
-                                uris = diary.imageUris + diary.videoUris,
+                                imageUris = diary.imageUris,
+                                videoUris = diary.videoUris,
                                 serverUrl = serverUrl,
-                                apiKey = apiKey
+                                apiKey = apiKey,
+                                onOpenImage = { index ->
+                                    viewing = ViewedAttachments(diary.imageUris, index)
+                                }
                             )
                         }
                         // 고치기와 지우기는 펼쳤을 때만 둡니다. 접힌 목록에 버튼이 줄지어 있으면
@@ -290,6 +297,16 @@ fun DiaryScreen(
                 }
             }
         }
+    }
+
+    viewing?.let { shown ->
+        AttachmentViewerDialog(
+            uris = shown.uris,
+            startIndex = shown.index,
+            onDismiss = { viewing = null },
+            serverUrl = serverUrl,
+            apiKey = apiKey
+        )
     }
 
     editing?.let { draft ->
@@ -328,12 +345,25 @@ fun DiaryScreen(
  * 서버 첨부는 API 키가 필요해서 헤더를 실어 보냅니다. 주소에 키를 붙이면 기록에 남습니다.
  */
 @Composable
-private fun AttachmentThumbnails(uris: List<String>, serverUrl: String, apiKey: String) {
+private fun AttachmentThumbnails(
+    imageUris: List<String>,
+    videoUris: List<String>,
+    serverUrl: String,
+    apiKey: String,
+    /**
+     * 사진을 눌렀을 때. 몇 번째 사진인지를 함께 넘겨, 연 자리에서부터 옆으로 밀 수 있게 합니다.
+     *
+     * **사진만 엽니다.** 어느 것이 영상인지는 주소를 보고 짐작하지 않고 일기가 나눠 둔
+     * 두 목록으로 가릅니다. 확장자로 짐작하면 서버 주소(`appgoodwords://...`)에서 틀립니다.
+     */
+    onOpenImage: (Int) -> Unit = {}
+) {
+    val uris = imageUris + videoUris
     if (uris.isEmpty()) return
     val context = LocalContext.current
 
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(uris) { uri ->
+        itemsIndexed(uris) { index, uri ->
             val model = remember(uri, serverUrl, apiKey) {
                 val target = AttachmentUris.toHttpUrl(serverUrl, uri) ?: uri.takeIf { AttachmentUris.isLocal(it) }
                 target?.let { data ->
@@ -360,14 +390,25 @@ private fun AttachmentThumbnails(uris: List<String>, serverUrl: String, apiKey: 
                     )
                 }
             } else {
+                // 미리보기는 잘라서 보여 주므로 눌러서 전체를 볼 수 있어야 합니다.
+                val isImage = index < imageUris.size
                 AsyncImage(
                     model = model,
-                    contentDescription = "붙여 둔 첨부",
+                    contentDescription = if (isImage) "붙여 둔 사진, 눌러서 크게 보기" else "붙여 둔 영상",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(96.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .then(
+                            if (isImage) {
+                                Modifier
+                                    .clickable { onOpenImage(index) }
+                                    .testTag(attachmentThumbnailTag(uri))
+                            } else {
+                                Modifier
+                            }
+                        )
                 )
             }
         }
@@ -574,3 +615,13 @@ private fun android.content.Context.persistDiaryReadPermission(uri: Uri) {
         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 }
+
+/**
+ * 크게 보고 있는 사진들과, 그중 몇 번째를 열었는지.
+ *
+ * 목록과 자리를 따로 두면 둘이 어긋나 엉뚱한 사진이 먼저 뜹니다.
+ */
+private data class ViewedAttachments(
+    val uris: List<String>,
+    val index: Int
+)
