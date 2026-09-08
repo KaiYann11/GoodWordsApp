@@ -46,6 +46,8 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.PendingGrowthPrompt
 import com.codex.appgoodwords.data.ReportPeriod
 import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -59,6 +61,9 @@ internal const val growthTidyButtonTag = "growth_tidy_button"
 internal fun growthListFilterTag(name: String): String = "growth_list_filter_" + name.ifBlank { "all" }
 
 internal const val growthLastReviewedTag = "growth_last_reviewed"
+
+/** 목록이 길어 아래쪽은 아직 안 그려져 있습니다. 시험이 굴러갈 자리를 잡아 둡니다. */
+internal const val growthListTag = "growth_list"
 
 /**
  * 마지막으로 돌아본 것이 언제인지 한 줄로.
@@ -149,6 +154,9 @@ fun GrowthFeedbackScreen(
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
     var pasting by rememberSaveable { mutableStateOf(false) }
     var listFilter by rememberSaveable { mutableStateOf(ReportListFilter.ALL.name) }
+    // 달력이 보고 있는 달과 고른 날. 화면을 떠났다 와도 보던 달이 남습니다.
+    var calendarMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
+    var selectedDateText by rememberSaveable { mutableStateOf<String?>(null) }
     var tidying by rememberSaveable { mutableStateOf(false) }
     val period = ReportPeriod.of(selectedPeriod)
     val deletingReport = reports.firstOrNull { it.id == deleting }
@@ -213,7 +221,9 @@ fun GrowthFeedbackScreen(
     }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag(growthListTag),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -317,6 +327,24 @@ fun GrowthFeedbackScreen(
                     }
                 }
             }
+        }
+
+        // 목록만 있으면 "어느 구간을 빠뜨렸나"를 알 수 없습니다. 날짜에 놓아야 빈 자리가 보입니다.
+        item {
+            GrowthCalendarCard(
+                reports = reports,
+                month = runCatching { YearMonth.parse(calendarMonthText) }
+                    .getOrDefault(YearMonth.now()),
+                selectedDate = selectedDateText?.let { text ->
+                    runCatching { LocalDate.parse(text) }.getOrNull()
+                },
+                onMonthChanged = { target ->
+                    calendarMonthText = target.toString()
+                    // 달을 넘기면 고른 날은 지웁니다. 안 보이는 날이 골라진 채로 남습니다.
+                    selectedDateText = null
+                },
+                onDateSelected = { date -> selectedDateText = date.toString() }
+            )
         }
 
         // 쌓이고 나면 목록이 한 줄로 끝없이 이어집니다. 하루 주기로 돌리면 한 해에 삼백 장이
