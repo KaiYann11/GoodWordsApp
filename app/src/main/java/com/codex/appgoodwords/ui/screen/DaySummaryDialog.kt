@@ -9,7 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DayDigest
 import java.time.LocalDate
@@ -59,29 +65,42 @@ fun DaySummaryDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag(daySummaryDialogTag),
         title = {
+            // 셋 다 제 몫을 주장하면 글자가 잘립니다. 화살표는 제 너비만 쓰고, 남는 자리를
+            // 모두 날짜에 줍니다(weight). 글자 크기를 키워 둔 기기에서 특히 그렇습니다 —
+            // "이전"·"다음"이라고 적어 두면 그 글자부터 자리를 차지해 정작 날짜가 잘립니다.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
+                IconButton(
                     onClick = { onMove(date.minusDays(1)) },
                     modifier = Modifier.testTag(daySummaryPrevTag)
                 ) {
-                    Text("이전")
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+                        contentDescription = "앞날로"
+                    )
                 }
                 Text(
                     text = titleOf(date, today),
-                    modifier = Modifier.testTag(daySummaryTitleTag),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(daySummaryTitleTag),
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    // 그래도 모자라면 줄을 바꿉니다. 자르는 것보다 낫습니다.
+                    maxLines = 2
                 )
-                TextButton(
+                IconButton(
                     onClick = { onMove(date.plusDays(1)) },
                     enabled = date < today,
                     modifier = Modifier.testTag(daySummaryNextTag)
                 ) {
-                    Text("다음")
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                        contentDescription = "다음 날로"
+                    )
                 }
             }
         },

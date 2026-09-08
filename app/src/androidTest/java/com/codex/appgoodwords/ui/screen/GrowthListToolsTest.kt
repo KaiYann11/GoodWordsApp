@@ -1,10 +1,12 @@
 package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
 import org.junit.Assert.assertEquals
@@ -54,6 +56,9 @@ class GrowthListToolsTest {
 
         compose.onNodeWithTag(growthListFilterTag(ReportListFilterName.MONTHLY)).performClick()
 
+        // 목록은 달력 아래에 있어 아직 안 그려져 있습니다. 굴려야 나옵니다.
+        compose.onNodeWithTag(growthListTag).performScrollToNode(hasText("가이드 2"))
+
         // 한 달짜리는 하나뿐입니다.
         compose.onNodeWithText("가이드 2").assertExists()
         compose.onNodeWithText("가이드 5").assertDoesNotExist()
@@ -65,6 +70,9 @@ class GrowthListToolsTest {
         compose.setContent { growthScreen(reports = listOf(report(1, ReportPeriod.DAILY), report(2, ReportPeriod.DAILY), report(3, ReportPeriod.DAILY), report(4, ReportPeriod.DAILY))) }
 
         compose.onNodeWithTag(growthListFilterTag(ReportListFilterName.MONTHLY)).performClick()
+
+        compose.onNodeWithTag(growthListTag)
+            .performScrollToNode(hasText("거르개를 전체로 두면", substring = true))
 
         compose.onNodeWithText("거르개를 전체로 두면", substring = true).assertExists()
     }
