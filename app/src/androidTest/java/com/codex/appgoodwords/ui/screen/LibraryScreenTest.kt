@@ -2,10 +2,16 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertContentDescriptionContains
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
 import org.junit.Assert.assertTrue
@@ -108,6 +114,36 @@ class LibraryScreenTest {
             title = "글귀 $index",
             body = "본문 $index"
         )
+    }
+
+    @Test
+    fun aSearchMissDoesNotClaimThatEverythingWasReadAndCanBeReset() {
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = setOf(1L)) }
+
+        compose.onNodeWithTag(librarySearchTag).performTextInput("없는 검색어")
+        compose.onNodeWithTag(librarySearchTag).performImeAction()
+        compose.onNodeWithTag(libraryListTag).performScrollToNode(hasText("조건에 맞는 글귀가 없습니다."))
+        compose.onNodeWithText("조건에 맞는 글귀가 없습니다.").assertIsDisplayed()
+        compose.onNodeWithText("오늘 읽을 글귀를 다 넘겼습니다.").assertDoesNotExist()
+        compose.onNodeWithTag(libraryListTag).performScrollToNode(hasText("전체 보기"))
+        compose.onNodeWithText("전체 보기").performClick()
+
+        compose.onNodeWithTag(libraryListTag).performScrollToNode(hasText("글귀 1"))
+        compose.onNodeWithText("글귀 1").assertIsDisplayed()
+        compose.onNodeWithContentDescription("검색어 지우기").assertDoesNotExist()
+    }
+
+    @Test
+    fun clearingTheQueryKeepsTheReadingFilter() {
+        compose.setContent { libraryScreen(items = threeQuotes, confirmedTodayIds = setOf(1L)) }
+
+        compose.onNodeWithTag(librarySearchTag).performTextInput("없는 검색어")
+        compose.onNodeWithTag(librarySearchTag).performImeAction()
+        compose.onNodeWithContentDescription("검색어 지우기").performClick()
+
+        compose.onNodeWithTag(libraryReadFilterTag("UNREAD")).assertIsSelected()
+        compose.onNodeWithText("글귀 1").assertDoesNotExist()
+        compose.onNodeWithText("글귀 2").assertIsDisplayed()
     }
 
     @androidx.compose.runtime.Composable

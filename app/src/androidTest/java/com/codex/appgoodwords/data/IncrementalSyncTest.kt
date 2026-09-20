@@ -2,6 +2,7 @@ package com.codex.appgoodwords.data
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import com.codex.appgoodwords.AppGoodWordsApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -19,18 +20,21 @@ import org.junit.Test
  * 여기서 확인하려는 것은 "덜 보내면서도 안 잃는가"입니다.
  *
  * 서버가 떠 있지 않으면 건너뜁니다.
- * 실행 방법: `node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765`
+ * testServerUrl에는 운영 데이터가 없는 별도 HTTPS 테스트 서버를 지정합니다.
  */
 class IncrementalSyncTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val container = (context as AppGoodWordsApplication).container
     private val client = ServerSyncClient()
-    private val settings = ServerSyncSettings(serverUrl = "http://10.0.2.2:8765", apiKey = "")
+    private val settings = ServerSyncSettings(
+        serverUrl = InstrumentationRegistry.getArguments().getString("testServerUrl").orEmpty(),
+        apiKey = InstrumentationRegistry.getArguments().getString("testServerApiKey").orEmpty()
+    )
 
     @Before
     fun requireServer() {
-        val reachable = runCatching { runBlocking { client.testConnection(settings) } }.isSuccess
-        assumeTrue("서버가 떠 있지 않아 건너뜁니다.", reachable)
+        assumeTrue("testServerUrl에 별도 HTTPS 테스트 서버를 지정해 주세요.", settings.serverUrl.isNotBlank())
+        runBlocking { client.testConnection(settings) }
     }
 
     @After

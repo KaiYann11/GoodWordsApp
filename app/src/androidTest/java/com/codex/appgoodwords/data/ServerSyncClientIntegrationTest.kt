@@ -1,5 +1,7 @@
 package com.codex.appgoodwords.data
 
+import androidx.test.platform.app.InstrumentationRegistry
+
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -12,18 +14,61 @@ import org.junit.Test
  * 병합 규칙 자체는 SyncMergerTest와 서버 테스트가 덮고, 여기서는 둘 사이의 전송 형식을 봅니다.
  *
  * 서버가 떠 있지 않으면 건너뜁니다.
- * 실행 방법: `node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765`
+ * testServerUrl에는 운영 데이터가 없는 별도 HTTPS 테스트 서버를 지정합니다.
  */
 class ServerSyncClientIntegrationTest {
     private val client = ServerSyncClient()
 
-    // 에뮬레이터에서 호스트 PC를 가리키는 주소.
-    private val settings = ServerSyncSettings(serverUrl = "http://10.0.2.2:8765", apiKey = "")
+    private val settings = ServerSyncSettings(
+        serverUrl = InstrumentationRegistry.getArguments().getString("testServerUrl").orEmpty(),
+        apiKey = InstrumentationRegistry.getArguments().getString("testServerApiKey").orEmpty()
+    )
 
     @Before
     fun requireServer() {
-        val reachable = runCatching { runBlocking { client.testConnection(settings) } }.isSuccess
-        assumeTrue("서버가 떠 있지 않아 건너뜁니다.", reachable)
+        assumeTrue("testServerUrl에 별도 HTTPS 테스트 서버를 지정해 주세요.", settings.serverUrl.isNotBlank())
+        runBlocking { client.testConnection(settings) }
+    }
+
+    @Test
+    fun notToDoTextSurvivesEditAndDeletionAcrossDevices() = runBlocking {
+        val now = System.currentTimeMillis()
+        val rule = ContentItemEntity(
+            syncId = "e2e-not-to-do-${SyncIdentity.newId()}", type = ContentType.NOT_TO_DO,
+            title = "하지 않을 일 ${SyncIdentity.newId()}", body = "", updatedAt = now - 2_000L
+        )
+        val sent = client.mergeSnapshot(settings, snapshotWith(items = listOf(rule)))
+        assertEquals(ContentType.NOT_TO_DO, sent.items.single { it.syncId == rule.syncId }.type)
+        val edited = rule.copy(body = "첫 줄\n둘째 줄", updatedAt = now - 1_000L)
+        client.mergeSnapshot(settings, snapshotWith(items = listOf(edited)))
+        val stale = client.mergeSnapshot(settings, snapshotWith(items = listOf(rule)))
+        assertEquals(edited.body, stale.items.single { it.syncId == rule.syncId }.body)
+        client.mergeSnapshot(settings, snapshotWith(deletions = listOf(
+            // 보존 기간 안의 표식으로 시험합니다. 1970년 시각을 쓰면 서버가 오래된 표식으로 정리합니다.
+            DeletionEntity(syncId = rule.syncId, entityType = SyncEntityType.CONTENT_ITEM, deletedAt = now)
+        )))
+        val deleted = client.mergeSnapshot(settings, snapshotWith(items = listOf(rule)))
+        assertTrue(deleted.items.none { it.syncId == rule.syncId })
+    }
+
+    @Test
+    fun classifyingInboxTextSurvivesAStaleDeviceSync() = runBlocking {
+        val syncId = "e2e-inbox-${SyncIdentity.newId()}"
+        val pending = ContentItemEntity(
+            syncId = syncId, type = ContentType.INBOX, title = "수집한 글 $syncId",
+            body = "원문 첫 줄\n두 번째 줄", sourceUrl = "https://example.com/$syncId",
+            updatedAt = 1_000L
+        )
+        val received = client.mergeSnapshot(settings, snapshotWith(items = listOf(pending)))
+        assertEquals(ContentType.INBOX, received.items.single { it.syncId == syncId }.type)
+
+        val memo = pending.copy(type = ContentType.MEMO, updatedAt = 2_000L)
+        client.mergeSnapshot(settings, snapshotWith(items = listOf(memo)))
+        val merged = client.mergeSnapshot(settings, snapshotWith(items = listOf(pending)))
+        val saved = merged.items.single { it.syncId == syncId }
+        assertEquals(ContentType.MEMO, saved.type)
+        assertEquals(pending.body, saved.body)
+        assertEquals(pending.sourceUrl, saved.sourceUrl)
     }
 
     @Test

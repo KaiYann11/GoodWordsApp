@@ -2,16 +2,20 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,8 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
@@ -61,37 +67,35 @@ fun DailyLoopCard(
         modifier = modifier
             .fillMaxWidth()
             .testTag(dailyLoopCardTag),
-        colors = if (progress.isComplete) {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        } else {
-            CardDefaults.cardColors()
-        }
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("오늘의 ${progress.stepCount}걸음", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "오늘의 ${progress.stepCount}걸음",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).padding(end = 12.dp)
+                )
                 Text(
                     text = "${progress.doneCount} / ${progress.stepCount}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (progress.isComplete) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
             LinearProgressIndicator(
                 progress = { ratio },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                trackColor = MaterialTheme.colorScheme.primaryContainer
             )
 
             Text(progress.message, style = MaterialTheme.typography.bodyMedium)
@@ -131,13 +135,23 @@ private fun StepRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isNext) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag(dailyLoopStepTag(step))
+            .heightIn(min = 56.dp)
+            .semantics { stateDescription = if (done) "완료" else if (isNext) "다음 걸음" else "아직 시작 전" }
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Box(
             modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape)
+                .border(
+                    width = 1.5.dp,
+                    color = if (done || isNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    shape = CircleShape
+                )
                 .background(
                     if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
                 ),
@@ -153,13 +167,12 @@ private fun StepRow(
             }
         }
 
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = step.label,
                 style = MaterialTheme.typography.bodyLarge,
                 // 끝낸 걸음은 흐리게 두어, 남은 것이 저절로 눈에 들어오게 합니다.
                 fontWeight = if (isNext) FontWeight.SemiBold else FontWeight.Normal,
-                textDecoration = if (done) TextDecoration.LineThrough else null,
                 color = if (done) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
@@ -175,5 +188,11 @@ private fun StepRow(
                 )
             }
         }
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+            contentDescription = null,
+            tint = if (isNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }

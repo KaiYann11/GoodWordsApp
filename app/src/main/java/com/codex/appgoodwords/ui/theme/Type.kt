@@ -8,17 +8,17 @@ import androidx.compose.ui.unit.sp
 val AppTypography = Typography(
     headlineMedium = TextStyle(
         fontSize = 30.sp,
-        lineHeight = 34.sp,
+        lineHeight = 38.sp,
         fontWeight = FontWeight.Bold
     ),
     titleLarge = TextStyle(
         fontSize = 24.sp,
-        lineHeight = 28.sp,
+        lineHeight = 32.sp,
         fontWeight = FontWeight.Bold
     ),
     titleMedium = TextStyle(
         fontSize = 18.sp,
-        lineHeight = 22.sp,
+        lineHeight = 26.sp,
         fontWeight = FontWeight.SemiBold
     ),
     titleSmall = TextStyle(
@@ -29,17 +29,17 @@ val AppTypography = Typography(
     bodyLarge = TextStyle(
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        fontWeight = FontWeight.Medium
+        fontWeight = FontWeight.Normal
     ),
     bodyMedium = TextStyle(
         fontSize = 14.sp,
         lineHeight = 22.sp,
-        fontWeight = FontWeight.Medium
+        fontWeight = FontWeight.Normal
     ),
     bodySmall = TextStyle(
         fontSize = 12.sp,
         lineHeight = 18.sp,
-        fontWeight = FontWeight.Medium
+        fontWeight = FontWeight.Normal
     ),
     labelLarge = TextStyle(
         fontSize = 14.sp,

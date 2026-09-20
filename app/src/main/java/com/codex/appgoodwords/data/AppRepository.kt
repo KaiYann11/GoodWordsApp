@@ -86,32 +86,59 @@ class AppRepository(
     }
 
     /**
-     * 다른 앱에서 공유해 온 것을 보관함에 바로 담습니다.
-     *
-     * 담는 화면을 거치지 않으므로 [ContentNormalizer]를 여기서 부릅니다. 안 부르면 종류를
-     * 알아내지 못해 유튜브 링크가 영상이 아니라 글귀로 담깁니다.
-     *
-     * **같은 주소를 두 번 담지 않습니다.** 공유는 손이 가벼워서 같은 영상을 여러 번 보내게
-     * 되는데, 그때마다 쌓이면 보관함이 같은 것으로 채워집니다. 병합이 나중에 합쳐 주기는
-     * 하지만(`SyncDeduplicator`), 그전까지는 목록에 두 벌로 보입니다.
+     * 공유하거나 붙여넣은 글은 먼저 임시저장소에 모읍니다.
+     * 같은 원문을 연달아 보내도 한 번만 담되, 같은 주소의 다른 문장은 보존합니다.
      */
-    suspend fun saveSharedContent(draft: ContentDraft): SharedSaveResult {
-        val normalized = ContentNormalizer.normalize(draft)
+    suspend fun saveSharedContent(draft: ContentDraft): SharedSaveResult = database.withTransaction {
+        val normalized = ContentNormalizer.normalize(draft.copy(type = ContentType.INBOX))
         ContentNormalizer.validate(normalized)
 
-        val existing = normalized.sourceUrl
-            .takeIf { it.isNotBlank() }
-            ?.let { contentItemDao.findBySourceUrl(it) }
+        val existing = contentItemDao.findInboxMatch(normalized.title, normalized.body, normalized.sourceUrl)
         if (existing != null) {
-            return SharedSaveResult(
+            return@withTransaction SharedSaveResult(
                 title = existing.title.ifBlank { existing.body.take(24) },
                 alreadyKept = true
             )
         }
 
         saveContent(normalized)
-        return SharedSaveResult(title = normalized.title, alreadyKept = false)
+        SharedSaveResult(title = normalized.title, alreadyKept = false)
     }
+
+    /** 복사본을 만들지 않고 분류만 바꿔 원문·첨부·메모와 기기 간 식별자를 지킵니다. */
+    suspend fun classifyInboxItem(id: Long, destination: ContentType) = database.withTransaction {
+        require(destination in listOf(ContentType.MEMO, ContentType.QUOTE, ContentType.IDEA)) {
+            "옮길 곳을 선택해 주세요."
+        }
+        val item = contentItemDao.getById(id) ?: error("정리할 글을 찾을 수 없습니다.")
+        check(item.type == ContentType.INBOX) { "이미 정리한 글입니다." }
+        val type = ContentNormalizer.detectType(ContentDraft.fromItem(item).copy(type = destination))
+        contentItemDao.insert(item.copy(type = type, updatedAt = maxOf(System.currentTimeMillis(), item.updatedAt + 1)))
+    }
+
+    /** AI 답을 붙이고 개념으로 옮기는 두 저장을 한꺼번에 끝냅니다. */
+    suspend fun saveConceptExplanation(id: Long, explanation: String): ContentItemEntity =
+        database.withTransaction {
+            val item = contentItemDao.getById(id) ?: error("임시저장 글을 찾을 수 없습니다.")
+            check(item.type == ContentType.INBOX) { "이미 정리한 글입니다." }
+            val answer = ConceptExplanation.memoBody(explanation)
+            val changedAt = maxOf(System.currentTimeMillis(), item.updatedAt + 1L)
+            val concept = item.copy(type = ContentType.CONCEPT, updatedAt = changedAt)
+            contentItemDao.insert(concept)
+            contentMemoDao.insert(
+                ContentMemoEntity(
+                    updatedAt = changedAt,
+                    contentItemId = concept.id,
+                    contentItemSyncId = concept.syncId,
+                    contentTitle = concept.title.ifBlank { concept.body.take(24) },
+                    body = answer,
+                    createdAt = changedAt
+                )
+            )
+            concept
+        }
+
+    suspend fun getContentItem(id: Long): ContentItemEntity? = contentItemDao.getById(id)
 
     suspend fun deleteContent(id: Long) {
         val existing = contentItemDao.getById(id)
@@ -173,8 +200,7 @@ class AppRepository(
     private suspend fun pickCandidate(category: String): ContentItemEntity? {
         return contentItemDao.pickLeastRecentlySurfaced(
             category = category,
-            poolSize = SURFACE_POOL_SIZE,
-            excluded = ContentType.IDEA
+            poolSize = SURFACE_POOL_SIZE
         )
     }
 
@@ -203,6 +229,7 @@ class AppRepository(
         trigger: ExposureTrigger
     ) {
         val item = contentItemDao.getById(contentItemId) ?: return
+        if (item.type in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT)) return
         val viewedAt = System.currentTimeMillis()
 
         exposureEventDao.insert(
@@ -223,6 +250,7 @@ class AppRepository(
         trigger: ExposureTrigger
     ): Boolean {
         val item = contentItemDao.getById(contentItemId) ?: return false
+        if (item.type in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT)) return false
         val (start, end) = todayRange()
         val existingCount = exposureEventDao.countEventsForRange(
             contentItemId = contentItemId,

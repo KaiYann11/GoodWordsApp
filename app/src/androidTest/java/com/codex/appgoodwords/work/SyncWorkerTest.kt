@@ -2,6 +2,7 @@ package com.codex.appgoodwords.work
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.codex.appgoodwords.AppGoodWordsApplication
@@ -21,14 +22,15 @@ import org.junit.Test
  * 화면 없이 도는 경로라 눌러 볼 수가 없고, 조용히 실패하면 사용자는 동기화가 되고 있다고 믿습니다.
  *
  * 서버가 떠 있지 않으면 병합 테스트는 건너뜁니다.
- * 실행 방법: `node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765`
+ * testServerUrl에는 운영 데이터가 없는 별도 HTTPS 테스트 서버를 지정합니다.
  */
 class SyncWorkerTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val container = (context as AppGoodWordsApplication).container
 
-    // 에뮬레이터에서 호스트 PC를 가리키는 주소.
-    private val serverUrl = "http://10.0.2.2:8765"
+    // 테스트할 때만 전달하며 운영 서버를 사용하지 않습니다.
+    private val serverUrl = InstrumentationRegistry.getArguments().getString("testServerUrl").orEmpty()
+    private val serverApiKey = InstrumentationRegistry.getArguments().getString("testServerApiKey").orEmpty()
 
     @After
     fun tearDown() = runBlocking {
@@ -80,9 +82,10 @@ class SyncWorkerTest {
 
     @Test
     fun worker_mergesWithServerAndRecordsSuccess() = runBlocking {
-        assumeTrue("서버가 떠 있지 않아 건너뜁니다.", serverIsUp())
+        assumeTrue("testServerUrl에 별도 HTTPS 테스트 서버를 지정해 주세요.", serverUrl.isNotBlank())
+        container.serverSyncClient.testConnection(ServerSyncSettings(serverUrl = serverUrl, apiKey = serverApiKey))
         container.settingsStore.updateServerSyncSettings(
-            ServerSyncSettings(serverUrl = serverUrl, autoSyncEnabled = true)
+            ServerSyncSettings(serverUrl = serverUrl, apiKey = serverApiKey, autoSyncEnabled = true)
         )
 
         val result = TestListenableWorkerBuilder<SyncWorker>(context).build().doWork()
@@ -93,7 +96,4 @@ class SyncWorkerTest {
         assertFalse("실패가 남아 있습니다: ${status.lastError}", status.failed)
     }
 
-    private suspend fun serverIsUp(): Boolean = runCatching {
-        container.serverSyncClient.testConnection(ServerSyncSettings(serverUrl = serverUrl))
-    }.isSuccess
 }

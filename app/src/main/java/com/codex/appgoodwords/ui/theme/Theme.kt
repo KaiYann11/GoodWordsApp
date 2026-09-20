@@ -5,6 +5,7 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 private val LightColors = lightColorScheme(
@@ -17,7 +18,7 @@ private val LightColors = lightColorScheme(
     secondaryContainer = PanelCoral,
     onSecondaryContainer = MidnightBlue,
     tertiary = SunGlow,
-    onTertiary = MidnightBlue,
+    onTertiary = CardWhite,
     tertiaryContainer = PanelYellow,
     onTertiaryContainer = MidnightBlue,
     background = CloudWhite,
@@ -26,15 +27,24 @@ private val LightColors = lightColorScheme(
     onSurface = SoftInk,
     surfaceVariant = PanelBlue,
     onSurfaceVariant = SoftSlate,
-    outline = PanelBlue
+    outline = Color(0xFF748198),
+    outlineVariant = Color(0xFFDCE2ED),
+    surfaceTint = OceanBlue,
+    surfaceDim = Color(0xFFE1E6EF),
+    surfaceBright = CardWhite,
+    surfaceContainerLowest = CardWhite,
+    surfaceContainerLow = Color(0xFFF8FAFD),
+    surfaceContainer = Color(0xFFF0F3F9),
+    surfaceContainerHigh = Color(0xFFEAF0F7),
+    surfaceContainerHighest = Color(0xFFE3EAF4)
 )
 
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(14.dp),
-    small = RoundedCornerShape(20.dp),
-    medium = RoundedCornerShape(26.dp),
-    large = RoundedCornerShape(32.dp),
-    extraLarge = RoundedCornerShape(40.dp)
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 @Composable

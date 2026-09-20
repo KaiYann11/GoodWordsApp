@@ -129,6 +129,8 @@ app.addEventListener("submit", async (event) => {
   try {
     if (form.dataset.form === "content") {
       await submitContent(form);
+    } else if (form.dataset.form === "not-to-do") {
+      await submitNotToDo(form);
     } else if (form.dataset.form === "routine") {
       await submitRoutine(form);
     } else if (form.dataset.form === "memo") {
@@ -164,6 +166,13 @@ app.addEventListener("click", async (event) => {
     } else if (action === "delete-content") {
       await api(`/api/content/${id}`, { method: "DELETE" });
       showToast("항목을 삭제했습니다.");
+      await loadSnapshot(false);
+    } else if (action === "delete-not-to-do") {
+      const item = findById(state.snapshot.items, id);
+      if (!window.confirm(`'${item?.title || "이 항목"}' 항목을 삭제할까요?`)) return;
+      await api(`/api/content/${id}`, { method: "DELETE" });
+      if (state.editingContentId === id) state.editingContentId = null;
+      showToast("하지 않을 일을 삭제했습니다.");
       await loadSnapshot(false);
     } else if (action === "favorite") {
       const item = findById(state.snapshot.items, id);
@@ -340,12 +349,20 @@ function emptySnapshot() {
   };
 }
 
+function requireSecureConnection() {
+  if (location.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) {
+    throw new Error("기록과 접속 키를 보호하려면 HTTPS 서버 주소로 접속해 주세요.");
+  }
+}
+
 async function api(path, options = {}) {
+  requireSecureConnection();
   const headers = { Accept: "application/json" };
   const apiKey = localStorage.getItem("appGoodWordsApiKey") || "";
   if (apiKey) headers["X-API-Key"] = apiKey;
   const init = {
     method: options.method || "GET",
+    redirect: "error",
     headers,
   };
   if (options.body !== undefined) {
@@ -374,11 +391,12 @@ function attachmentField(mime) {
 
 /** 파일 본문을 그대로 보냅니다. 서버가 내용 해시로 이름을 지어 주소를 돌려줍니다. */
 async function uploadAttachment(file) {
+  requireSecureConnection();
   const headers = { "Content-Type": file.type || "application/octet-stream" };
   const apiKey = localStorage.getItem("appGoodWordsApiKey") || "";
   if (apiKey) headers["X-API-Key"] = apiKey;
 
-  const response = await fetch("/api/attachments", { method: "POST", headers, body: file });
+  const response = await fetch("/api/attachments", { method: "POST", headers, body: file, redirect: "error" });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
@@ -390,12 +408,13 @@ async function uploadAttachment(file) {
  * 한 번 받은 것은 다시 받지 않습니다. 내용 해시가 주소라서 같은 id면 내용도 같습니다.
  */
 async function attachmentBlobUrl(id) {
+  requireSecureConnection();
   if (attachmentBlobs.has(id)) return attachmentBlobs.get(id);
   try {
     const headers = {};
     const apiKey = localStorage.getItem("appGoodWordsApiKey") || "";
     if (apiKey) headers["X-API-Key"] = apiKey;
-    const response = await fetch(`/api/attachments/${id}`, { headers });
+    const response = await fetch(`/api/attachments/${id}`, { headers, redirect: "error" });
     if (!response.ok) return null;
     const url = URL.createObjectURL(await response.blob());
     attachmentBlobs.set(id, url);
@@ -431,6 +450,7 @@ function render() {
   if (state.activeTab === "home") renderHome();
   if (state.activeTab === "library") renderLibrary();
   if (state.activeTab === "routines") renderRoutines();
+  if (state.activeTab === "not-to-do") renderNotToDo();
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
@@ -449,6 +469,7 @@ function syncTabs() {
 function renderHome() {
   const summary = todaySummary();
   const recent = [...state.snapshot.items]
+    .filter(item => item.type !== "NOT_TO_DO")
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 8);
   app.innerHTML = `
@@ -488,6 +509,9 @@ function renderLibrary() {
             <select id="contentType" name="type">
               ${option("QUOTE", "글귀", editing.type)}
               ${option("IDEA", "아이디어", editing.type)}
+              ${option("INBOX", "임시저장소", editing.type)}
+              ${option("MEMO", "메모", editing.type)}
+              ${option("CONCEPT", "개념", editing.type)}
               ${option("LINK", "링크", editing.type)}
               ${option("VIDEO", "영상", editing.type)}
             </select>
@@ -534,6 +558,9 @@ function renderLibrary() {
               ${option("ALL", "전체", state.typeFilter)}
               ${option("QUOTE", "글귀", state.typeFilter)}
               ${option("IDEA", "아이디어", state.typeFilter)}
+              ${option("INBOX", "임시저장소", state.typeFilter)}
+              ${option("MEMO", "메모", state.typeFilter)}
+              ${option("CONCEPT", "개념", state.typeFilter)}
               ${option("LINK", "링크", state.typeFilter)}
               ${option("VIDEO", "영상", state.typeFilter)}
             </select>
@@ -606,6 +633,48 @@ function renderRoutines() {
                 )
                 .join("")
             : empty("저장된 루틴이 없습니다.")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderNotToDo() {
+  const items = state.snapshot.items.filter(item => item.type === "NOT_TO_DO")
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const editing = findById(items, state.editingContentId) || {};
+  app.innerHTML = `
+    <section class="grid two">
+      <form class="panel" data-form="not-to-do">
+        <h2>${editing.id ? "하지 않을 일 수정" : "하지 않을 일 추가"}</h2>
+        <p class="muted">반복하지 않기로 한 행동과 그 이유를 적어 두세요.</p>
+        <div class="formGrid">
+          <div class="field full">
+            <label for="notToDoTitle">하지 않을 일</label>
+            <input id="notToDoTitle" name="title" value="${attr(editing.title)}" placeholder="예: 잠들기 전 숏폼 오래 보기" required>
+          </div>
+          <div class="field full">
+            <label for="notToDoMemo">메모 (선택)</label>
+            <textarea id="notToDoMemo" name="body" placeholder="피하려는 이유나 기억할 점">${escapeHtml(editing.body)}</textarea>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button class="primary" type="submit">저장</button>
+          ${editing.id ? `<button type="button" data-action="cancel-content">취소</button>` : ""}
+        </div>
+      </form>
+      <section>
+        <h2 class="sectionTitle">하지 않을 일 ${items.length}개</h2>
+        <div class="itemList">
+          ${items.length ? items.map(item => `
+            <article class="item">
+              <h3>${escapeHtml(item.title)}</h3>
+              ${item.body ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.body)}</p>` : ""}
+              <div class="actions">
+                <button type="button" data-action="edit-content" data-id="${item.id}">수정</button>
+                <button type="button" data-action="delete-not-to-do" data-id="${item.id}">삭제</button>
+              </div>
+            </article>`).join("") : empty("아직 기록한 항목이 없습니다. 피하고 싶은 행동부터 하나 적어 보세요.")}
         </div>
       </section>
     </section>
@@ -1157,6 +1226,20 @@ async function submitContent(form) {
   await loadSnapshot(false);
 }
 
+async function submitNotToDo(form) {
+  const data = new FormData(form);
+  const title = String(data.get("title") || "").trim();
+  if (!title) throw new Error("하지 않을 일을 입력해 주세요.");
+  const id = state.editingContentId;
+  await api(id ? `/api/content/${id}` : "/api/content", {
+    method: id ? "PUT" : "POST",
+    body: { type: "NOT_TO_DO", title, body: data.get("body") },
+  });
+  state.editingContentId = null;
+  showToast(id ? "하지 않을 일을 수정했습니다." : "하지 않을 일을 저장했습니다.");
+  await loadSnapshot(false);
+}
+
 async function submitRoutine(form) {
   const data = new FormData(form);
   const payload = {
@@ -1278,6 +1361,7 @@ async function submitBookQuote(form) {
 }
 
 function contentCard(item) {
+  const canConfirm = !["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(item.type);
   const confirmed = todaySummary().confirmedIds.has(item.id);
   // 최근 것이 위로. 앱 상세 화면과 같은 줄로 보여야 합니다.
   const memos = state.snapshot.contentMemos
@@ -1301,8 +1385,8 @@ function contentCard(item) {
       ${item.sourceUrl ? `<p><a href="${attr(item.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.sourceUrl)}</a></p>` : ""}
       ${item.tags?.length ? `<div class="chips">${item.tags.map((tag) => `<span class="chip">#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
       <div class="actions">
-        <button type="button" data-action="confirm" data-id="${item.id}">${confirmed ? "확인 취소" : "오늘 확인"}</button>
-        <button type="button" data-action="make-routine" data-id="${item.id}">루틴으로</button>
+        ${canConfirm ? `<button type="button" data-action="confirm" data-id="${item.id}">${confirmed ? "확인 취소" : "오늘 확인"}</button>` : ""}
+        ${item.type === "CONCEPT" ? "" : `<button type="button" data-action="make-routine" data-id="${item.id}">루틴으로</button>`}
         <button type="button" data-action="edit-content" data-id="${item.id}">수정</button>
         <button class="danger" type="button" data-action="delete-content" data-id="${item.id}">삭제</button>
       </div>
@@ -1446,11 +1530,15 @@ function summaryLine(line) {
 function filteredItems() {
   const query = state.query.trim().toLowerCase();
   return [...state.snapshot.items]
+    .filter((item) => item.type !== "NOT_TO_DO")
     .filter((item) => state.typeFilter === "ALL" || item.type === state.typeFilter)
     .filter((item) => !state.categoryFilter || item.category === state.categoryFilter)
     .filter((item) => {
       if (!query) return true;
-      return [item.title, item.body, item.author, item.category, ...(item.tags || [])]
+      const memoBodies = state.snapshot.contentMemos
+        .filter((memo) => memo.contentItemId === item.id)
+        .map((memo) => memo.body);
+      return [item.title, item.body, item.author, item.category, ...(item.tags || []), ...memoBodies]
         .join(" ")
         .toLowerCase()
         .includes(query);
@@ -1564,7 +1652,7 @@ function formatDate(timestamp) {
 }
 
 function labelForType(type) {
-  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상" }[type] || type || "";
+  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념" }[type] || type || "";
 }
 
 function labelForEvent(type) {

@@ -24,6 +24,7 @@ class AttachmentClient(private val context: Context) {
      * 사진 한 장 때문에 동기화 전체가 멈추면 안 되므로, 부르는 쪽에서 건너뛰게 합니다.
      */
     suspend fun upload(settings: ServerSyncSettings, uri: String): String? = withContext(Dispatchers.IO) {
+        if (!AttachmentUris.isLocal(uri)) return@withContext null
         val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return@withContext null
         val mime = mimeOf(parsed)
         if (mime.isBlank()) return@withContext null
@@ -54,6 +55,7 @@ class AttachmentClient(private val context: Context) {
         val endpoint = URL("${ServerUrlPolicy.normalize(settings.serverUrl)}$ATTACHMENTS_PATH")
         val connection = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            instanceFollowRedirects = false
             connectTimeout = 10_000
             // 동영상은 오래 걸립니다. 스냅샷보다 넉넉히 잡습니다.
             readTimeout = 120_000

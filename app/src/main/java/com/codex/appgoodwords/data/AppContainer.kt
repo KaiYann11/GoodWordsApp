@@ -2,7 +2,9 @@ package com.codex.appgoodwords.data
 
 import android.content.Context
 import androidx.room.Room
+import coil.ImageLoader
 import com.codex.appgoodwords.work.ReminderScheduler
+import okhttp3.OkHttpClient
 
 class AppContainer(
     context: Context
@@ -30,7 +32,10 @@ class AppContainer(
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
                 AppDatabase.MIGRATION_15_16,
-                AppDatabase.MIGRATION_16_17
+                AppDatabase.MIGRATION_16_17,
+                AppDatabase.MIGRATION_17_18,
+                AppDatabase.MIGRATION_18_19,
+                AppDatabase.MIGRATION_19_20
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -47,6 +52,8 @@ class AppContainer(
     val serverSyncClient: ServerSyncClient by lazy {
         ServerSyncClient()
     }
+
+    val aiFeedbackClient: AiFeedbackClient by lazy { AiFeedbackClient() }
 
     val syncBackupStore: SyncBackupStore by lazy {
         SyncBackupStore(appContext)
@@ -91,6 +98,13 @@ class AppContainer(
 
     val attachmentClient: AttachmentClient by lazy { AttachmentClient(appContext) }
 
+    // 인증된 첨부 요청이 다른 주소로 넘어가 접속 키를 보내지 않도록 합니다.
+    val attachmentImageLoader: ImageLoader by lazy {
+        ImageLoader.Builder(appContext)
+            .okHttpClient(OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build())
+            .build()
+    }
+
     val attachmentUploader: AttachmentUploader by lazy {
         AttachmentUploader(client = attachmentClient, database = database)
     }
@@ -98,7 +112,8 @@ class AppContainer(
     val growthFeedbackCoordinator: GrowthFeedbackCoordinator by lazy {
         GrowthFeedbackCoordinator(
             database = database,
-            settingsStore = settingsStore
+            settingsStore = settingsStore,
+            client = aiFeedbackClient
         )
     }
 

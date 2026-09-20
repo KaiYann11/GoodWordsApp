@@ -84,11 +84,13 @@
         <!--
             공유에서 이 앱을 고르면 화면 없이 바로 담습니다.
             보이는 화면이 없어 NoDisplay 테마를 쓰고, 최근 목록에도 남기지 않습니다.
+            연속 공유가 닫히는 화면에 합쳐져 빠지지 않도록 요청마다 새 작업으로 엽니다.
             담는 화면을 다시 거치게 하려면 이 거르개를 MainActivity로 되돌리면 됩니다.
         -->
         <activity
             android:name=".ShareTargetActivity"
             android:exported="true"
+            android:documentLaunchMode="always"
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:taskAffinity=""
@@ -100,6 +102,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
 
                 <data android:mimeType="text/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
     </application>

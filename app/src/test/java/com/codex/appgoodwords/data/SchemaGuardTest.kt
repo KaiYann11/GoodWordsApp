@@ -1,7 +1,14 @@
 package com.codex.appgoodwords.data
 
 import java.io.Closeable
-import java.net.ServerSocket
+import java.net.InetAddress
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.security.KeyStore
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotNull
@@ -82,10 +89,12 @@ class SchemaGuardTest {
      * 스키마 확인이 먼저 걸리면 그 뒤 요청은 오지 않으므로, 무엇이 왔는지만 기록해 두면 됩니다.
      */
     private class FakeHealthServer(private val schemaVersion: Int) : Closeable {
-        private val socket = ServerSocket(0)
+        private val originalFactory = HttpsURLConnection.getDefaultSSLSocketFactory()
+        private val socket = testTlsContext.serverSocketFactory.createServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         val paths = mutableListOf<String>()
 
         init {
+            HttpsURLConnection.setDefaultSSLSocketFactory(testTlsContext.socketFactory)
             thread(isDaemon = true) {
                 while (!socket.isClosed) {
                     runCatching {
@@ -113,11 +122,40 @@ class SchemaGuardTest {
             }
         }
 
-        // 127.x는 평문 http로도 동기화할 수 있는 주소다.
-        fun settings() = ServerSyncSettings(serverUrl = "http://127.0.0.1:${socket.localPort}")
+        fun settings() = ServerSyncSettings(serverUrl = "https://127.0.0.1:${socket.localPort}")
 
         override fun close() {
             socket.close()
+            HttpsURLConnection.setDefaultSSLSocketFactory(originalFactory)
+        }
+    }
+
+    private companion object {
+        // 테스트 JVM에서만 임시 인증서를 신뢰합니다. 앱에 인증서나 검증 예외를 넣지 않습니다.
+        val testTlsContext: SSLContext by lazy {
+            val directory = Files.createTempDirectory("appgoodwords-test-tls-")
+            val file = directory.resolve("server.p12")
+            val password = "synthetic-test-password"
+            try {
+                val executable = if (System.getProperty("os.name").startsWith("Windows")) "keytool.exe" else "keytool"
+                val process = ProcessBuilder(
+                    Paths.get(System.getProperty("java.home"), "bin", executable).toString(),
+                    "-genkeypair", "-alias", "test", "-keyalg", "RSA", "-keysize", "2048",
+                    "-dname", "CN=localhost", "-ext", "SAN=ip:127.0.0.1,dns:localhost", "-validity", "2",
+                    "-keystore", file.toString(), "-storetype", "PKCS12", "-storepass", password, "-noprompt"
+                ).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().use { it.readText() }
+                check(process.waitFor() == 0) { "테스트 인증서를 만들지 못했습니다: $output" }
+                val store = KeyStore.getInstance("PKCS12").apply {
+                    Files.newInputStream(file).use { load(it, password.toCharArray()) }
+                }
+                val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(store, password.toCharArray()) }
+                val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+                SSLContext.getInstance("TLS").apply { init(keys.keyManagers, trust.trustManagers, null) }
+            } finally {
+                Files.deleteIfExists(file)
+                Files.deleteIfExists(directory)
+            }
         }
     }
 }

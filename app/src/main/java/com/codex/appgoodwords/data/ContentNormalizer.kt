@@ -38,6 +38,10 @@ object ContentNormalizer {
 
     /** 담을 것이 하나도 없으면 알려 줍니다. */
     fun validate(draft: ContentDraft) {
+        if (draft.type == ContentType.NOT_TO_DO) {
+            require(draft.title.isNotBlank()) { "하지 않을 일을 입력해 주세요." }
+            return
+        }
         require(
             draft.body.isNotBlank() ||
                 draft.sourceUrl.isNotBlank() ||
@@ -52,7 +56,7 @@ object ContentNormalizer {
      * **번뜩인 것은 겉모습으로 알 수 없습니다.** 담는 사람이 짚어 준 것을 덮어쓰지 않습니다.
      */
     fun detectType(draft: ContentDraft): ContentType {
-        if (draft.type == ContentType.IDEA) return ContentType.IDEA
+        if (!draft.type.isReadingContent) return draft.type
         val url = draft.sourceUrl.trim().lowercase()
         return when {
             url.contains("youtube.com") ||

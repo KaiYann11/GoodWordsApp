@@ -133,6 +133,7 @@ class ServerSyncClient {
         val endpoint = URL("${normalizeServerUrl(serverUrl)}$path")
         val connection = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = method
+            instanceFollowRedirects = false
             connectTimeout = 10_000
             readTimeout = 20_000
             setRequestProperty("Accept", "application/json")

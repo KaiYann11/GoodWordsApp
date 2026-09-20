@@ -2149,6 +2149,105 @@ describe("AI 돌아보기", () => {
   });
 });
 
+describe("임시저장소와 메모", () => {
+  it("분류할 때 원문과 식별자가 유지된다", async () => {
+    const created = await (await api("/api/content", {
+      method: "POST",
+      body: { type: "INBOX", title: "수집한 용어", body: "첫 줄\n둘째 줄", sourceUrl: "https://example.com/inbox", tags: ["참고"] },
+    })).json();
+    assert.equal(created.type, "INBOX");
+    const edited = await (await api(`/api/content/${created.id}`, {
+      method: "PUT", body: { ...created, type: "MEMO" },
+    })).json();
+    assert.equal(edited.type, "MEMO");
+    assert.equal(edited.syncId, created.syncId);
+    assert.equal(edited.body, created.body);
+    assert.equal(edited.sourceUrl, created.sourceUrl);
+    assert.deepEqual(edited.tags, created.tags);
+    const confirmed = await (await api(`/api/content/${created.id}/toggle-confirm`, { method: "POST" })).json();
+    assert.equal(confirmed.confirmed, false);
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.items.find(item => item.syncId === created.syncId).type, "MEMO");
+    assert.equal(stored.items.find(item => item.syncId === created.syncId).showCount, 0);
+  });
+
+  it("스냅샷을 교체해도 개인 기록 종류를 글귀로 바꾸지 않는다", async () => {
+    const items = ["INBOX", "MEMO", "CONCEPT"].map((type, index) => ({
+      id: index + 1, syncId: `collection-${type}`, type, title: type, body: `원문 ${index}`,
+    }));
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.schemaVersion, 20);
+    assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
+  });
+
+  it("개념은 원문과 AI 설명 메모를 함께 동기화하고 읽음으로 세지 않는다", async () => {
+    const concept = await (await api("/api/content", {
+      method: "POST",
+      body: { type: "CONCEPT", title: "인지 부하", body: "원래 저장한 문장", sourceUrl: "https://example.com/context" },
+    })).json();
+    const memo = await (await api(`/api/content/${concept.id}/memos`, {
+      method: "POST", body: { body: "AI 설명\n한꺼번에 처리해야 하는 정보의 양입니다." },
+    })).json();
+    const confirmed = await (await api(`/api/content/${concept.id}/toggle-confirm`, { method: "POST" })).json();
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(concept.type, "CONCEPT");
+    assert.equal(stored.items.find(item => item.syncId === concept.syncId).body, "원래 저장한 문장");
+    assert.equal(stored.contentMemos.find(item => item.syncId === memo.syncId).contentItemSyncId, concept.syncId);
+    assert.equal(confirmed.confirmed, false);
+  });
+});
+
+describe("하지 않을 일", () => {
+  it("제목만 저장하고 메모를 수정해도 같은 기록으로 남는다", async () => {
+    const response = await api("/api/content", {
+      method: "POST", body: { type: "NOT_TO_DO", title: "잠들기 전 숏폼 오래 보기" },
+    });
+    assert.equal(response.status, 201);
+    const created = await response.json();
+    assert.equal(created.type, "NOT_TO_DO");
+    assert.equal(created.body, "");
+    const edited = await (await api(`/api/content/${created.id}`, {
+      method: "PUT", body: { body: "휴대폰은 책상에 두기\n잠을 먼저 챙기기" },
+    })).json();
+    assert.equal(edited.syncId, created.syncId);
+    assert.equal(edited.type, "NOT_TO_DO");
+    assert.equal(edited.title, created.title);
+    assert.equal(edited.body, "휴대폰은 책상에 두기\n잠을 먼저 챙기기");
+    const confirmed = await (await api(`/api/content/${created.id}/toggle-confirm`, { method: "POST" })).json();
+    assert.equal(confirmed.confirmed, false);
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.items.find(item => item.id === created.id).showCount, 0);
+    assert.equal(stored.exposureEvents.filter(event => event.contentItemSyncId === created.syncId).length, 0);
+  });
+
+  it("빈 제목은 저장하지 않는다", async () => {
+    const response = await api("/api/content", {
+      method: "POST", body: { type: "NOT_TO_DO", title: "   ", body: "제목 없는 메모" },
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("백업 교체와 병합에 종류를 보존하고 삭제한 기준을 되살리지 않는다", async () => {
+    const rule = { id: 1, syncId: "not-to-do-sync", type: "NOT_TO_DO", title: "충동 구매", body: "하루 기다리기", updatedAt: 100 };
+    const quote = { ...rule, id: 2, syncId: "same-text-quote", type: "QUOTE" };
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ items: [rule, quote] }) });
+    const backup = await (await api("/api/snapshot")).json();
+    assert.equal(backup.items.length, 2);
+    assert.equal(backup.items.find(item => item.syncId === rule.syncId).type, "NOT_TO_DO");
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [{ ...rule, body: "일주일 기다리기", updatedAt: 200 }] }) });
+    const merged = await (await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [rule] }) })).json();
+    const saved = merged.items.find(item => item.syncId === rule.syncId);
+    assert.equal(saved.body, "일주일 기다리기");
+    await api(`/api/content/${saved.id}`, { method: "DELETE" });
+    const deleted = await (await api("/api/sync", { method: "POST", body: backup })).json();
+    assert.ok(deleted.items.every(item => item.syncId !== rule.syncId));
+    assert.ok(deleted.deletions.some(entry => entry.syncId === rule.syncId && entry.entityType === "CONTENT_ITEM"));
+    assert.ok(deleted.items.some(item => item.syncId === quote.syncId));
+  });
+});
+
 describe("번뜩인 아이디어", () => {
   it("아이디어 종류가 그대로 남는다", async () => {
     // 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 보관함에서 아이디어만 골라 볼 수 없게 된다.

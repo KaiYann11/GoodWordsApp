@@ -1,6 +1,8 @@
 package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -8,7 +10,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.FeedbackKind
@@ -43,8 +45,16 @@ class HomeScreenTest {
     fun overallAndRoutineStatisticsAreOnTheSameScreen() {
         compose.setContent { homeScreen() }
 
+        compose.onNodeWithText("돌아보기").assertDoesNotExist()
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasTestTag(homeInsightsToggleTag))
+        compose.onNodeWithTag(homeInsightsToggleTag).performClick()
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasText("돌아보기"))
         compose.onNodeWithText("돌아보기").assertIsDisplayed()
-        compose.onNodeWithText("달성률 - (0/0)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasText("달성률 - (0/0)"))
+        compose.onNodeWithText("달성률 - (0/0)").assertIsDisplayed()
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasTestTag(homeInsightsToggleTag))
+        compose.onNodeWithTag(homeInsightsToggleTag).performClick()
+        compose.onNodeWithText("돌아보기").assertDoesNotExist()
     }
 
     @Test
@@ -58,6 +68,7 @@ class HomeScreenTest {
             )
         }
 
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasTestTag(feedbackCardTag))
         compose.onNodeWithTag(feedbackCardTag).assertIsDisplayed()
         compose.onNodeWithText("5일째 이어 가고 있습니다.").assertIsDisplayed()
         compose.onNodeWithText("'물 한 컵'은 이레 내내 지켰습니다.").assertIsDisplayed()
@@ -68,6 +79,7 @@ class HomeScreenTest {
         // 카드만 덩그러니 비어 있으면 고장인지 비어 있는 것인지 알 수 없습니다.
         compose.setContent { homeScreen(notes = emptyList()) }
 
+        compose.onNodeWithTag(homeListTag).performScrollToNode(hasTestTag(feedbackCardTag))
         compose.onNodeWithText("기록이 쌓이면 여기에 짚어 드릴 말이 생깁니다.").assertIsDisplayed()
     }
 
@@ -91,6 +103,16 @@ class HomeScreenTest {
         compose.onNodeWithTag(dailyLoopStepTag(DailyStep.QUOTE)).performClick()
 
         assertEquals(DailyStep.QUOTE, opened)
+    }
+
+    @Test
+    fun theVisibleCaptureButtonWorksWithoutDiscoveringTheSwipe() {
+        var opened = false
+        compose.setContent { homeScreen(onSwipeToCapture = { opened = true }) }
+
+        compose.onNodeWithTag(homeCaptureButtonTag).assertIsDisplayed().performClick()
+
+        assertTrue(opened)
     }
 
     @Test

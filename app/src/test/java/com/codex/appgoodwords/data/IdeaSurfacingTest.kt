@@ -24,14 +24,14 @@ class IdeaSurfacingTest {
     @Test
     fun everyOtherKindIsStillSomethingToRevisit() {
         // 글귀·링크·영상은 모아 두었다가 다시 만나려고 담은 것입니다.
-        val revisitable = ContentType.entries.filter { it != ContentType.IDEA }
+        val revisitable = ContentType.entries.filter { it.isReadingContent }
 
         assertEquals(listOf(ContentType.QUOTE, ContentType.LINK, ContentType.VIDEO), revisitable)
     }
 
     @Test
     fun theKindIsStoredByNameSoTheQueryCanCompareIt() {
-        // 뽑는 질의가 `type <> :excluded`로 거릅니다. 이름이 바뀌면 그 비교가 조용히 빗나갑니다.
+        // 뽑는 질의가 종류 이름으로 거릅니다. 이름이 바뀌면 그 비교가 빗나갑니다.
         assertEquals("IDEA", Converters().fromContentType(ContentType.IDEA))
         assertEquals(ContentType.IDEA, Converters().toContentType("IDEA"))
     }

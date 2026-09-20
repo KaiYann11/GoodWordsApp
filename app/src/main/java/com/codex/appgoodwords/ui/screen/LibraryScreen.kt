@@ -18,16 +18,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -42,8 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentShuffle
@@ -52,6 +59,8 @@ import com.codex.appgoodwords.data.ReadingCombo
 import kotlinx.coroutines.delay
 
 internal const val libraryAddButtonTag = "library_add_button"
+internal const val libraryListTag = "library_list"
+internal const val librarySearchTag = "library_search"
 
 /** 읽음 거르개. 개수가 같이 적혀서 글자만으로는 짚기 어렵습니다. */
 internal fun libraryReadFilterTag(name: String): String = "library_read_filter_$name"
@@ -147,9 +156,16 @@ fun LibraryScreen(
     var favoritesOnly by rememberSaveable { mutableStateOf(false) }
     var showFilters by rememberSaveable { mutableStateOf(false) }
     var comboFeedback by remember { mutableStateOf<ComboFeedback?>(null) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val contentLabel = if (showTypeFilter) "글귀" else "아이디어"
 
     val activeFilter = ContentFilter.valueOf(selectedFilter)
     val activeReadFilter = ReadFilter.valueOf(selectedReadFilter)
+    val activeFilterCount = listOf(
+        activeFilter != ContentFilter.ALL,
+        selectedCategory.isNotBlank(),
+        favoritesOnly
+    ).count { it }
     // 읽음 거르개를 빼고 거른 것. 알약에 적을 개수는 여기서 셉니다.
     // 자기 자신까지 걸러서 세면 "안읽은 것"을 고른 순간 "읽은 것 0"이 됩니다.
     val baseItems = items.filter { item ->
@@ -196,7 +212,7 @@ fun LibraryScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag(libraryListTag),
             // 아래쪽을 더 비웁니다. 담기 버튼이 마지막 글귀를 가리면 그 글귀는 누를 수 없습니다.
             contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -209,9 +225,20 @@ fun LibraryScreen(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { value -> query = value },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag(librarySearchTag),
                     label = { Text("검색") },
-                    supportingText = { Text("제목, 본문, 태그, 카테고리로 검색") }
+                    placeholder = { Text("제목, 본문, 태그로 찾기") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    trailingIcon = if (query.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Outlined.Close, contentDescription = "검색어 지우기")
+                            }
+                        }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() })
                 )
             }
 
@@ -244,7 +271,13 @@ fun LibraryScreen(
                     FilterChip(
                         selected = showFilters,
                         onClick = { showFilters = !showFilters },
-                        label = { Text(if (showFilters) "거르개 접기" else "거르개") },
+                        label = {
+                            Text(when {
+                                showFilters -> "필터 접기"
+                                activeFilterCount > 0 -> "필터 · $activeFilterCount"
+                                else -> "필터"
+                            })
+                        },
                         leadingIcon = {
                             Icon(
                                 imageVector = if (showFilters) {
@@ -266,7 +299,8 @@ fun LibraryScreen(
                             sort = RankSort.valueOf(sortMode)
                         ),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
@@ -383,19 +417,31 @@ fun LibraryScreen(
             if (items.isEmpty()) {
                 item {
                     EmptyCard(
-                        title = "아직 담아 둔 글귀가 없습니다.",
-                        body = "오른쪽 아래 담기 버튼으로 글귀, 링크, 영상을 저장해 보세요."
+                        title = "아직 담아 둔 ${contentLabel}가 없습니다.",
+                        body = if (showTypeFilter) "마음에 남은 글귀, 링크, 영상을 모아 보세요." else "떠오른 생각을 한 줄부터 남겨 보세요.",
+                        actionLabel = "첫 $contentLabel 담기",
+                        onAction = onAddContent
                     )
                 }
             } else if (sortedItems.isEmpty()) {
                 item {
                     EmptyCard(
-                        title = when (activeReadFilter) {
-                            ReadFilter.UNREAD -> "오늘 읽을 글귀를 다 넘겼습니다."
-                            ReadFilter.READ -> "오늘 읽은 글귀가 아직 없습니다."
-                            ReadFilter.ALL -> "조건에 맞는 글귀가 없습니다."
+                        title = when {
+                            baseItems.isEmpty() -> "조건에 맞는 ${contentLabel}가 없습니다."
+                            activeReadFilter == ReadFilter.UNREAD -> "오늘 읽을 ${contentLabel}를 다 넘겼습니다."
+                            activeReadFilter == ReadFilter.READ -> "오늘 읽은 ${contentLabel}가 아직 없습니다."
+                            else -> "조건에 맞는 ${contentLabel}가 없습니다."
                         },
-                        body = "거르개를 전체로 돌리면 담아 둔 글귀가 다시 보입니다."
+                        body = if (baseItems.isEmpty()) "검색어나 필터를 바꾸거나, 전체 목록을 확인해 보세요." else "전체 목록에서 담아 둔 ${contentLabel}를 다시 볼 수 있어요.",
+                        actionLabel = "전체 보기",
+                        onAction = {
+                            query = ""
+                            selectedCategory = ""
+                            selectedFilter = ContentFilter.ALL.name
+                            selectedReadFilter = ReadFilter.ALL.name
+                            favoritesOnly = false
+                            keyboard?.hide()
+                        }
                     )
                 }
             } else {
@@ -447,13 +493,13 @@ fun LibraryScreen(
         ExtendedFloatingActionButton(
             onClick = onAddContent,
             icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
-            text = { Text("글귀 담기") },
+            text = { Text("$contentLabel 담기") },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
                 // 이 버튼 안의 글자는 접근성 정보로 합쳐지지 않아서, 이름을 따로 달지 않으면
                 // 화면을 소리로 듣는 사람에게는 이름 없는 "버튼"으로만 읽힙니다.
-                .semantics { contentDescription = "글귀 담기" }
+                .semantics { contentDescription = "$contentLabel 담기" }
                 .testTag(libraryAddButtonTag)
         )
     }

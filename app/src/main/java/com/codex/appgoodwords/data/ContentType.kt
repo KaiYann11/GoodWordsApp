@@ -15,5 +15,17 @@ enum class ContentType {
     QUOTE,
     LINK,
     VIDEO,
-    IDEA
+    IDEA,
+    INBOX,
+    MEMO,
+    NOT_TO_DO,
+    CONCEPT;
+
+    /** 글귀 목록과 알림에서 다시 보여 줄 종류. 미분류 글과 개인 메모는 따로 둡니다. */
+    val isReadingContent: Boolean
+        get() = this in readingTypes
+
+    companion object {
+        val readingTypes = listOf(QUOTE, LINK, VIDEO)
+    }
 }

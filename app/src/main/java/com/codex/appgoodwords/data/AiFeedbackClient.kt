@@ -184,6 +184,7 @@ class AiFeedbackClient {
         val endpoint = URL(url)
         val connection = (endpoint.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            instanceFollowRedirects = false
             connectTimeout = 15_000
             // 글을 쓰는 데 시간이 걸립니다. 동기화보다 넉넉히 둡니다.
             readTimeout = 180_000
@@ -227,7 +228,7 @@ class AiFeedbackClient {
         }
     }
 
-    private fun normalizeServerUrl(serverUrl: String): String = serverUrl.trim().trimEnd('/')
+    private fun normalizeServerUrl(serverUrl: String): String = ServerUrlPolicy.normalize(serverUrl)
 
     private companion object {
         const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"

@@ -28,11 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
 import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.AttachmentKind
 import com.codex.appgoodwords.data.AttachmentShot
-import com.codex.appgoodwords.data.AttachmentUris
+import com.codex.appgoodwords.data.SearchKind
 
 internal const val galleryGridTag = "gallery_grid"
 
@@ -49,11 +48,16 @@ fun AttachmentGalleryScreen(
     modifier: Modifier = Modifier,
     /** 서버가 보관하는 첨부를 받아올 주소. 서버를 안 쓰면 비어 있고, 그 첨부는 자리만 보입니다. */
     serverUrl: String = "",
-    apiKey: String = ""
+    apiKey: String = "",
+    diaryLocked: Boolean = false,
+    onUnlockDiaries: () -> Unit = {}
 ) {
-    val byMonth = remember(shots) { AttachmentGallery.byMonth(shots) }
+    val visibleShots = remember(shots, diaryLocked) {
+        if (diaryLocked) shots.filter { it.source != SearchKind.DIARY } else shots
+    }
+    val byMonth = remember(visibleShots) { AttachmentGallery.byMonth(visibleShots) }
 
-    if (shots.isEmpty()) {
+    if (visibleShots.isEmpty() && !diaryLocked) {
         Box(
             modifier = modifier
                 .fillMaxSize()
@@ -77,6 +81,11 @@ fun AttachmentGalleryScreen(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        if (diaryLocked) {
+            item(key = "diary-lock", span = { GridItemSpan(maxLineSpan) }) {
+                DiaryUnlockCard(onUnlock = onUnlockDiaries)
+            }
+        }
         byMonth.forEach { (month, monthShots) ->
             item(key = "head-$month", span = { GridItemSpan(maxLineSpan) }) {
                 Text(
@@ -113,6 +122,7 @@ private fun AttachmentTile(
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val imageLoader = attachmentImageLoader()
     val shape = RoundedCornerShape(10.dp)
 
     Box(
@@ -128,21 +138,14 @@ private fun AttachmentTile(
             // 기기 안 파일은 그 주소로 바로 읽고, 서버가 보관하는 파일은 http 주소로 바꿔 받습니다.
             // 서버 첨부는 API 키가 필요해서 헤더를 실어 보냅니다. 주소에 키를 붙이면 기록에 남습니다.
             val model = remember(shot.uri, serverUrl, apiKey) {
-                val target = AttachmentUris.toHttpUrl(serverUrl, shot.uri)
-                    ?: shot.uri.takeIf { AttachmentUris.isLocal(it) }
-                target?.let { data ->
-                    ImageRequest.Builder(context)
-                        .data(data)
-                        .apply { if (apiKey.isNotBlank()) addHeader("X-API-Key", apiKey.trim()) }
-                        .crossfade(true)
-                        .build()
-                }
+                attachmentImageRequest(context, shot.uri, serverUrl, apiKey)
             }
             if (model == null) {
                 TileLabel("서버 연결 필요")
             } else {
                 SubcomposeAsyncImage(
                     model = model,
+                    imageLoader = imageLoader,
                     contentDescription = shot.label,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

@@ -54,8 +54,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.codex.appgoodwords.data.AttachmentUris
 import com.codex.appgoodwords.data.DiaryAnswers
 import com.codex.appgoodwords.data.DiaryDraft
 import com.codex.appgoodwords.data.DiaryEntity
@@ -113,7 +111,7 @@ fun DiaryScreen(
      */
     locked: Boolean = false,
     /** 잠금을 풀어 달라고 묻습니다. 풀리면 받은 것을 부릅니다. */
-    onRequestUnlock: (() -> Unit) -> Unit = { it() }
+    onRequestUnlock: (() -> Unit) -> Unit = {}
 ) {
     var editing by remember { mutableStateOf<DiaryDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<DiaryEntity?>(null) }
@@ -134,7 +132,7 @@ fun DiaryScreen(
      * 대야 합니다. 한 번 풀면 이 화면을 떠날 때까지 열어 둡니다. 저장하지 않으므로 앱이
      * 다시 뜨면 다시 묻습니다.
      */
-    var unlocked by remember { mutableStateOf(false) }
+    var unlocked by remember(locked) { mutableStateOf(false) }
     val needsUnlock = locked && !unlocked
 
     val listState = rememberLazyListState()
@@ -202,7 +200,7 @@ fun DiaryScreen(
         }
 
         items(diaries, key = { it.id }) { diary ->
-            val expanded = diary.id in expandedIds
+            val expanded = diary.id in expandedIds && !needsUnlock
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -299,7 +297,7 @@ fun DiaryScreen(
         }
     }
 
-    viewing?.let { shown ->
+    viewing?.takeIf { !needsUnlock }?.let { shown ->
         AttachmentViewerDialog(
             uris = shown.uris,
             startIndex = shown.index,
@@ -309,7 +307,7 @@ fun DiaryScreen(
         )
     }
 
-    editing?.let { draft ->
+    editing?.takeIf { it.id == 0L || !needsUnlock }?.let { draft ->
         DiaryEditDialog(
             draft = draft,
             onDismiss = { editing = null },
@@ -320,7 +318,7 @@ fun DiaryScreen(
         )
     }
 
-    pendingDelete?.let { diary ->
+    pendingDelete?.takeIf { !needsUnlock }?.let { diary ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("일기를 지울까요?") },
@@ -361,18 +359,12 @@ private fun AttachmentThumbnails(
     val uris = imageUris + videoUris
     if (uris.isEmpty()) return
     val context = LocalContext.current
+    val imageLoader = attachmentImageLoader()
 
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         itemsIndexed(uris) { index, uri ->
             val model = remember(uri, serverUrl, apiKey) {
-                val target = AttachmentUris.toHttpUrl(serverUrl, uri) ?: uri.takeIf { AttachmentUris.isLocal(it) }
-                target?.let { data ->
-                    ImageRequest.Builder(context)
-                        .data(data)
-                        .apply { if (apiKey.isNotBlank()) addHeader("X-API-Key", apiKey.trim()) }
-                        .crossfade(true)
-                        .build()
-                }
+                attachmentImageRequest(context, uri, serverUrl, apiKey)
             }
             if (model == null) {
                 // 서버 주소를 안 넣은 채 다른 기기에서 붙인 첨부를 받으면 여기로 옵니다.
@@ -394,6 +386,7 @@ private fun AttachmentThumbnails(
                 val isImage = index < imageUris.size
                 AsyncImage(
                     model = model,
+                    imageLoader = imageLoader,
                     contentDescription = if (isImage) "붙여 둔 사진, 눌러서 크게 보기" else "붙여 둔 영상",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

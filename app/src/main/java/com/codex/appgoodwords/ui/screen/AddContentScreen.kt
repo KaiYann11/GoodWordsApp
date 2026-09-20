@@ -77,6 +77,9 @@ fun AddContentScreen(
     var isFavorite by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.isFavorite ?: false) }
     // 번뜩인 것은 겉모습으로 알 수 없습니다. 주소로 종류를 알아내는 규칙이 짚어 주지 못합니다.
     var isIdea by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.type == ContentType.IDEA) }
+    val collectionType = initialDraft?.type?.takeIf {
+        it in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT)
+    }
 
     val selectedTags = remember(tagsText) { parseTags(tagsText) }
 
@@ -294,7 +297,7 @@ fun AddContentScreen(
             }
         }
 
-        item {
+        if (collectionType == null) item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -348,7 +351,7 @@ fun AddContentScreen(
                         onSave(
                             ContentDraft(
                                 // 켜지 않으면 예전처럼 주소를 보고 알아서 정합니다.
-                                type = if (isIdea) ContentType.IDEA else ContentType.QUOTE,
+                                type = collectionType ?: if (isIdea) ContentType.IDEA else ContentType.QUOTE,
                                 title = title,
                                 body = body,
                                 author = author,

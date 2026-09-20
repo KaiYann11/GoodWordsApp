@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,7 +47,8 @@ fun TodayMoodCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .testTag(todayMoodCardTag)
+            .testTag(todayMoodCardTag),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -59,7 +61,8 @@ fun TodayMoodCard(
             ) {
                 Text(
                     text = if (mood == null) "오늘 기분은 어떠세요?" else "오늘은 ${mood.label}",
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
                 )
                 if (mood != null && onClear != null) {
                     TextButton(onClick = onClear) { Text("지우기") }
@@ -68,7 +71,7 @@ fun TodayMoodCard(
 
             if (mood == null) {
                 Text(
-                    text = "하나만 누르면 됩니다. 일기를 쓰지 않은 날도 남습니다.",
+                    text = "지금 기분을 하나 골라 주세요. 옆으로 넘기면 더 있어요.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

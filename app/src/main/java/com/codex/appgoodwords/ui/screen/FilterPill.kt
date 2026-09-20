@@ -1,16 +1,18 @@
 package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -31,26 +33,18 @@ internal fun CountFilterPill(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(22.dp))
-            .clickable(onClick = onClick)
+            .clip(RoundedCornerShape(14.dp))
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .background(
                 if (selected) {
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary
-                        )
-                    )
+                    MaterialTheme.colorScheme.primary
                 } else {
-                    Brush.horizontalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.surface
-                        )
-                    )
+                    MaterialTheme.colorScheme.surface
                 }
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = "$title $count",

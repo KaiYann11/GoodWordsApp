@@ -4,11 +4,16 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,7 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ContentItemCard(
     item: ContentItemEntity,
@@ -54,11 +60,11 @@ fun ContentItemCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable { onOpenItem(item) },
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+            containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -66,16 +72,7 @@ fun ContentItemCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.tertiaryContainer,
-                                MaterialTheme.colorScheme.secondaryContainer
-                            )
-                        )
-                    )
+                    .background(MaterialTheme.colorScheme.primaryContainer)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -89,89 +86,34 @@ fun ContentItemCard(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (showTypeChip) {
-                                CapsuleTag(
-                                    text = item.type.displayLabel(),
-                                    backgroundBrush = Brush.horizontalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primary,
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
-                                        )
-                                    ),
-                                    textColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                            item.category.takeIf { it.isNotBlank() }?.let { category ->
-                                CapsuleTag(
-                                    text = category,
-                                    backgroundBrush = Brush.horizontalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.secondaryContainer,
-                                            MaterialTheme.colorScheme.tertiaryContainer
-                                        )
-                                    ),
-                                    textColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
-                        }
-                    }
-
-                    Row {
-                        IconButton(onClick = { onConfirmItem(item) }) {
-                            Icon(
-                                imageVector = if (confirmedToday) Icons.Outlined.DoneAll else Icons.Outlined.Done,
-                                contentDescription = if (confirmedToday) "오늘 확인 완료" else "오늘 확인",
-                                tint = if (confirmedToday) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                        if (showTypeChip) {
+                            CapsuleTag(
+                                text = item.type.displayLabel(),
+                                backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+                                textColor = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
-
-                        IconButton(onClick = { shareContentItem(context, item) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.IosShare,
-                                contentDescription = "공유하기",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        // 글귀만 카드로 만듭니다. 링크와 영상은 주소가 핵심이라 그림으로 만들 것이 없습니다.
-                        if (item.type == ContentType.QUOTE) {
-                            IconButton(onClick = { shareQuoteImage(context, item) }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Image,
-                                    contentDescription = "이미지로 공유",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        IconButton(onClick = { onToggleFavorite(item) }) {
-                            Icon(
-                                imageVector = if (item.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                                contentDescription = "즐겨찾기",
-                                tint = if (item.isFavorite) {
-                                    MaterialTheme.colorScheme.tertiary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                        item.category.takeIf { it.isNotBlank() }?.let { category ->
+                            CapsuleTag(
+                                text = category,
+                                backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                                textColor = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
                     }
@@ -227,6 +169,38 @@ fun ContentItemCard(
                         Text(text = "링크 열기")
                     }
                 }
+
+                // 제목은 온전히 읽게 두고, 읽음·공유·즐겨찾기는 본문 아래에서 고릅니다.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = { onConfirmItem(item) }) {
+                        Icon(
+                            imageVector = if (confirmedToday) Icons.Outlined.DoneAll else Icons.Outlined.Done,
+                            contentDescription = if (confirmedToday) "오늘 확인 완료" else "오늘 확인"
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (confirmedToday) "읽음 취소" else "읽음")
+                    }
+                    Row {
+                        IconButton(onClick = { shareContentItem(context, item) }) {
+                            Icon(Icons.Outlined.IosShare, contentDescription = "공유하기")
+                        }
+                        if (item.type == ContentType.QUOTE) {
+                            IconButton(onClick = { shareQuoteImage(context, item) }) {
+                                Icon(Icons.Outlined.Image, contentDescription = "이미지로 공유")
+                            }
+                        }
+                        IconButton(onClick = { onToggleFavorite(item) }) {
+                            Icon(
+                                imageVector = if (item.isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                                contentDescription = "즐겨찾기",
+                                tint = if (item.isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -235,13 +209,13 @@ fun ContentItemCard(
 @Composable
 private fun CapsuleTag(
     text: String,
-    backgroundBrush: Brush,
-    textColor: androidx.compose.ui.graphics.Color
+    backgroundColor: Color,
+    textColor: Color
 ) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(backgroundBrush)
+            .background(backgroundColor)
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Text(
@@ -267,5 +241,9 @@ private fun ContentType.displayLabel(): String {
         ContentType.LINK -> "링크"
         ContentType.VIDEO -> "영상"
         ContentType.IDEA -> "아이디어"
+        ContentType.INBOX -> "임시저장소"
+        ContentType.MEMO -> "메모"
+        ContentType.NOT_TO_DO -> "하지 않을 일"
+        ContentType.CONCEPT -> "개념"
     }
 }

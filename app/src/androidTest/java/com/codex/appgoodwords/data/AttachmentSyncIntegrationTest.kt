@@ -1,7 +1,8 @@
 package com.codex.appgoodwords.data
 
 import android.content.Context
-import android.net.Uri
+import androidx.core.content.FileProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.core.app.ApplicationProvider
 import com.codex.appgoodwords.AppGoodWordsApplication
 import java.io.File
@@ -27,7 +28,10 @@ import org.junit.Test
 class AttachmentSyncIntegrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val container = (context as AppGoodWordsApplication).container
-    private val settings = ServerSyncSettings(serverUrl = "http://10.0.2.2:8765", apiKey = "")
+    private val settings = ServerSyncSettings(
+        serverUrl = InstrumentationRegistry.getArguments().getString("testServerUrl").orEmpty(),
+        apiKey = InstrumentationRegistry.getArguments().getString("testServerApiKey").orEmpty()
+    )
 
     // 1x1 PNG. 진짜 바이트여야 서버가 짓는 해시가 의미 있습니다.
     private val png: ByteArray = Base64.getDecoder().decode(
@@ -38,10 +42,11 @@ class AttachmentSyncIntegrationTest {
 
     @Before
     fun requireServer() {
-        val reachable = runCatching { runBlocking { ServerSyncClient().testConnection(settings) } }.isSuccess
-        assumeTrue("서버가 떠 있지 않아 건너뜁니다.", reachable)
+        assumeTrue("testServerUrl에 별도 HTTPS 테스트 서버를 지정해 주세요.", settings.serverUrl.isNotBlank())
+        runBlocking { ServerSyncClient().testConnection(settings) }
 
-        photo = File(context.cacheDir, "attachment-test-${System.nanoTime()}.png")
+        photo = File(context.cacheDir, "quote-cards/attachment-test-${System.nanoTime()}.png")
+        photo.parentFile!!.mkdirs()
         photo.writeBytes(png)
     }
 
@@ -53,7 +58,7 @@ class AttachmentSyncIntegrationTest {
 
     @Test
     fun aDeviceAttachmentBecomesAServerAddress() = runBlocking {
-        val localUri = Uri.fromFile(photo).toString()
+        val localUri = photoUri(photo)
         container.database.diaryDao().insert(
             DiaryEntity(
                 syncId = "attach-${SyncIdentity.newId()}",
@@ -76,7 +81,7 @@ class AttachmentSyncIntegrationTest {
             DiaryEntity(
                 syncId = "attach-${SyncIdentity.newId()}",
                 entryDate = "2026-08-17",
-                imageUris = listOf(Uri.fromFile(photo).toString())
+                imageUris = listOf(photoUri(photo))
             )
         )
         container.attachmentUploader.uploadPending(settings)
@@ -93,7 +98,7 @@ class AttachmentSyncIntegrationTest {
             DiaryEntity(
                 syncId = "attach-${SyncIdentity.newId()}",
                 entryDate = "2026-08-17",
-                imageUris = listOf(Uri.fromFile(photo).toString())
+                imageUris = listOf(photoUri(photo))
             )
         )
         container.attachmentUploader.uploadPending(settings)
@@ -107,12 +112,12 @@ class AttachmentSyncIntegrationTest {
 
     @Test
     fun aMissingFileDoesNotStopTheRest() = runBlocking {
-        val gone = File(context.cacheDir, "already-deleted-${System.nanoTime()}.png")
+        val gone = File(context.cacheDir, "quote-cards/already-deleted-${System.nanoTime()}.png")
         container.database.diaryDao().insert(
             DiaryEntity(
                 syncId = "attach-${SyncIdentity.newId()}",
                 entryDate = "2026-08-17",
-                imageUris = listOf(Uri.fromFile(gone).toString(), Uri.fromFile(photo).toString())
+                imageUris = listOf(photoUri(gone), photoUri(photo))
             )
         )
 
@@ -132,7 +137,7 @@ class AttachmentSyncIntegrationTest {
             DiaryEntity(
                 syncId = "attach-${SyncIdentity.newId()}",
                 entryDate = "2026-08-17",
-                imageUris = listOf(Uri.fromFile(photo).toString())
+                imageUris = listOf(photoUri(photo))
             )
         )
 
@@ -141,6 +146,9 @@ class AttachmentSyncIntegrationTest {
         assertEquals(0, result.uploaded)
         assertEquals(0, result.failed)
     }
+
+    private fun photoUri(file: File): String =
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file).toString()
 
     private fun download(url: String): ByteArray {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {

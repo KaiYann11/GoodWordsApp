@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.codex.appgoodwords.data.BookEntity
@@ -42,6 +43,18 @@ class SearchScreenTest {
         // 빈칸에 전부를 쏟아 내면 검색 화면이 목록 화면이 됩니다.
         compose.onNodeWithText("일기 1").assertDoesNotExist()
         compose.onNodeWithText("글귀 1").assertDoesNotExist()
+    }
+
+    @Test
+    fun clearingTheQueryReturnsToTheSearchGuide() {
+        compose.setContent { searchScreen() }
+
+        compose.onNodeWithTag(searchInputTag).performTextInput("여름")
+        compose.onNodeWithContentDescription("검색어 지우기").performClick()
+
+        compose.onNodeWithText("어떤 기록을 찾고 있나요?").assertIsDisplayed()
+        compose.onNodeWithText("바다").assertDoesNotExist()
+        compose.onNodeWithContentDescription("검색어 지우기").assertDoesNotExist()
     }
 
     @Test

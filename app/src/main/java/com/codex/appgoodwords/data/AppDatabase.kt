@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GrowthReportEntity::class,
         MoodLogEntity::class
     ],
-    version = 17,
+    version = 20,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -40,6 +40,21 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun moodLogDao(): MoodLogDao
 
     companion object {
+        /** 테이블은 그대로 두고, 개념 종류를 모르는 앱·서버와 형식을 구분합니다. */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(database: SupportSQLiteDatabase) = Unit
+        }
+
+        /** 테이블은 그대로 두고, 하지 않을 일 종류를 모르는 앱·서버와 형식을 구분합니다. */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(database: SupportSQLiteDatabase) = Unit
+        }
+
+        /** 저장 구조는 같고, 임시저장소·메모 종류를 모르는 서버와 동기화하지 않도록 버전을 맞춥니다. */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(database: SupportSQLiteDatabase) = Unit
+        }
+
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(

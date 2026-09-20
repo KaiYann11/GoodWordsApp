@@ -1,8 +1,15 @@
 package com.codex.appgoodwords.data
 
 import android.content.Context
+import android.content.Intent
+import android.text.SpannableString
 import androidx.test.core.app.ApplicationProvider
 import com.codex.appgoodwords.AppGoodWordsApplication
+import com.codex.appgoodwords.ShareTargetActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -42,14 +49,51 @@ class SharedContentSaveTest {
         .filter { it.sourceUrl.contains(TEST_HOST) || it.body.startsWith(TEST_MARK) }
 
     @Test
-    fun aSharedYoutubeLinkIsKeptAsAVideo() = runBlocking {
+    fun twoSelectionsDeliveredDuringStartupBothStay() = runBlocking {
+        val texts = listOf("$TEST_MARK 연속 공유 첫 문장", "$TEST_MARK 연속 공유 둘째 문장")
+        withContext(Dispatchers.Main) {
+            texts.forEach { text ->
+                context.startActivity(Intent(context, ShareTargetActivity::class.java).apply {
+                    action = Intent.ACTION_PROCESS_TEXT
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_PROCESS_TEXT, text)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                })
+            }
+        }
+        withTimeout(5_000) {
+            while (!keptItems().map { it.body }.containsAll(texts)) delay(50)
+        }
+        assertEquals(2, keptItems().count { it.body in texts })
+    }
+
+    @Test
+    fun theTextSelectionActionAcceptsStyledText() = runBlocking {
+        val text = "$TEST_MARK 선택한 용어"
+        withContext(Dispatchers.Main) {
+            context.startActivity(Intent(context, ShareTargetActivity::class.java).apply {
+                action = Intent.ACTION_PROCESS_TEXT
+                type = "text/plain"
+                putExtra(Intent.EXTRA_PROCESS_TEXT, SpannableString(text))
+                putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
+        withTimeout(5_000) {
+            while (keptItems().none { it.body == text }) delay(50)
+        }
+        assertEquals(ContentType.INBOX, keptItems().single { it.body == text }.type)
+    }
+
+    @Test
+    fun aSharedYoutubeLinkWaitsInTheInbox() = runBlocking {
         val draft = SharedText.toDraft("나를 바꾼 15분\nhttps://youtu.be/$TEST_HOST-1?si=abc")!!
 
         val result = repository.saveSharedContent(draft)
 
         assertFalse(result.alreadyKept)
         val saved = keptItems().single()
-        assertEquals(ContentType.VIDEO, saved.type)
+        assertEquals(ContentType.INBOX, saved.type)
         assertEquals("나를 바꾼 15분", saved.title)
         assertEquals("https://youtu.be/$TEST_HOST-1?si=abc", saved.sourceUrl)
     }
@@ -69,13 +113,13 @@ class SharedContentSaveTest {
     }
 
     @Test
-    fun plainSharedTextIsKeptAsAQuote() = runBlocking {
+    fun plainSharedTextWaitsInTheInbox() = runBlocking {
         val draft = SharedText.toDraft("$TEST_MARK 행동은 감정이 따라올 때까지 기다리면 늘 늦다.")!!
 
         repository.saveSharedContent(draft)
 
         val saved = keptItems().single()
-        assertEquals(ContentType.QUOTE, saved.type)
+        assertEquals(ContentType.INBOX, saved.type)
         assertEquals("", saved.sourceUrl)
         // 글 자체가 알맹이라 본문에 담겨야 합니다. 제목만 채우면 담기지 않습니다.
         assertEquals("$TEST_MARK 행동은 감정이 따라올 때까지 기다리면 늘 늦다.", saved.body)
@@ -102,6 +146,58 @@ class SharedContentSaveTest {
 
         assertTrue(result.isFailure)
         assertEquals(before, keptItems().size)
+    }
+
+    @Test
+    fun repeatingPlainTextDoesNotCreateAnotherInboxItem() = runBlocking {
+        val draft = SharedText.toDraft("$TEST_MARK 같은 문장")!!
+        repository.saveSharedContent(draft)
+        assertTrue(repository.saveSharedContent(draft).alreadyKept)
+        assertEquals(1, keptItems().size)
+    }
+
+    @Test
+    fun differentPassagesFromTheSamePageBothStay() = runBlocking {
+        val url = "https://example.com/$TEST_HOST"
+        repository.saveSharedContent(SharedText.toDraft("$TEST_MARK 첫 문장\n$url")!!)
+        repository.saveSharedContent(SharedText.toDraft("$TEST_MARK 다른 문장\n$url")!!)
+        assertEquals(2, keptItems().size)
+    }
+
+    @Test
+    fun classificationPreservesTheOriginalRecordAndItsAttachments() = runBlocking {
+        repository.saveSharedContent(SharedText.toDraft("$TEST_MARK 첫 줄\n둘째 줄")!!)
+        val before = keptItems().single().copy(
+            tags = listOf("공부"), imageUris = listOf("content://test/attachment"),
+            bookSyncId = "source-book", bookPage = 10, updatedAt = System.currentTimeMillis() + 60_000
+        )
+        container.database.contentItemDao().insert(before)
+
+        repository.classifyInboxItem(before.id, ContentType.MEMO)
+
+        val after = keptItems().single()
+        assertEquals(before.copy(type = ContentType.MEMO, updatedAt = after.updatedAt), after)
+        assertTrue(after.updatedAt > before.updatedAt)
+        assertTrue(runCatching { repository.classifyInboxItem(before.id, ContentType.QUOTE) }.isFailure)
+    }
+
+    @Test
+    fun classifyingAVideoIntoTheQuoteLibraryDetectsItsType() = runBlocking {
+        repository.saveSharedContent(SharedText.toDraft("영상\nhttps://youtu.be/$TEST_HOST-classify")!!)
+        val before = keptItems().single()
+        repository.classifyInboxItem(before.id, ContentType.QUOTE)
+        val after = keptItems().single()
+        assertEquals(ContentType.VIDEO, after.type)
+        assertEquals(before.syncId, after.syncId)
+    }
+
+    @Test
+    fun aMemoCannotBeCountedAsAReadQuote() = runBlocking {
+        repository.saveSharedContent(SharedText.toDraft("$TEST_MARK 메모로 남길 글")!!)
+        val item = keptItems().single()
+        repository.classifyInboxItem(item.id, ContentType.MEMO)
+        assertFalse(repository.markContentConfirmed(item.id, ExposureTrigger.DETAIL_OPEN))
+        assertEquals(0, keptItems().single().showCount)
     }
 
     private companion object {

@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.SubcomposeAsyncImage
-import coil.request.ImageRequest
-import com.codex.appgoodwords.data.AttachmentUris
 
 internal const val attachmentViewerTag = "attachment_viewer"
 internal const val attachmentViewerPageTag = "attachment_viewer_page"
@@ -109,15 +107,9 @@ private fun AttachmentPage(
     apiKey: String
 ) {
     val context = LocalContext.current
+    val imageLoader = attachmentImageLoader()
     val model = remember(uri, serverUrl, apiKey) {
-        val target = AttachmentUris.toHttpUrl(serverUrl, uri) ?: uri.takeIf { AttachmentUris.isLocal(it) }
-        target?.let { data ->
-            ImageRequest.Builder(context)
-                .data(data)
-                .apply { if (apiKey.isNotBlank()) addHeader("X-API-Key", apiKey.trim()) }
-                .crossfade(true)
-                .build()
-        }
+        attachmentImageRequest(context, uri, serverUrl, apiKey)
     }
 
     Box(
@@ -139,6 +131,7 @@ private fun AttachmentPage(
         } else {
             SubcomposeAsyncImage(
                 model = model,
+                imageLoader = imageLoader,
                 contentDescription = "붙여 둔 사진",
                 modifier = Modifier.fillMaxSize(),
                 // 자르지 않습니다. 전체를 보려고 연 화면입니다.

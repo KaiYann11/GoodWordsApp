@@ -3,7 +3,7 @@ package com.codex.appgoodwords.ui.screen
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -13,16 +13,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 
 internal const val libraryQuoteTabTag = "library_tab_quote"
 internal const val libraryIdeaTabTag = "library_tab_idea"
 internal const val libraryBookTabTag = "library_tab_book"
+internal const val libraryInboxTabTag = "library_tab_inbox"
+internal const val libraryMemoTabTag = "library_tab_memo"
+internal const val libraryConceptTabTag = "library_tab_concept"
 
 /** 보관함 안의 자리. 검색에서 넘어올 때도 이 번호로 짚습니다. */
 internal object LibraryTab {
     const val QUOTE = 0
     const val IDEA = 1
     const val BOOK = 2
+    const val INBOX = 3
+    const val MEMO = 4
+    const val CONCEPT = 5
 }
 
 /**
@@ -43,7 +50,11 @@ fun LibraryTabsScreen(
     ideaContent: @Composable () -> Unit = {},
     /** 검색에서 넘어올 때 어느 쪽을 열지. null이면 보던 쪽 그대로입니다. */
     requestedTab: Int? = null,
-    requestKey: Any? = null
+    requestKey: Any? = null,
+    inboxCount: Int = 0,
+    inboxContent: @Composable () -> Unit = {},
+    memoContent: @Composable () -> Unit = {},
+    conceptContent: @Composable () -> Unit = {}
 ) {
     // 화면을 돌려도 보던 쪽이 유지되어야 합니다.
     var selected by rememberSaveable { mutableIntStateOf(LibraryTab.QUOTE) }
@@ -54,12 +65,34 @@ fun LibraryTabsScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selected) {
+        val tabs = listOf(
+            LibraryTab.INBOX, LibraryTab.QUOTE, LibraryTab.MEMO,
+            LibraryTab.CONCEPT, LibraryTab.IDEA, LibraryTab.BOOK
+        )
+        ScrollableTabRow(selectedTabIndex = tabs.indexOf(selected), edgePadding = 8.dp) {
+            Tab(
+                selected = selected == LibraryTab.INBOX,
+                onClick = { selected = LibraryTab.INBOX },
+                text = { Text(if (inboxCount > 0) "임시저장소 $inboxCount" else "임시저장소") },
+                modifier = Modifier.testTag(libraryInboxTabTag)
+            )
             Tab(
                 selected = selected == LibraryTab.QUOTE,
                 onClick = { selected = LibraryTab.QUOTE },
                 text = { Text("글귀") },
                 modifier = Modifier.testTag(libraryQuoteTabTag)
+            )
+            Tab(
+                selected = selected == LibraryTab.MEMO,
+                onClick = { selected = LibraryTab.MEMO },
+                text = { Text("메모") },
+                modifier = Modifier.testTag(libraryMemoTabTag)
+            )
+            Tab(
+                selected = selected == LibraryTab.CONCEPT,
+                onClick = { selected = LibraryTab.CONCEPT },
+                text = { Text("개념") },
+                modifier = Modifier.testTag(libraryConceptTabTag)
             )
             Tab(
                 selected = selected == LibraryTab.IDEA,
@@ -75,6 +108,9 @@ fun LibraryTabsScreen(
             )
         }
         when (selected) {
+            LibraryTab.INBOX -> inboxContent()
+            LibraryTab.MEMO -> memoContent()
+            LibraryTab.CONCEPT -> conceptContent()
             LibraryTab.IDEA -> ideaContent()
             LibraryTab.BOOK -> bookContent()
             else -> quoteContent()

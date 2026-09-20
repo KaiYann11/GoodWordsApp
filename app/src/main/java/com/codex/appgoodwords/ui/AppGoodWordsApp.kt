@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -52,11 +53,10 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -80,7 +80,12 @@ import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DaySummaryDialog
 import com.codex.appgoodwords.ui.screen.DetailScreen
+import com.codex.appgoodwords.ui.screen.ClassifyInboxDialog
+import com.codex.appgoodwords.ui.screen.TextCollectionScreen
+import com.codex.appgoodwords.ui.screen.NotToDoScreen
+import com.codex.appgoodwords.ui.screen.RoutineTabsScreen
 import com.codex.appgoodwords.ui.screen.DiaryScreen
+import com.codex.appgoodwords.ui.screen.DiaryUnlockCard
 import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
@@ -188,7 +193,7 @@ fun AppGoodWordsApp(
     val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
     val diaryLockEnabled by viewModel.diaryLockEnabled.collectAsStateWithLifecycle()
 
-    // 지문을 물으려면 FragmentActivity가 필요합니다. 아니면 못 묻고, 그때는 그냥 엽니다.
+    // 기기 인증을 할 수 없는 환경에서는 잠긴 내용을 열지 않습니다.
     val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
     val lockState by viewModel.lockState.collectAsStateWithLifecycle()
 
@@ -226,11 +231,23 @@ fun AppGoodWordsApp(
 
     var navStack by rememberSaveable { mutableStateOf(listOf(tabRoute(AppTab.HOME))) }
     var addFormVersion by rememberSaveable { mutableIntStateOf(0) }
+    var classifyingItemId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var classifyingItem by remember { mutableStateOf(false) }
+    var askingConceptId by remember { mutableStateOf<Long?>(null) }
     var confirmFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var confirmFeedbackToken by remember { mutableLongStateOf(0L) }
 
     val destination = remember(navStack) { parseRoute(navStack.last()) }
     val currentTab = destination.tab
+    var diaryUnlocked by remember(navStack.last(), diaryLockEnabled) { mutableStateOf(false) }
+    val diaryLocked = diaryLockEnabled && !diaryUnlocked
+    DisposableEffect(lifecycleOwner, navStack.last(), diaryLockEnabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) diaryUnlocked = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val selectedItem = allItems.firstOrNull { it.id == destination.selectedItemId }
     val editingItem = allItems.firstOrNull { it.id == destination.editingItemId }
     val canNavigateBack = navStack.size > 1
@@ -244,6 +261,20 @@ fun AppGoodWordsApp(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val saveableStateHolder = rememberSaveableStateHolder()
+
+    fun unlockDiary(onUnlocked: () -> Unit = {}) {
+        val host = activity
+        if (host == null) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("기기 인증을 사용할 수 없어 일기를 열지 않았습니다.") }
+            return
+        }
+        AppLock.authenticate(
+            activity = host,
+            onUnlocked = { diaryUnlocked = true; onUnlocked() },
+            onFailed = { reason -> coroutineScope.launch { snackbarHostState.showSnackbar(reason) } },
+            title = "일기 열기"
+        )
+    }
 
     fun pushRoute(route: String) {
         if (navStack.lastOrNull() != route) {
@@ -326,6 +357,29 @@ fun AppGoodWordsApp(
         }
     }
 
+    fun explainInboxConcept(item: ContentItemEntity) {
+        if (askingConceptId != null) return
+        askingConceptId = item.id
+        coroutineScope.launch {
+            val result = viewModel.explainInboxConcept(item.id)
+            askingConceptId = null
+            if (result.isSuccess) {
+                val concept = result.getOrThrow()
+                // 답을 바로 보여 주고, 뒤로 가면 새 개념 탭에 머뭅니다.
+                navStack = listOf(
+                    tabRoute(AppTab.LIBRARY),
+                    focusRoute(SearchKind.CONCEPT, concept.id),
+                    detailRoute(AppTab.LIBRARY, concept.id)
+                )
+                snackbarHostState.showSnackbar("AI 설명과 함께 개념으로 옮겼습니다.")
+            } else {
+                snackbarHostState.showSnackbar(
+                    result.exceptionOrNull()?.message ?: "AI에게 의미를 묻지 못했습니다."
+                )
+            }
+        }
+    }
+
     fun openFreshAddForm() {
         viewModel.clearSharedText()
         addFormVersion += 1
@@ -373,22 +427,6 @@ fun AppGoodWordsApp(
         }
     }
 
-    if (capturingIdea) {
-        IdeaCaptureDialog(
-            onCapture = { title -> captureIdea(title) },
-            onDismiss = { capturingIdea = false }
-        )
-    }
-
-    // 그날 요약. 홈의 점수 카드나 그래프 막대에서 엽니다.
-    openedDayDigest?.let { digest ->
-        DaySummaryDialog(
-            digest = digest,
-            onMove = { date -> viewModel.openDay(date) },
-            onDismiss = { viewModel.closeDay() }
-        )
-    }
-
     LaunchedEffect(openItemRequest, allItems, currentTab) {
         val targetId = openItemRequest ?: return@LaunchedEffect
         if (allItems.any { it.id == targetId }) {
@@ -398,30 +436,67 @@ fun AppGoodWordsApp(
     }
 
     AppGoodWordsTheme {
-        // 잠겨 있으면 아래를 아예 그리지 않습니다. 화면 위에 덮기만 하면 최근 앱 목록의
-        // 미리보기에 내용이 그대로 남습니다.
         when (lockState) {
             AppLockState.CHECKING -> {
-                // 설정을 읽는 동안입니다. 잠깐 비워 둡니다.
                 Box(modifier = Modifier.fillMaxSize())
                 return@AppGoodWordsTheme
             }
-
             AppLockState.LOCKED -> {
                 AppLockScreen(onUnlocked = { viewModel.unlock() })
                 return@AppGoodWordsTheme
             }
-
             AppLockState.OPEN -> Unit
+        }
+
+        if (capturingIdea) {
+            IdeaCaptureDialog(
+                onCapture = { title -> captureIdea(title) },
+                onDismiss = { capturingIdea = false }
+            )
+        }
+
+        // 그날 요약. 홈의 점수 카드나 그래프 막대에서 엽니다.
+        openedDayDigest?.let { digest ->
+            DaySummaryDialog(
+                digest = if (diaryLocked) digest.copy(
+                    diaryTitles = if (digest.diaryTitles.isEmpty()) emptyList() else listOf("잠긴 일기 ${digest.diaryTitles.size}개")
+                ) else digest,
+                onMove = { date -> viewModel.openDay(date) },
+                onDismiss = { viewModel.closeDay() }
+            )
+        }
+
+        allItems.firstOrNull { it.id == classifyingItemId && it.type == ContentType.INBOX }?.let { item ->
+            ClassifyInboxDialog(
+                item = item,
+                saving = classifyingItem,
+                onDismiss = { classifyingItemId = null },
+                onSelect = { target ->
+                    classifyingItem = true
+                    coroutineScope.launch {
+                        val result = viewModel.classifyInboxItem(item.id, target)
+                        classifyingItem = false
+                        val message = if (result.isSuccess) {
+                            classifyingItemId = null
+                            when (target) {
+                                ContentType.MEMO -> "메모로 옮겼습니다."
+                                ContentType.IDEA -> "아이디어로 옮겼습니다."
+                                else -> "글귀 모음으로 옮겼습니다."
+                            }
+                        } else result.exceptionOrNull()?.message ?: "옮기지 못했습니다."
+                        snackbarHostState.showSnackbar(message)
+                    }
+                }
+            )
         }
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent,
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
+                        containerColor = MaterialTheme.colorScheme.background,
                         titleContentColor = MaterialTheme.colorScheme.onBackground
                     ),
                     title = {
@@ -432,7 +507,9 @@ fun AppGoodWordsApp(
                                 else -> currentTab.title
                             },
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
                     navigationIcon = {
@@ -470,7 +547,10 @@ fun AppGoodWordsApp(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 if (selectedItem == null) {
-                    NavigationBar {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp
+                    ) {
                         // 담기(+)는 하단 바에 두지 않습니다. 하단 바는 "어디로 갈지"만 담아야
                         // 읽기 쉬운데, +만 혼자 "무엇을 할지"여서 성격이 달랐습니다.
                         // 지금은 보관함의 글귀 화면 안에 있습니다.
@@ -497,10 +577,17 @@ fun AppGoodWordsApp(
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
                                             },
-                                            contentDescription = tab.title
+                                            contentDescription = null
                                         )
                                     },
-                                    label = { Text(tab.title) }
+                                    label = { Text(tab.title, maxLines = 1) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 )
                             }
                     }
@@ -510,21 +597,16 @@ fun AppGoodWordsApp(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFFF7FBFF),
-                                Color(0xFFEFF4FF),
-                                Color(0xFFFDF9FF)
-                            )
-                        )
-                    )
+                    .background(MaterialTheme.colorScheme.background)
             ) {
                 saveableStateHolder.SaveableStateProvider(navStack.last()) {
                 if (selectedItem != null) {
                     DetailScreen(
                         modifier = Modifier.padding(innerPadding),
                         item = selectedItem,
+                        onClassify = { classifyingItemId = selectedItem.id },
+                        askingConcept = askingConceptId == selectedItem.id,
+                        onAskConcept = { explainInboxConcept(selectedItem) },
                         confirmedToday = selectedItem.id in confirmedTodayIds,
                         onEdit = { item ->
                             pushRoute(editRoute(currentTab, item.id))
@@ -618,7 +700,7 @@ fun AppGoodWordsApp(
                             todayScore = todayScore,
                             scoreTrend = scoreTrend,
                             onOpenDay = { date -> viewModel.openDay(date) },
-                            memories = onThisDay,
+                            memories = if (diaryLocked) onThisDay.filter { it.kind != SearchKind.DIARY } else onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,
                             onCaptureIdea = { title -> captureIdea(title) },
@@ -637,8 +719,53 @@ fun AppGoodWordsApp(
 
                         AppTab.LIBRARY -> LibraryTabsScreen(
                             modifier = Modifier.padding(innerPadding),
-                            // 검색에서 책을 골라 왔으면 독서 쪽을 열어 줍니다.
-                            requestedTab = if (destination.focusKind == SearchKind.BOOK) LibraryTab.BOOK else null,
+                            inboxCount = allItems.count { it.type == ContentType.INBOX },
+                            inboxContent = {
+                                TextCollectionScreen(
+                                    items = allItems.filter { it.type == ContentType.INBOX },
+                                    collectionType = ContentType.INBOX,
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) },
+                                    onClassifyItem = { item -> classifyingItemId = item.id },
+                                    askingConceptId = askingConceptId,
+                                    onAskConcept = { item -> explainInboxConcept(item) },
+                                    onPaste = { text ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.captureInboxText(text)
+                                            snackbarHostState.showSnackbar(
+                                                result.fold(
+                                                    onSuccess = { alreadyKept ->
+                                                        if (alreadyKept) "임시저장소에 이미 있는 글입니다."
+                                                        else "임시저장소에 담았습니다."
+                                                    },
+                                                    onFailure = { it.message ?: "담지 못했습니다." }
+                                                )
+                                            )
+                                        }
+                                    }
+                                )
+                            },
+                            memoContent = {
+                                TextCollectionScreen(
+                                    items = allItems.filter { it.type == ContentType.MEMO },
+                                    collectionType = ContentType.MEMO,
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) }
+                                )
+                            },
+                            conceptContent = {
+                                TextCollectionScreen(
+                                    items = allItems.filter { it.type == ContentType.CONCEPT },
+                                    collectionType = ContentType.CONCEPT,
+                                    contentMemos = contentMemos,
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) }
+                                )
+                            },
+                            requestedTab = when (destination.focusKind) {
+                                SearchKind.BOOK -> LibraryTab.BOOK
+                                SearchKind.CONCEPT -> LibraryTab.CONCEPT
+                                SearchKind.INBOX -> LibraryTab.INBOX
+                                SearchKind.MEMO -> LibraryTab.MEMO
+                                else -> null
+                            },
                             requestKey = destination.focusId,
                             bookContent = {
                                 BookScreen(
@@ -716,7 +843,7 @@ fun AppGoodWordsApp(
                             },
                             quoteContent = {
                         LibraryScreen(
-                            items = remember(allItems) { allItems.filter { it.type != ContentType.IDEA } },
+                            items = remember(allItems) { allItems.filter { it.type.isReadingContent } },
                             categories = categories,
                             confirmedTodayIds = confirmedTodayIds,
                             shuffleSeed = shuffleSeed,
@@ -752,87 +879,106 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.ROUTINE -> RoutineScreen(
+                        AppTab.ROUTINE -> RoutineTabsScreen(
                             modifier = Modifier.padding(innerPadding),
-                            focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
-                            routines = routines,
-                            todayCounts = routineTodayCounts,
-                            memos = routineMemos,
-                            onSaveRoutine = { draft ->
-                                coroutineScope.launch {
-                                    val result = viewModel.saveRoutine(draft)
-                                    val message = if (result.isSuccess) {
-                                        "루틴을 저장했습니다."
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "루틴을 저장하지 못했습니다."
-                                    }
-                                    snackbarHostState.showSnackbar(message)
-                                }
+                            requestedNotToDo = when (destination.focusKind) {
+                                SearchKind.NOT_TO_DO -> true
+                                SearchKind.ROUTINE -> false
+                                else -> null
                             },
-                            onDeleteRoutine = { routine ->
-                                coroutineScope.launch {
-                                    val result = viewModel.deleteRoutine(routine.id)
-                                    val message = if (result.isSuccess) {
-                                        "루틴을 삭제했습니다."
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "루틴을 삭제하지 못했습니다."
-                                    }
-                                    snackbarHostState.showSnackbar(message)
-                                }
+                            requestKey = navStack.last(),
+                            notToDoContent = {
+                                NotToDoScreen(
+                                    items = allItems,
+                                    onSave = viewModel::saveContent,
+                                    onDelete = viewModel::deleteContent,
+                                    focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.NOT_TO_DO }
+                                )
                             },
-                            onSaveMemo = { routine, body ->
-                                coroutineScope.launch {
-                                    val result = viewModel.saveRoutineMemo(routine.id, body)
-                                    val message = if (result.isSuccess) {
-                                        "메모를 저장하고 수행 처리했습니다."
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "메모를 저장하지 못했습니다."
+                            routineContent = {
+                                RoutineScreen(
+                                    focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
+                                    routines = routines,
+                                    todayCounts = routineTodayCounts,
+                                    memos = routineMemos,
+                                    onSaveRoutine = { draft ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.saveRoutine(draft)
+                                            val message = if (result.isSuccess) {
+                                                "루틴을 저장했습니다."
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "루틴을 저장하지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onDeleteRoutine = { routine ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.deleteRoutine(routine.id)
+                                            val message = if (result.isSuccess) {
+                                                "루틴을 삭제했습니다."
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "루틴을 삭제하지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onSaveMemo = { routine, body ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.saveRoutineMemo(routine.id, body)
+                                            val message = if (result.isSuccess) {
+                                                "메모를 저장하고 수행 처리했습니다."
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "메모를 저장하지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onDeleteMemo = { memo ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.deleteRoutineMemo(memo.id)
+                                            val message = if (result.isSuccess) {
+                                                "메모를 삭제했습니다."
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "메모를 삭제하지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onCheckRoutine = { routine ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.checkRoutine(routine.id)
+                                            val message = if (result.isSuccess) {
+                                                "${routine.title}: 오늘 ${result.getOrDefault(0)}회"
+                                            } else {
+                                                result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
+                                            }
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
+                                    onMoveRoutine = { routine, up ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.moveRoutine(routine.id, up)
+                                            // 성공하면 목록이 곧바로 움직여 보이므로 따로 알리지 않는다.
+                                            result.exceptionOrNull()?.let { failure ->
+                                                snackbarHostState.showSnackbar(
+                                                    failure.message ?: "루틴 순서를 바꾸지 못했습니다."
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onMoveRoutineTo = { routine, targetIndex ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.moveRoutineTo(routine.id, targetIndex)
+                                            result.exceptionOrNull()?.let { failure ->
+                                                snackbarHostState.showSnackbar(
+                                                    failure.message ?: "루틴 순서를 바꾸지 못했습니다."
+                                                )
+                                            }
+                                        }
                                     }
-                                    snackbarHostState.showSnackbar(message)
-                                }
-                            },
-                            onDeleteMemo = { memo ->
-                                coroutineScope.launch {
-                                    val result = viewModel.deleteRoutineMemo(memo.id)
-                                    val message = if (result.isSuccess) {
-                                        "메모를 삭제했습니다."
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "메모를 삭제하지 못했습니다."
-                                    }
-                                    snackbarHostState.showSnackbar(message)
-                                }
-                            },
-                            onCheckRoutine = { routine ->
-                                coroutineScope.launch {
-                                    val result = viewModel.checkRoutine(routine.id)
-                                    val message = if (result.isSuccess) {
-                                        "${routine.title}: 오늘 ${result.getOrDefault(0)}회"
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
-                                    }
-                                    snackbarHostState.showSnackbar(message)
-                                }
-                            },
-                            onMoveRoutine = { routine, up ->
-                                coroutineScope.launch {
-                                    val result = viewModel.moveRoutine(routine.id, up)
-                                    // 성공하면 목록이 곧바로 움직여 보이므로 따로 알리지 않는다.
-                                    result.exceptionOrNull()?.let { failure ->
-                                        snackbarHostState.showSnackbar(
-                                            failure.message ?: "루틴 순서를 바꾸지 못했습니다."
-                                        )
-                                    }
-                                }
-                            },
-                            onMoveRoutineTo = { routine, targetIndex ->
-                                coroutineScope.launch {
-                                    val result = viewModel.moveRoutineTo(routine.id, targetIndex)
-                                    result.exceptionOrNull()?.let { failure ->
-                                        snackbarHostState.showSnackbar(
-                                            failure.message ?: "루틴 순서를 바꾸지 못했습니다."
-                                        )
-                                    }
-                                }
+                                )
+
                             }
                         )
 
@@ -874,18 +1020,8 @@ fun AppGoodWordsApp(
                         AppTab.DIARY -> DiaryScreen(
                             modifier = Modifier.padding(innerPadding),
                             diaries = diaries,
-                            locked = diaryLockEnabled,
-                            // 기기에 이미 있는 잠금을 빌려 씁니다. 못 물어보는 기기면 그냥 엽니다.
-                            // 열 수 없게 두면 사용자가 자기 일기에서 잠깁니다.
-                            onRequestUnlock = { onUnlocked ->
-                                val host = activity
-                                if (host == null) onUnlocked() else AppLock.authenticate(
-                                    activity = host,
-                                    onUnlocked = onUnlocked,
-                                    onFailed = { },
-                                    title = "일기 열기"
-                                )
-                            },
+                            locked = diaryLocked,
+                            onRequestUnlock = { onUnlocked -> unlockDiary(onUnlocked) },
                             focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.DIARY },
                             today = LocalDate.now(),
                             // 서버가 보관하는 첨부를 받아오려면 주소와 키가 필요합니다.
@@ -918,14 +1054,17 @@ fun AppGoodWordsApp(
 
                         AppTab.SEARCH -> SearchScreen(
                             modifier = Modifier.padding(innerPadding),
+                            diaryLocked = diaryLocked,
+                            onUnlockDiaries = { unlockDiary() },
                             items = allItems,
+                            contentMemos = contentMemos,
                             diaries = diaries,
                             todos = todos,
                             books = books,
                             routines = routines,
                             growthReports = growthReports,
                             onOpenHit = { hit ->
-                                if (hit.kind == SearchKind.QUOTE) {
+                                if (hit.kind in listOf(SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT)) {
                                     openItemDetail(AppTab.SEARCH, hit.id)
                                 } else {
                                     // 나머지는 각자 사는 탭으로 데려가 그 항목을 짚어 줍니다.
@@ -954,7 +1093,10 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.GROWTH -> GrowthFeedbackScreen(
+                        AppTab.GROWTH -> if (diaryLocked) DiaryUnlockCard(
+                            modifier = Modifier.padding(innerPadding).padding(16.dp),
+                            onUnlock = { unlockDiary() }
+                        ) else GrowthFeedbackScreen(
                             modifier = Modifier.padding(innerPadding),
                             reports = growthReports,
                             running = growthRunning,
@@ -1043,6 +1185,8 @@ fun AppGoodWordsApp(
 
                         AppTab.GALLERY -> AttachmentGalleryScreen(
                             modifier = Modifier.padding(innerPadding),
+                            diaryLocked = diaryLocked,
+                            onUnlockDiaries = { unlockDiary() },
                             shots = attachmentShots,
                             serverUrl = serverSyncSettings.serverUrl,
                             apiKey = serverSyncSettings.apiKey,
@@ -1117,7 +1261,10 @@ fun AppGoodWordsApp(
                             }
                         )
 
-                        AppTab.SETTINGS -> SettingsScreen(
+                        AppTab.SETTINGS -> if (diaryLocked) DiaryUnlockCard(
+                            modifier = Modifier.padding(innerPadding).padding(16.dp),
+                            onUnlock = { unlockDiary() }
+                        ) else SettingsScreen(
                             modifier = Modifier.padding(innerPadding),
                             settings = settings,
                             serverSyncSettings = serverSyncSettings,
@@ -1131,7 +1278,10 @@ fun AppGoodWordsApp(
                             appLockEnabled = appLockEnabled,
                             onAppLockChanged = { enabled -> viewModel.setAppLockEnabled(enabled) },
                             diaryLockEnabled = diaryLockEnabled,
-                            onDiaryLockChanged = { enabled -> viewModel.setDiaryLockEnabled(enabled) },
+                            onDiaryLockChanged = { enabled ->
+                                if (enabled) viewModel.setDiaryLockEnabled(true)
+                                else unlockDiary { viewModel.setDiaryLockEnabled(false) }
+                            },
                             aiFeedbackSettings = aiFeedbackSettings,
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
                             dailySteps = dailySteps,
@@ -1353,11 +1503,11 @@ private fun focusRoute(kind: SearchKind, id: Long): String = "focus:${kind.name}
 
 /** 그 종류를 어디서 보는지. 할 일과 루틴은 같은 탭 안에서 나뉩니다. */
 private fun tabOf(kind: SearchKind): AppTab = when (kind) {
-    SearchKind.QUOTE -> AppTab.LIBRARY
+    SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT -> AppTab.LIBRARY
     SearchKind.BOOK -> AppTab.LIBRARY
     SearchKind.DIARY -> AppTab.DIARY
     SearchKind.TODO -> AppTab.TODO
-    SearchKind.ROUTINE -> AppTab.ROUTINE
+    SearchKind.ROUTINE, SearchKind.NOT_TO_DO -> AppTab.ROUTINE
     SearchKind.GROWTH -> AppTab.GROWTH
 }
 

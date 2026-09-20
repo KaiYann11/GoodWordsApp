@@ -56,7 +56,9 @@ object OnThisDay {
             )
         }
 
-        val fromItems = items.mapNotNull { item ->
+        val fromItems = items
+            .filter { it.type !in listOf(ContentType.NOT_TO_DO, ContentType.CONCEPT) }
+            .mapNotNull { item ->
             val date = toDate(item.createdAt, zoneId)
             val yearsAgo = yearsAgoOf(date, today) ?: return@mapNotNull null
             OnThisDayMemory(
@@ -67,7 +69,7 @@ object OnThisDay {
                 body = item.body,
                 yearsAgo = yearsAgo
             )
-        }
+            }
 
         // 가까운 해가 먼저입니다. 작년 것이 십 년 전 것보다 와닿습니다.
         // 같은 해라면 일기를 앞에 둡니다. 그날 직접 쓴 글이 담아 둔 글귀보다 제 것입니다.

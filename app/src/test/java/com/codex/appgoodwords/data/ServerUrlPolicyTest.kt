@@ -1,14 +1,13 @@
 package com.codex.appgoodwords.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ServerUrlPolicyTest {
     @Test
-    fun allowsPlainHttpToPrivateRanges() {
+    fun rejectsPlainHttpEvenOnPrivateAndLoopbackAddresses() {
         listOf(
             "http://192.168.0.10:8765",
             "http://10.0.2.2:8765",
@@ -19,7 +18,7 @@ class ServerUrlPolicyTest {
             "http://169.254.10.10:8765",
             "http://mac-mini.local:8765"
         ).forEach { url ->
-            assertEquals(url, ServerUrlPolicy.normalize(url))
+            assertThrows(IllegalArgumentException::class.java) { ServerUrlPolicy.normalize(url) }
         }
     }
 
@@ -51,7 +50,7 @@ class ServerUrlPolicyTest {
 
     @Test
     fun trimsWhitespaceAndTrailingSlash() {
-        assertEquals("http://192.168.0.10:8765", ServerUrlPolicy.normalize("  http://192.168.0.10:8765/  "))
+        assertEquals("https://sync.example.com", ServerUrlPolicy.normalize("  https://sync.example.com/  "))
     }
 
     @Test
@@ -68,18 +67,12 @@ class ServerUrlPolicyTest {
     }
 
     @Test
-    fun isLocalNetworkHost_boundaries() {
-        assertTrue(ServerUrlPolicy.isLocalNetworkHost("10.0.0.0"))
-        assertTrue(ServerUrlPolicy.isLocalNetworkHost("10.255.255.255"))
-        assertTrue(ServerUrlPolicy.isLocalNetworkHost("192.168.255.255"))
-        assertTrue(ServerUrlPolicy.isLocalNetworkHost("::1"))
-        assertTrue(ServerUrlPolicy.isLocalNetworkHost("[::1]"))
-
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("11.0.0.1"))
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("192.169.0.1"))
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("1.2.3"))
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("999.1.1.1"))
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("example.com"))
-        assertFalse(ServerUrlPolicy.isLocalNetworkHost("notlocal.localdomain"))
+    fun rejectsEmbeddedCredentialsAndAmbiguousEndpoints() {
+        listOf(
+            "https://user:password@sync.example.com", "https://sync.example.com?target=other",
+            "https://sync.example.com#other", "https://sync.example.com:70000", "https://"
+        ).forEach { url ->
+            assertThrows(IllegalArgumentException::class.java) { ServerUrlPolicy.normalize(url) }
+        }
     }
 }

@@ -3,10 +3,14 @@ package com.codex.appgoodwords.data
 /** 검색 결과가 어느 기능에서 나왔는지. */
 enum class SearchKind(val label: String) {
     QUOTE("글귀"),
+    MEMO("메모"),
+    CONCEPT("개념"),
+    INBOX("임시저장소"),
     DIARY("일기"),
     TODO("할 일"),
     BOOK("독서"),
     ROUTINE("루틴"),
+    NOT_TO_DO("하지 않을 일"),
     GROWTH("돌아보기")
 }
 
@@ -54,6 +58,7 @@ object AppSearch {
     fun search(
         query: String,
         items: List<ContentItemEntity> = emptyList(),
+        contentMemos: List<ContentMemoEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
         books: List<BookEntity> = emptyList(),
@@ -64,25 +69,42 @@ object AppSearch {
         if (terms.isEmpty()) return SearchResults(query = query, hits = emptyList())
 
         val hits = buildList {
-            addAll(
-                items.matching(
-                    terms = terms,
-                    fields = { item ->
-                        listOf(item.title, item.body, item.author, item.category, item.tags.joinToString(" "))
-                    }
-                ) { item ->
-                    SearchHit(
-                        kind = SearchKind.QUOTE,
-                        id = item.id,
-                        title = item.title.ifBlank { item.body.take(30) },
-                        snippet = snippetOf(item.body, terms),
-                        meta = listOfNotNull(
-                            item.author.takeIf { it.isNotBlank() },
-                            item.category.takeIf { it.isNotBlank() }
-                        ).joinToString(" · ")
-                    )
+            val memoBodiesByItem = contentMemos.groupBy { it.contentItemId }
+            val contentGroups = items.groupBy { item ->
+                when (item.type) {
+                    ContentType.MEMO -> SearchKind.MEMO
+                    ContentType.CONCEPT -> SearchKind.CONCEPT
+                    ContentType.INBOX -> SearchKind.INBOX
+                    ContentType.NOT_TO_DO -> SearchKind.NOT_TO_DO
+                    else -> SearchKind.QUOTE
                 }
-            )
+            }
+            contentGroups.forEach { (kind, content) ->
+                addAll(
+                    content.matching(
+                        terms = terms,
+                        fields = { item ->
+                            listOf(item.title, item.body, item.author, item.sourceUrl, item.category, item.tags.joinToString(" ")) +
+                                memoBodiesByItem[item.id].orEmpty().map { it.body }
+                        }
+                    ) { item ->
+                        SearchHit(
+                            kind = kind,
+                            id = item.id,
+                            title = item.title.ifBlank { item.body.take(30) },
+                            snippet = snippetOf(
+                                (listOf(item.body) + memoBodiesByItem[item.id].orEmpty().map { it.body })
+                                    .joinToString(" "),
+                                terms
+                            ),
+                            meta = listOfNotNull(
+                                item.author.takeIf { it.isNotBlank() },
+                                item.category.takeIf { it.isNotBlank() }
+                            ).joinToString(" · ")
+                        )
+                    }
+                )
+            }
             addAll(
                 diaries.matching(
                     terms = terms,

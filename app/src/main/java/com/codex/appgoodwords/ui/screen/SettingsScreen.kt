@@ -500,7 +500,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("서버 주소") },
                         supportingText = {
-                            Text("예: http://192.168.0.10:8765 (평문 http는 같은 네트워크 주소만, 외부는 https 필요)")
+                            Text("예: https://서버이름.ts.net · 인증서가 확인되는 HTTPS 주소를 입력해 주세요.")
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true

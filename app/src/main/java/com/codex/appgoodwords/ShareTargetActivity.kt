@@ -5,7 +5,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import com.codex.appgoodwords.data.SharedText
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 다른 앱의 공유에서 이 앱을 고르면, **앱을 열지 않고 바로 담습니다.**
@@ -23,14 +25,25 @@ import kotlinx.coroutines.launch
 class ShareTargetActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        capture(intent)
+    }
 
-        val draft = if (intent?.action == Intent.ACTION_SEND) {
-            SharedText.toDraft(
-                text = intent.getStringExtra(Intent.EXTRA_TEXT),
-                subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // 공유 앱이 SINGLE_TOP으로 보내면 새 화면 대신 이곳으로 다음 원문이 옵니다.
+        capture(intent)
+    }
+
+    private fun capture(incoming: Intent?) {
+        val draft = when (incoming?.action) {
+            Intent.ACTION_SEND -> SharedText.toDraft(
+                text = incoming.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                subject = incoming.getStringExtra(Intent.EXTRA_SUBJECT)
             )
-        } else {
-            null
+            Intent.ACTION_PROCESS_TEXT -> SharedText.toDraft(
+                text = incoming.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            )
+            else -> null
         }
 
         if (draft == null) {
@@ -45,11 +58,12 @@ class ShareTargetActivity : Activity() {
                 .fold(
                     onSuccess = { saved ->
                         val name = saved.title.ifBlank { "새 게시글" }
-                        if (saved.alreadyKept) "이미 담아 둔 것입니다: $name" else "보관함에 담았습니다: $name"
+                        if (saved.alreadyKept) "임시저장소에 이미 있습니다: $name" else "임시저장소에 담았습니다: $name"
                     },
                     onFailure = { failure -> failure.message ?: "담지 못했습니다." }
                 )
-            toast(message)
+            // 저장은 백그라운드에서 하지만 안내는 화면 스레드에서 띄워야 합니다.
+            withContext(Dispatchers.Main) { toast(message) }
         }
 
         // 저장을 기다리지 않고 물러납니다. 공유한 앱으로 곧바로 돌아가야 합니다.

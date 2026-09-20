@@ -7,7 +7,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 17;
+const schemaVersion = 20;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -60,7 +60,7 @@ for (const [mime, ext] of attachmentExtensions) {
 }
 
 /** 보관함에 담기는 종류. 앱 `ContentType`과 같은 이름이어야 한다. */
-const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA"]);
+const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
 const triggers = new Set([
   "APP_LAUNCH",
@@ -1544,7 +1544,9 @@ function saveContent(db, payload, itemId = null) {
     showCount: Object.hasOwn(payload, "showCount") ? payload.showCount : existing?.showCount || 0,
     isFavorite: Object.hasOwn(payload, "isFavorite") ? payload.isFavorite : existing?.isFavorite || false,
   });
-  if (!normalized.body && !normalized.sourceUrl && normalized.imageUris.length === 0 && normalized.videoUris.length === 0) {
+  if (normalized.type === "NOT_TO_DO") {
+    if (!normalized.title) throw new HttpError(400, "하지 않을 일을 입력해 주세요.");
+  } else if (!normalized.body && !normalized.sourceUrl && normalized.imageUris.length === 0 && normalized.videoUris.length === 0) {
     throw new HttpError(400, "본문, 링크, 사진, 영상 중 하나는 필요합니다.");
   }
   if (!normalized.title) {
@@ -1860,6 +1862,7 @@ function recordContentEvent(db, itemId, eventType, trigger, incrementRead) {
 }
 
 function markConfirmedOnce(db, itemId, trigger) {
+  if (["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(db.items.find(item => item.id === itemId)?.type)) return false;
   const [start, end] = todayRange();
   const exists = db.exposureEvents.some(
     (event) =>
@@ -1874,6 +1877,7 @@ function markConfirmedOnce(db, itemId, trigger) {
 }
 
 function toggleConfirmed(db, itemId, trigger) {
+  if (["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(db.items.find(item => item.id === itemId)?.type)) return false;
   const [start, end] = todayRange();
   const before = db.exposureEvents.length;
   db.exposureEvents = db.exposureEvents.filter(
@@ -2352,6 +2356,7 @@ function contentType(filePath) {
       ".mjs": "text/javascript; charset=utf-8",
       ".svg": "image/svg+xml",
       ".json": "application/json; charset=utf-8",
+      ".apk": "application/vnd.android.package-archive",
     }[extname(filePath).toLowerCase()] || "application/octet-stream"
   );
 }
@@ -2383,6 +2388,9 @@ function parseArgs(args) {
     else if (arg === "--api-key") parsed.apiKey = args[++index];
     else if (arg === "--attachments") parsed.attachmentsDir = args[++index];
     else if (arg === "--seed") parsed.seed = true;
+  }
+  if (!["127.0.0.1", "::1", "localhost"].includes(parsed.host)) {
+    throw new Error("HTTP 서버는 루프백 주소에서만 실행할 수 있습니다. 외부 기기는 HTTPS 프록시로 연결해 주세요.");
   }
   parsed.dbPath = resolve(parsed.dbPath);
   // 첨부는 DB JSON 밖에 둡니다. 안에 넣으면 스냅샷을 주고받을 때마다 사진과 영상이 통째로 오갑니다.

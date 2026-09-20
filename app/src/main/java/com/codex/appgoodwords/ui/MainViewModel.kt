@@ -12,6 +12,7 @@ import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.ContentDraft
+import com.codex.appgoodwords.data.ConceptExplanation
 import com.codex.appgoodwords.data.ContentNormalizer
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryDraft
@@ -397,7 +398,7 @@ class MainViewModel(
 
     /** 일기만 따로 거는 잠금. 앱 잠금과 별개입니다. */
     val diaryLockEnabled = container.settingsStore.diaryLockEnabledFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     /**
      * 잠금의 세 가지 상태.
@@ -864,6 +865,33 @@ class MainViewModel(
         val trimmed = title.trim()
         require(trimmed.isNotBlank()) { "적은 것이 없습니다." }
         container.repository.saveContent(ContentDraft(type = ContentType.IDEA, title = trimmed))
+    }
+
+    suspend fun captureInboxText(text: String): Result<Boolean> = runCatching {
+        val draft = com.codex.appgoodwords.data.SharedText.toDraft(text)
+            ?: error("붙여넣을 텍스트가 없습니다.")
+        container.repository.saveSharedContent(draft).alreadyKept
+    }
+
+    suspend fun classifyInboxItem(id: Long, destination: ContentType): Result<Unit> = runCatching {
+        container.repository.classifyInboxItem(id, destination)
+        Unit
+    }
+
+    /** 임시저장 원문을 AI에게 설명받고, 성공한 경우에만 개념으로 옮깁니다. */
+    suspend fun explainInboxConcept(id: Long) = runCatching {
+        val item = container.repository.getContentItem(id) ?: error("임시저장 글을 찾을 수 없습니다.")
+        check(item.type == ContentType.INBOX) { "이미 정리한 글입니다." }
+        val aiSettings = container.settingsStore.getAiFeedbackSettings()
+        val rawAnswer = container.aiFeedbackClient.ask(
+            system = ConceptExplanation.systemPrompt(),
+            user = ConceptExplanation.userPrompt(item),
+            model = aiSettings.effectiveModel,
+            aiSettings = aiSettings,
+            syncSettings = container.settingsStore.getServerSyncSettings()
+        )
+        val explanation = ConceptExplanation.parse(rawAnswer)
+        container.repository.saveConceptExplanation(id, explanation)
     }
 
     /**

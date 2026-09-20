@@ -16,7 +16,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>APP_GOOD_WORDS_HOST</key>
-    <string>0.0.0.0</string>
+    <string>127.0.0.1</string>
     <key>APP_GOOD_WORDS_PORT</key>
     <string>8765</string>
     <key>APP_GOOD_WORDS_API_KEY</key>

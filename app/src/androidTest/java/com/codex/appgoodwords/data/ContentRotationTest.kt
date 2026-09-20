@@ -45,6 +45,16 @@ class ContentRotationTest {
     }
 
     @Test
+    fun privateCollectionsAreNeverSurfacedAsQuotes() = runBlocking {
+        for (type in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.IDEA, ContentType.CONCEPT)) {
+            database.contentItemDao().insert(ContentItemEntity(type = type, title = type.name, body = "내용"))
+        }
+        assertNull(pick(poolSize = 5))
+        val quote = insertItem("정리한 글귀")
+        assertEquals(quote, pick(poolSize = 5)?.id)
+    }
+
+    @Test
     fun pick_prefersNeverSurfacedItem() = runBlocking {
         val shown = insertItem("이미 노출됨", lastSurfacedAt = 1_000L)
         val neverShown = insertItem("한 번도 노출 안 됨")

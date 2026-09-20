@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-HOST=${APP_GOOD_WORDS_HOST:-0.0.0.0}
+HOST=${APP_GOOD_WORDS_HOST:-127.0.0.1}
 PORT=${APP_GOOD_WORDS_PORT:-8765}
 DB=${APP_GOOD_WORDS_DB:-"$SCRIPT_DIR/app-good-words.db.json"}
 

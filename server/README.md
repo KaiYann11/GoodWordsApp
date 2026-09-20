@@ -15,13 +15,53 @@ node app_good_words_server.mjs --seed
 http://127.0.0.1:8765
 ```
 
-탭은 홈 · 보관함 · 루틴 · 할 일 · 일기 · 독서 · 돌아보기 · 이력 · 서버입니다. 앱에서 하는 일은 웹에서도 됩니다.
+탭은 홈 · 보관함 · 루틴 · 하지 않을 일 · 할 일 · 일기 · 독서 · 돌아보기 · 이력 · 서버입니다. 앱에서 하는 일은 웹에서도 됩니다.
 
 Windows에서 간단히 실행하려면 `server\run_server.cmd`를 열면 됩니다.
 
+## 이 PC에 설치된 서버
+
+현재 사용자 설치 위치는 `%LOCALAPPDATA%\AppGoodWordsServer`입니다. `app/`에 서버와 웹 화면,
+`runtime/`에 Node, `data/`에 DB와 첨부, `logs/`에 실행 기록을 둡니다. 개발 저장소의 DB 원본은
+유지하고 설치 직전 사본을 `data/backups/`에 남겼습니다.
+
+Windows 로그인 시 시작프로그램의 `AppGoodWords Server` 바로가기가 서버를 숨김 실행합니다.
+시작 메뉴의 **오늘의 글귀 서버**에서 서버 열기·시작·중지·접속 키 복사를 사용할 수 있습니다.
+API 키는 설치 폴더의 `api-key.txt`에 있으며 저장소나 다운로드 페이지에는 포함하지 않습니다.
+
+PC에서는 `http://127.0.0.1:8765/`로 접속할 수 있습니다. 휴대폰은 PC와 같은 Tailscale에 연결하고
+`https://<PC의 Tailscale DNS 이름>/`으로 접속합니다. 앱의 서버 주소도 HTTPS 주소로 바꾸고 기존
+접속 키를 사용합니다. **연결 테스트 → 서버와 병합**으로 확인합니다.
+PC가 켜져 있고 Windows에 로그인되어 있어야 합니다.
+
+Node 서버는 루프백에서만 HTTP를 받으며 휴대폰 연결은 Tailscale Serve의 HTTPS를 거칩니다.
+LAN에 TCP 8765 포트를 열 필요가 없습니다. 설정 방법은 아래 HTTPS 연결 절을 참고하세요.
+
+## 휴대폰에서 앱 업데이트
+
+휴대폰 브라우저로 `https://<PC의 Tailscale DNS 이름>/update/`를 열면 최신 APK를 받을 수 있습니다.
+서버 화면의 **앱 업데이트** 링크로도 이동합니다. 다운로드 뒤 Android 설치 화면에서 업데이트합니다.
+설치 파일을 받는 페이지에는 접속 키가 필요하지 않으며, 개인 기록 API에는 기존 인증이 적용됩니다.
+
+새 버전은 `app/build.gradle.kts`의 `versionCode`를 올리고 같은 서명으로 빌드한 다음 게시합니다.
+프로젝트 루트에서:
+
+```powershell
+.\gradlew.bat assembleDebug
+.\server\publish_update.ps1 -WebRoot "$env:LOCALAPPDATA\AppGoodWordsServer\app\web"
+```
+
+저장소에서 직접 서버를 실행 중이면 `-WebRoot`를 생략합니다. 게시 스크립트는 APK를 버전·해시가
+포함된 이름으로 복사한 뒤 `latest.json`을 교체하므로 서버를 재시작할 필요가 없습니다.
+페이지는 매번 최신 목록을 가져옵니다. 이전 파일은 이미 다운로드 중인 사용자를 위해 보존합니다.
+
+현재 휴대폰 앱은 디버그 서명이므로 디버그 APK를 게시합니다. 서명이 다른 APK나 unsigned
+릴리스를 게시하면 기존 앱에 업데이트할 수 없습니다. [Android 앱 서명 안내](https://developer.android.com/studio/publish/app-signing)
+설치는 Android의 사용자 확인을 거칩니다. [웹사이트를 통한 배포 안내](https://developer.android.com/distribute/marketing-tools/alternative-distribution)
+
 ## 맥미니에서 실행
 
-맥미니를 같은 Wi-Fi/LAN의 서버로 쓸 때는 모든 네트워크 인터페이스에서 받도록 실행합니다.
+맥미니에서도 Node는 루프백에서 실행하고 휴대폰은 HTTPS 프록시를 통해 연결합니다.
 
 ```sh
 cd /path/to/AppGoodWords/server
@@ -29,23 +69,7 @@ chmod +x ./run_server.sh
 APP_GOOD_WORDS_API_KEY="change-me" ./run_server.sh
 ```
 
-맥미니의 LAN IP 확인:
-
-```sh
-ipconfig getifaddr en0
-```
-
-다른 기기에서 접속:
-
-```text
-http://<Mac mini LAN IP>:8765
-```
-
-Android 앱 설정 탭의 서버 주소도 같은 값으로 넣습니다.
-
-```text
-http://<Mac mini LAN IP>:8765
-```
+맥미니와 휴대폰에 같은 Tailscale 계정을 연결한 뒤 아래 HTTPS 연결 절을 적용합니다.
 
 맥미니 부팅 시 자동 실행하려면 `launchd/com.appgoodwords.server.plist.example`의 경로와 API 키를 수정한 뒤 아래처럼 등록합니다.
 
@@ -61,22 +85,54 @@ launchctl enable gui/$(id -u)/com.appgoodwords.server
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.appgoodwords.server.plist
 ```
 
-## LAN/Android 공유
+## HTTPS 연결
 
-Windows PC나 서버의 같은 포트를 다른 기기에서 접근하게 하려면 바인드 주소를 열어 실행합니다.
+PC·맥미니와 휴대폰을 같은 Tailscale에 연결합니다. 서버를 루프백에 실행한 뒤 Serve를 설정합니다.
 
 ```powershell
-.\run_server.ps1 -BindHost 0.0.0.0 -Port 8765 -Seed -ApiKey "change-me"
+.\run_server.ps1 -BindHost 127.0.0.1 -Port 8765 -Seed
+tailscale serve --bg --https=443 http://127.0.0.1:8765
 ```
 
-Android 앱 설정 탭의 서버 주소:
+API 키는 실행 전에 `APP_GOOD_WORDS_API_KEY`로 지정합니다. Serve가 계정의 HTTPS 활성화를
+요구하면 안내한 Tailscale 페이지에서 활성화합니다. 성공 시 출력되는 HTTPS 주소를 앱과 웹에서
+사용하며 기존 API 키 인증도 유지합니다. Tailscale Serve는 인증서 발급·갱신을 관리합니다.
+[Tailscale Serve 문서](https://tailscale.com/docs/features/tailscale-serve)
+
+Android 앱 설정 탭의 서버 주소 예시:
 
 ```text
-Android Emulator: http://10.0.2.2:8765
-Physical device:  http://<Mac mini 또는 PC LAN IP>:8765
+https://<PC 또는 맥미니의 이름>.<tailnet>.ts.net
 ```
 
-`-ApiKey`를 사용한 경우 Android 앱과 웹 UI의 API 키 입력란에 같은 값을 넣습니다.
+앱 1.1.1부터 사설 주소·루프백 주소도 HTTP 동기화는 차단합니다. HTTP 주소를 단순히 HTTPS로
+고쳐 쓰는 것으로는 충분하지 않으며, 해당 주소에서 신뢰할 수 있는 인증서로 HTTPS를 제공해야 합니다.
+인증서 검증을 끄거나 앱에 평문 예외를 추가하지 않습니다.
+
+통합 테스트는 운영 DB와 분리한 서버를 HTTPS로 제공하고, 에뮬레이터 계측 실행에
+`-e testServerUrl https://<테스트 서버> -e testServerApiKey <가짜 테스트 키>`를 전달합니다.
+주소가 지정된 테스트 서버에 연결하지 못하면 테스트가 실패합니다. 운영 서버 주소를 넣지 마세요.
+
+## 하지 않을 일
+
+앱 1.2.0부터 **루틴 → 하지 않을 일**에서 반복하지 않기로 한 행동을 적고 볼 수 있습니다.
+제목은 필수이고 메모는 선택입니다. 목록에서 수정·삭제할 수 있으며 검색·백업·서버 동기화에도
+포함됩니다. 웹에서는 **루틴** 옆의 **하지 않을 일** 탭을 사용합니다.
+
+기록은 `NOT_TO_DO` 종류로 저장하며 글귀 알림이나 읽음, 루틴 수행 횟수에 포함하지 않습니다.
+하지 않을 일은 동기화 형식 19부터 지원합니다. 현재 서버가 요구하는 앱 버전과 형식은 아래 개념 설명을 따릅니다.
+
+## 개념 설명
+
+앱 1.3.0부터 임시저장소의 **AI에게 의미 묻기**로 원문을 설명받을 수 있습니다. 성공하면 원문 항목은
+`CONCEPT`로 바뀌고 AI 답은 연결된 글귀 메모로 함께 저장됩니다. 실패하면 임시저장 원문은 그대로
+남습니다. 개념은 읽음과 글귀 알림에 포함하지 않습니다.
+
+AI 호출은 기존 돌아보기 설정과 같은 공급자·모델·키를 사용합니다. 서버 주소가 있으면
+`/api/growth-feedback` 프록시를 사용하므로 서버에 `OPENAI_API_KEY` 또는 `ANTHROPIC_API_KEY`가 있어야
+합니다. 서버에 키가 없고 휴대폰에 직접 호출용 키가 있으면 앱이 직접 호출합니다.
+
+동기화 형식은 20입니다. 이 서버와 연결하는 기기는 모두 앱 1.3.0 이상으로 업데이트해야 합니다.
 
 ## 동기화 동작
 

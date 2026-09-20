@@ -79,7 +79,10 @@ fun DetailScreen(
     /** 이 글귀를 오늘부터 밟을 루틴으로 옮깁니다. */
     onMakeRoutine: (String) -> Unit = {},
     /** 이 글귀를 할 일 하나로 옮깁니다. */
-    onMakeTodo: (String) -> Unit = {}
+    onMakeTodo: (String) -> Unit = {},
+    onClassify: () -> Unit = {},
+    askingConcept: Boolean = false,
+    onAskConcept: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -165,7 +168,7 @@ fun DetailScreen(
                             )
                         }
 
-                        DetailPill(
+                        if (item.type.isReadingContent) DetailPill(
                             text = if (confirmedToday) "읽음" else "안읽음",
                             containerBrush = Brush.horizontalGradient(
                                 listOf(
@@ -254,13 +257,15 @@ fun DetailScreen(
 
         item {
             SectionCard(title = "정보") {
-                MetaRow(label = "읽음 처리 수", value = "${item.showCount}회")
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
-                MetaRow(
-                    label = "최근 읽음",
-                    value = item.lastShownAt?.let(::formatDateTime) ?: "아직 없음"
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                if (item.type.isReadingContent) {
+                    MetaRow(label = "읽음 처리 수", value = "${item.showCount}회")
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                    MetaRow(
+                        label = "최근 읽음",
+                        value = item.lastShownAt?.let(::formatDateTime) ?: "아직 없음"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                }
                 MetaRow(label = "생성일", value = formatDateTime(item.createdAt))
 
                 if (item.tags.isNotEmpty()) {
@@ -314,11 +319,29 @@ fun DetailScreen(
 
         item {
             SectionCard(title = "빠른 작업") {
-                Button(
-                    onClick = { onConfirm(item) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (confirmedToday) "안읽음으로 변경" else "읽음으로 변경")
+                if (item.type == ContentType.INBOX) {
+                    Button(
+                        onClick = onAskConcept,
+                        enabled = !askingConcept,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (askingConcept) "AI에게 묻는 중…" else "AI에게 의미 묻기")
+                    }
+                    OutlinedButton(
+                        onClick = onClassify,
+                        enabled = !askingConcept,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("직접 분류하기")
+                    }
+                }
+                if (item.type.isReadingContent) {
+                    Button(
+                        onClick = { onConfirm(item) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (confirmedToday) "안읽음으로 변경" else "읽음으로 변경")
+                    }
                 }
 
                 OutlinedButton(
@@ -375,14 +398,14 @@ fun DetailScreen(
         item {
             // 글귀 본문은 남이 쓴 말이라 고칠 수 없습니다. 그런데 읽을 때마다 드는 생각은
             // 다릅니다. 루틴처럼 옆에 붙여 두면 언제 무슨 생각을 했는지가 함께 남습니다.
-            SectionCard(title = "메모 ${memos.size}") {
+            SectionCard(title = if (item.type == ContentType.CONCEPT) "AI 설명과 메모 ${memos.size}" else "메모 ${memos.size}") {
                 OutlinedTextField(
                     value = memoText,
                     onValueChange = { memoText = it },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag(detailMemoFieldTag),
-                    label = { Text("이 글귀에 남길 생각") },
+                    label = { Text(if (item.type == ContentType.CONCEPT) "이 개념에 남길 메모" else "이 글귀에 남길 생각") },
                     minLines = 2
                 )
                 Button(
@@ -816,6 +839,10 @@ private fun ContentType.displayLabel(): String {
         ContentType.LINK -> "링크"
         ContentType.VIDEO -> "영상"
         ContentType.IDEA -> "아이디어"
+        ContentType.INBOX -> "임시저장소"
+        ContentType.MEMO -> "메모"
+        ContentType.NOT_TO_DO -> "하지 않을 일"
+        ContentType.CONCEPT -> "개념"
     }
 }
 

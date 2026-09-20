@@ -16,3 +16,6 @@ server/*.db.json.*
 server/*.log
 # 사용자가 붙인 사진·동영상·소리. 저장소에 들어가면 안 된다.
 server/attachments/
+server/web/update/*.apk
+server/web/update/latest.json
+server/web/update/latest.json.tmp

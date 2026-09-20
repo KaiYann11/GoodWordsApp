@@ -1,5 +1,7 @@
 package com.codex.appgoodwords.data
 
+import java.net.URI
+
 /**
  * 첨부 주소를 다루는 규칙.
  *
@@ -27,7 +29,10 @@ object AttachmentUris {
     }
 
     /** 기기에 있는 파일이라 이 기기에서만 열 수 있는 주소인지. */
-    fun isLocal(uri: String): Boolean = uri.isNotBlank() && !uri.startsWith(SCHEME)
+    fun isLocal(uri: String): Boolean = runCatching {
+        val parsed = URI(uri)
+        parsed.scheme == "content" && !parsed.rawAuthority.isNullOrBlank()
+    }.getOrDefault(false)
 
     /**
      * 실제로 받아올 수 있는 http 주소로 바꿉니다.

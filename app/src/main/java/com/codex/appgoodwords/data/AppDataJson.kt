@@ -50,7 +50,7 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 17
+    const val schemaVersion: Int = 20
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")

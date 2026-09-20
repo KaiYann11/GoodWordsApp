@@ -17,15 +17,29 @@
 node --test server/tests/server.test.mjs
 ```
 
-계측 테스트는 기기나 에뮬레이터가 필요합니다. **서버를 띄운 상태로 돌려야** 앱↔서버 경로가 실제로
-실행됩니다. 서버가 없으면 그 테스트들은 조용히 건너뛰므로, 결과에서 skipped가 0인지 확인해야 합니다.
+**이 PC의 서버는 `%LOCALAPPDATA%\AppGoodWordsServer`에 따로 설치되어 있습니다.**
+DB·첨부·접속 키는 그 폴더에 있고, 시작프로그램 바로가기로 로그인 때 실행합니다.
+저장소의 소스만 고치면 설치된 서버에는 반영되지 않으므로 배포할 때 서버 소스·웹 파일도 갱신합니다.
+사용자 데이터와 `api-key.txt`는 보존합니다.
+휴대폰용 APK를 갱신할 때는 `versionCode`를 올리고 같은 디버그 서명으로 빌드한 뒤
+`server/publish_update.ps1 -WebRoot "$env:LOCALAPPDATA\AppGoodWordsServer\app\web"`로 게시합니다.
+`/update/`에서 받는 설치 파일은 `latest.json`과 해시가 같아야 합니다.
+
+휴대폰의 서버 연결은 같은 Tailscale의 HTTPS 주소를 사용합니다. 설치된 Node는 127.0.0.1에만
+바인드하고 Tailscale Serve가 HTTPS를 제공합니다. 앱 1.1.1부터 HTTP 동기화·첨부·AI 프록시 연결을
+차단합니다. 인증서 검증을 끄거나 테스트 목적으로 앱에 평문·테스트 CA 예외를 넣지 않습니다.
+
+계측 테스트는 기기나 에뮬레이터가 필요합니다. **운영 DB와 분리된 HTTPS 테스트 서버**를 띄워
+`testServerUrl`·`testServerApiKey` 계측 인자를 지정해야 앱↔서버 경로가 실행됩니다.
+주소를 생략하면 통합 테스트가 건너뛰므로 skipped가 0인지 확인합니다. 지정한 주소가 연결되지
+않으면 실패해야 합니다. 운영 서버에는 테스트 데이터를 넣지 않습니다.
 
 ```powershell
-node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
-.\gradlew.bat connectedDebugAndroidTest
+node server/app_good_words_server.mjs --host 127.0.0.1 --port 18875 --db captures/test-server.json
+# 위 별도 서버를 HTTPS로 제공한 뒤 에뮬레이터를 지정해 아래처럼 계측합니다.
 ```
 
-에뮬레이터에서 호스트 PC 주소는 `http://10.0.2.2:8765`입니다.
+에뮬레이터에서도 인증서가 정상 검증되는 HTTPS 테스트 서버 주소를 사용합니다.
 
 **실기기가 붙어 있을 때 `connectedDebugAndroidTest`를 돌리지 마세요.** AGP가 붙어 있는 기기
 **전부**를 대상으로 삼고, 끝난 뒤 앱을 지웁니다. 사용자 DB가 함께 사라집니다. 실기기가
@@ -34,7 +48,7 @@ node server/app_good_words_server.mjs --host 0.0.0.0 --port 8765
 ```bash
 adb -s emulator-5554 install -r -t app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5554 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -s emulator-5554 shell am instrument -w com.codex.appgoodwords.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5554 shell am instrument -w -e testServerUrl https://<test-server> -e testServerApiKey <synthetic-key> com.codex.appgoodwords.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 **묶음 사이에 `pm clear`를 넣습니다.** 백업 파일이 앱 안에 쌓여서, 이어 돌리면
@@ -65,7 +79,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 17입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 20입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -90,7 +104,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 그래프에서 빼면 실제로는 쓴 날이 안 쓴 날처럼 보이고, 평균에 넣으면 그 칸이 흔들립니다.
 
 **번뜩인 것(`ContentType.IDEA`)은 담기는 자리만 글귀와 같습니다.** 떠오르는 자리는 다릅니다.
-`pickLeastRecentlySurfaced`가 `type <> :excluded`로 뺍니다. 알림과 위젯이 말하는 것은
+`pickLeastRecentlySurfaced`가 `ContentType.readingTypes`에 있는 글귀·링크·영상만 고릅니다. 알림과 위젯이 말하는 것은
 "오늘의 글귀"인데 내가 적어 둔 생각이 거기 뜨면 남의 좋은 말인 척 돌아오고, 새로 담은 것은
 `lastSurfacedAt`이 없어 **가장 먼저** 뽑힙니다. 목록도 나눕니다 — 보관함의 아이디어 탭
 (`LibraryTab`)입니다. 앞으로 "내가 쓴 것" 종류를 더하면 이 두 곳에서 함께 빼야 합니다.
@@ -104,14 +118,33 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 담는 화면(`MainViewModel.saveContent`)과 다른 앱에서 공유해 온 것(`ShareTargetActivity`).
 한쪽에 규칙을 따로 두면 같은 유튜브 링크가 담는 길에 따라 영상이 되기도 하고 링크가 되기도 합니다.
 
-**공유로 들어온 것은 화면 없이 바로 담깁니다.** `AndroidManifest.xml`의 SEND 거르개가
-`ShareTargetActivity`에 붙어 있습니다. 유튜브는 **제목 한 줄과 주소를 함께** 보내므로
-"http로 시작하면 주소"라고 보면 안 됩니다 — 제목이 앞에 붙어 있어 주소가 본문에 통째로 박히고,
-종류를 못 알아내 영상이 아니라 글귀가 됩니다. 나누는 규칙은 `SharedText`에 있습니다.
-**주소가 없으면 글을 본문에 담습니다** — 제목만 채우면 "본문·링크·사진·영상 중 하나는 있어야
-한다"는 `validate`에 걸려 조용히 담기지 않습니다. 저장은 화면이 아니라
-`AppGoodWordsApplication.applicationScope`에 겁니다. 이 화면은 곧바로 사라져서, 화면에 매인
-코루틴에 걸면 저장이 도중에 끊깁니다.
+**공유·텍스트 선택·붙여넣기로 가져온 글은 임시저장소(`INBOX`)에 먼저 담습니다.**
+`ShareTargetActivity`가 SEND와 PROCESS_TEXT를 받고 `saveSharedContent`가 저장합니다.
+제목과 주소를 나누는 규칙은 `SharedText`에 있습니다. 주소가 없으면 원문은 본문에 담습니다.
+같은 임시저장 글은 중복을 막되, 같은 주소에서 가져온 서로 다른 문장은 각각 남깁니다.
+저장은 `AppGoodWordsApplication.applicationScope`에 걸고, 저장 안내 토스트는
+`Dispatchers.Main`에서 띄웁니다. 배경 스레드에서 Toast를 만들면 저장 직후 앱이 종료됩니다.
+`documentLaunchMode="always"`를 유지합니다. 닫히는 담기 화면에 다음 공유가 합쳐지면 원문을 놓칩니다.
+보내는 앱이 `SINGLE_TOP`을 붙여 기존 화면을 재사용할 수도 있어 `onNewIntent`에서도 저장해야 합니다.
+
+**분류는 같은 기록의 종류만 바꿉니다.** `classifyInboxItem`이 메모(`MEMO`)·글귀 모음·아이디어로
+옮깁니다. 새 레코드를 만들거나 원본을 지우면 첨부·덧메모·syncId가 끊깁니다. `updatedAt`은
+기존 값보다 커야 오래된 기기의 사본이 분류를 되돌리지 않습니다. 메모는 아이디어와 별개입니다.
+메모·임시저장소는 읽음으로 세지 않고, 글귀 알림과 AI 글귀 추천용 원문 목록에서도 제외합니다.
+편집할 때도 그 종류를 유지합니다. 17→18은 테이블 변경 없이 동기화 종류를 늘리는 마이그레이션입니다.
+
+**개념(`CONCEPT`)은 임시저장 원문과 AI 설명을 함께 둡니다.** AI를 부르기 전에는 기록을 바꾸지 않고,
+답을 받은 뒤 `saveConceptExplanation`이 같은 트랜잭션에서 원문 항목의 종류를 바꾸고 설명을
+`ContentMemoEntity`로 붙입니다. 실패했는데 임시저장 글부터 사라지는 순서로 바꾸지 마세요. AI 설명은
+`ConceptExplanation`이 만드는 `AI 설명` 머리말로 구분합니다. 개념은 읽음·알림·위젯·지난해 글귀와
+AI 추천 원문에서 제외하고, 개념 탭과 검색에서는 연결된 설명까지 보여 줍니다. 19→20은 테이블 변경 없이
+종류를 늘리는 마이그레이션이며 형식 20에는 앱 1.3.0 이상을 연결합니다.
+
+**하지 않을 일(`NOT_TO_DO`)은 루틴 옆 탭에서 봅니다.** 기존 `content_items`에 제목과 선택 메모를
+저장하고, 추가·수정·삭제는 같은 기록의 `syncId`와 삭제 표식을 유지합니다. 루틴 수행이나 글귀 읽음,
+알림·위젯·지난해 글귀·AI 추천 원문으로 세거나 보내지 않습니다. 검색은 별도 `SearchKind.NOT_TO_DO`로
+찾아 루틴 화면의 해당 탭을 엽니다. 앱·서버·웹의 종류 이름을 맞추고, 18→19 마이그레이션은 테이블을
+유지합니다. 형식 19 서버에는 이를 아는 앱 1.2.0 이상으로 연결합니다.
 
 **날씨·기분·일기 종류 선택지는 앱과 웹이 같아야 합니다.** 앱 `DiaryTags.kt`의
 `DiaryWeather`·`DiaryMood`·`DiaryKind`와 웹 `server/web/app.js`의

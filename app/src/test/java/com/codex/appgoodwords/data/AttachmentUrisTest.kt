@@ -44,8 +44,8 @@ class AttachmentUrisTest {
     @Test
     fun aServerUriBecomesAnHttpAddress() {
         assertEquals(
-            "http://10.0.2.2:8765/api/attachments/$id",
-            AttachmentUris.toHttpUrl("http://10.0.2.2:8765", serverUri)
+            "https://sync.example.com/api/attachments/$id",
+            AttachmentUris.toHttpUrl("https://sync.example.com", serverUri)
         )
     }
 
@@ -64,5 +64,14 @@ class AttachmentUrisTest {
     fun anEmptyUriIsNeitherKind() {
         assertFalse(AttachmentUris.isLocal(""))
         assertFalse(AttachmentUris.isServerAttachment(""))
+    }
+
+    @Test
+    fun importedRemoteAndFileAddressesAreNotDeviceAttachments() {
+        listOf(
+            "https://unrelated.example/image.jpg", "http://127.0.0.1/image.jpg",
+            "file:///data/user/0/com.codex.appgoodwords/files/private.json",
+            "data:image/png;base64,AAAA", "/sdcard/photo.jpg", "content:///missing-provider", "content://"
+        ).forEach { assertFalse(it, AttachmentUris.isLocal(it)) }
     }
 }

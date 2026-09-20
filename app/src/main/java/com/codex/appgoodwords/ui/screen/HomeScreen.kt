@@ -15,11 +15,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +37,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,11 +57,15 @@ import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.StatsSummary
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 internal const val feedbackCardTag = "home_feedback_card"
 internal const val growthTeaserTag = "home_growth_teaser"
 internal const val onThisDayCardTag = "home_on_this_day"
 internal const val moodPracticeCardTag = "home_mood_practice"
+internal const val homeCaptureButtonTag = "home_capture_button"
+internal const val homeInsightsToggleTag = "home_insights_toggle"
 
 /**
  * 돌아보는 자리.
@@ -101,6 +113,7 @@ fun HomeScreen(
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var showInsights by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -120,25 +133,34 @@ fun HomeScreen(
                     change.consume()
                 }
             },
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = LocalDate.now().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                FilledTonalButton(
+                    onClick = onSwipeToCapture,
+                    modifier = Modifier.testTag(homeCaptureButtonTag)
+                ) {
+                    Text("아이디어 담기")
+                }
+            }
+        }
+
         // 앱을 열면 가장 먼저 보이는 자리입니다. 오늘 무엇부터 할지 여기서 정해집니다.
         dailyLoop?.let { progress ->
             item {
                 DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
-            }
-        }
-
-        // 걸음이 "오늘 무엇을 할까"라면 점수는 "요즘 어떻게 가고 있나"입니다.
-        // 걸음 바로 아래에 두어, 오늘 한 걸음이 흐름의 어디에 놓이는지 이어서 읽힙니다.
-        if (todayScore != null && scoreTrend != null) {
-            item {
-                DayScoreCard(
-                    todayScore = todayScore,
-                    trend = scoreTrend,
-                    onOpenDay = onOpenDay
-                )
             }
         }
 
@@ -151,7 +173,10 @@ fun HomeScreen(
         // 번뜩인 것은 언제 올지 모릅니다. 담으러 들어가는 사이에 날아가므로,
         // 앱을 열면 바로 보이는 자리에 한 줄 칸을 둡니다.
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -159,12 +184,22 @@ fun HomeScreen(
                     Text("번뜩인 것", style = MaterialTheme.typography.titleMedium)
                     IdeaCaptureField(onCapture = onCaptureIdea)
                     Text(
-                        text = "화면을 왼쪽으로 밀어도 이 칸이 뜹니다. " +
-                            "보관함 아이디어에 담기고, 익으면 루틴이나 할 일로 옮기면 됩니다.",
+                        text = "보관함의 아이디어에서 다시 꺼내 볼 수 있어요.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+        }
+
+        // 빠르게 남기는 기분과 아이디어를 먼저 두고, 쌓인 기록은 그 아래에서 돌아봅니다.
+        if (todayScore != null && scoreTrend != null) {
+            item {
+                DayScoreCard(
+                    todayScore = todayScore,
+                    trend = scoreTrend,
+                    onOpenDay = onOpenDay
+                )
             }
         }
 
@@ -185,29 +220,46 @@ fun HomeScreen(
         }
 
         item {
-            StatsCard(summary = summary)
-        }
-
-        if (moodPractice.isNotEmpty()) {
-            item {
-                MoodPracticeCard(rows = moodPractice)
+            TextButton(
+                onClick = { showInsights = !showInsights },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(homeInsightsToggleTag)
+                    .semantics { stateDescription = if (showInsights) "펼쳐짐" else "접힘" }
+            ) {
+                Text(
+                    text = if (showInsights) "통계와 실천 달력 접기" else "통계와 실천 달력 보기",
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = if (showInsights) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null
+                )
             }
         }
 
-        item {
-            RoutineCalendarCard(
-                routines = routines,
-                checks = checks,
-                selectedMonthText = selectedMonthText,
-                selectedDateText = selectedDateText,
-                onMonthChanged = { month, date ->
-                    selectedMonthText = month.toString()
-                    selectedDateText = date.toString()
-                },
-                onDateSelected = { date ->
-                    selectedDateText = date.toString()
-                }
-            )
+        if (showInsights) {
+            item { StatsCard(summary = summary) }
+
+            if (moodPractice.isNotEmpty()) {
+                item { MoodPracticeCard(rows = moodPractice) }
+            }
+
+            item {
+                RoutineCalendarCard(
+                    routines = routines,
+                    checks = checks,
+                    selectedMonthText = selectedMonthText,
+                    selectedDateText = selectedDateText,
+                    onMonthChanged = { month, date ->
+                        selectedMonthText = month.toString()
+                        selectedDateText = date.toString()
+                    },
+                    onDateSelected = { date ->
+                        selectedDateText = date.toString()
+                    }
+                )
+            }
         }
     }
 }
@@ -224,9 +276,9 @@ private fun FeedbackCard(notes: List<FeedbackNote>) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(feedbackCardTag),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -304,9 +356,9 @@ private fun GrowthTeaserCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(growthTeaserTag),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -322,7 +374,9 @@ private fun GrowthTeaserCard(
                     ?: report?.guide?.takeIf { it.isNotBlank() }
                     ?: "기록을 보고 잘한 점과 다음 걸음을 정리해 드립니다.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
             Button(onClick = onOpen) {
                 Text(if (report == null) "받아 보기" else "돌아보기 열기")
@@ -348,9 +402,9 @@ private fun OnThisDayCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(onThisDayCardTag),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -407,9 +461,9 @@ private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(moodPracticeCardTag),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
