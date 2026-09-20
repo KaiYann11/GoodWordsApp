@@ -66,6 +66,42 @@ class AiFeedbackSettingsTest {
         assertEquals(AiProvider.OPENAI, AiProvider.of(null))
         assertEquals(AiProvider.OPENAI, AiProvider.of("gemini"))
         assertEquals(AiProvider.ANTHROPIC, AiProvider.of("anthropic"))
+        assertEquals(AiProvider.CLAUDE_CLI, AiProvider.of("claude_cli"))
+    }
+
+    @Test
+    fun cliProvidersHaveNoKeyAndCannotBeCalledFromThisDevice() {
+        // CLI는 서버에 깔려 있습니다. 이 기기에서 부를 길이 없는데 열쇠가 있다고 직접 부르면
+        // 엉뚱한 곳(API)으로 나가거나 아무 데도 못 갑니다.
+        val settings = AiFeedbackSettings(openAiKey = "sk-openai").withProvider(AiProvider.CLAUDE_CLI)
+
+        assertTrue(settings.requiresServer)
+        assertFalse(settings.canCallDirectly)
+        assertEquals("", settings.activeKey)
+        // 열쇠 칸이 없으니 넣어도 다른 공급자의 열쇠를 건드리지 않습니다.
+        assertEquals("sk-openai", settings.withKey("whatever").openAiKey)
+        assertEquals("sk-openai", settings.withProvider(AiProvider.OPENAI).activeKey)
+    }
+
+    @Test
+    fun cliDefaultModelIsBlankAndTheReportNamesTheProvider() {
+        // 빈 모델은 "서버의 CLI에 설정해 둔 모델"이라는 뜻입니다. 서버가 --model을 붙이지 않습니다.
+        val settings = AiFeedbackSettings().withProvider(AiProvider.CODEX_CLI)
+
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.effectiveModel)
+        // 그래도 돌아보기에는 누가 썼는지 남아야 합니다.
+        assertEquals("Codex CLI", settings.reportModel)
+        assertEquals("gpt-5.5", settings.copy(model = "gpt-5.5").reportModel)
+        // API 쪽 모델 이름을 들고 오면 CLI 기본으로 되돌립니다.
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.copy(model = "gpt-4o").effectiveModel)
+    }
+
+    @Test
+    fun onlyCliProvidersOfferTheCliDefaultModel() {
+        // API 공급자에 빈 모델을 보내면 "모델이 없다"는 400만 돌아옵니다.
+        AiProvider.entries.forEach { provider ->
+            assertEquals(provider.name, provider.serverCli, provider.models.contains(AiProvider.CLI_DEFAULT_MODEL))
+        }
     }
 
     @Test

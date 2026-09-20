@@ -131,6 +131,8 @@ https://<PC 또는 맥미니의 이름>.<tailnet>.ts.net
 AI 호출은 기존 돌아보기 설정과 같은 공급자·모델·키를 사용합니다. 서버 주소가 있으면
 `/api/growth-feedback` 프록시를 사용하므로 서버에 `OPENAI_API_KEY` 또는 `ANTHROPIC_API_KEY`가 있어야
 합니다. 서버에 키가 없고 휴대폰에 직접 호출용 키가 있으면 앱이 직접 호출합니다.
+공급자를 Claude CLI·Codex CLI로 고르면 키 없이 서버 PC에 로그인해 둔 CLI가 답합니다(아래
+[AI 돌아보기](#ai-돌아보기) 참고). 이 둘은 서버 주소가 없으면 부를 수 없습니다.
 
 동기화 형식은 20입니다. 이 서버와 연결하는 기기는 모두 앱 1.3.0 이상으로 업데이트해야 합니다.
 
@@ -478,6 +480,50 @@ POST /api/growth-feedback   {"system":"...","user":"...","provider":"anthropic",
 `choices[0].message.content`에서 읽습니다. Claude는 `system`을 따로 싣고 `max_tokens`가 반드시
 있어야 하며, 답은 `content` 배열에서 글 조각만 골라 이어야 합니다. 생각하는 시간은 따로 켜지
 않습니다. 요즘 모델은 기본으로 켜져 있고 예전 방식(`budget_tokens`)을 보내면 400이 돌아옵니다.
+
+#### 열쇠 대신 서버의 CLI로 답하기
+
+`provider`에 `claude_cli`나 `codex_cli`를 보내면 열쇠 대신 **서버 PC에 깔려 로그인해 둔
+Claude Code·Codex CLI**를 돌립니다(`askCli`). API 열쇠 없이 구독을 그대로 씁니다. 환경 변수는
+필요 없습니다 — `claude`·`codex`가 PATH에 있으면 켜지고, 서버를 띄울 때 찾은 경로를 찍어 줍니다.
+다른 곳에 깔았으면 `APP_GOOD_WORDS_CLAUDE_CLI`·`APP_GOOD_WORDS_CODEX_CLI`에 실행 파일 경로를
+지정합니다. 못 찾으면 503과 함께 어디에 넣어야 하는지 돌려줍니다.
+
+```text
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"claude_cli","model":""}
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"codex_cli","model":"gpt-5.5"}
+```
+
+`model`을 비우면 `--model`을 붙이지 않아 CLI에 설정해 둔 기본 모델이 답합니다. 모델 이름은
+CLI에 인자로 나가는 **유일한 사용자 값**이라 글자를 검사합니다(영숫자와 `._:-`만). 셸이 다르게
+읽을 글자가 섞이면 400입니다.
+
+CLI는 **도구 없이 글만 쓰게** 돌립니다. 기록 속 문장이 "파일을 읽어라"고 해도 읽을 도구가 없습니다.
+
+- Claude: `claude -p --output-format json --safe-mode --tools "" --no-session-persistence
+  --system-prompt-file <임시 파일>`. `--safe-mode`가 훅·플러그인·MCP·CLAUDE.md를 모두 끄고,
+  로그인과 모델 선택은 그대로 둡니다. `--bare`는 쓰지 않습니다 — 그 모드는 OAuth 로그인을
+  읽지 않아 열쇠가 다시 필요해집니다.
+- Codex: `codex exec --ephemeral --skip-git-repo-check --ignore-user-config --disable shell_tool
+  --disable unified_exec --sandbox read-only -o <임시 파일> -`. 일러 주는 말을 따로 싣는 자리가
+  없어 물음 앞에 붙입니다. `--ignore-user-config`로 사용자 설정의 MCP 서버·훅을 읽지 않으므로
+  그 안의 기본 모델도 무시됩니다. 대신 `model_reasoning_effort`를 medium으로 못 박습니다.
+
+물음은 **명령줄 인자로 넘기지 않습니다.** 인자는 `ps`로 남에게 보이고, 따옴표·`%`·줄바꿈이
+섞이면 셸이 다르게 읽습니다. 사용자 글은 표준 입력으로, 일러 주는 말은 빈 임시 폴더의 파일로
+건넵니다. 작업 폴더도 그 임시 폴더라 서버 DB나 소스 옆에서 돌지 않고, 끝나면 지웁니다.
+대화도 남기지 않습니다(`--no-session-persistence`·`--ephemeral`) — 일기가 CLI 세션 기록으로
+서버 디스크에 쌓이면 안 됩니다. Windows에서는 `claude.cmd`처럼 확장자가 붙어 있어 서버가
+PATH를 직접 뒤지고 `cmd.exe`를 거쳐 돌립니다(`resolveCli`·`runProcess`).
+
+180초 안에 답이 없으면 프로세스를 나무째 끝내고 504를 돌려줍니다. 앱은 그보다 조금 더
+기다려 그 사유를 받습니다. 시간은 `APP_GOOD_WORDS_AI_TIMEOUT_MS`로 바꿀 수 있는데, 늘리면
+앱 `AiFeedbackClient`의 `readTimeout`(200초)도 함께 늘려야 사유가 앱까지 닿습니다.
+
+CLI는 요청이 올 때마다 찾고 새로 돌리므로, `claude login`을 다시 하거나 CLI를 업데이트해도
+서버를 다시 띄울 필요는 없습니다. 다만 서버는 뜰 때의 PATH를 쓰므로, CLI를 새 폴더에 깔아
+PATH가 바뀌었으면 다시 띄워야 합니다. `claude`·`codex`는 서버가 도는 사용자 계정으로
+로그인되어 있어야 합니다 — 이 PC의 설치된 서버는 시작프로그램으로 로그인한 사용자로 뜹니다.
 
 **서버는 물음을 만들지 않습니다.** 무엇이 나갈지는 앱 `GrowthPrompt`가 정하고 서버는 전달만
 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 일기 본문은 빼라고 정해 둔 것이

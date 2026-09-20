@@ -15,8 +15,10 @@ import org.json.JSONObject
  * 기기를 새로 붙일 때마다 다시 넣지 않아도 되고, 폰을 잃어버려도 열쇠가 함께 나가지 않습니다.
  * 서버가 없거나 서버에 열쇠가 없으면 이 기기에 넣어 둔 열쇠로 직접 부릅니다.
  *
- * 부를 곳은 OpenAI와 Claude 둘입니다([AiProvider]). 둘 다 공식 SDK를 쓰지 않고 HTTP로
+ * 열쇠로 부르는 곳은 OpenAI와 Claude 둘입니다([AiProvider]). 둘 다 공식 SDK를 쓰지 않고 HTTP로
  * 직접 부릅니다. 이 앱이 부르는 것은 한 종류의 요청뿐이라, SDK를 더하면 앱만 무거워집니다.
+ * 서버에 로그인해 둔 CLI(Claude Code·Codex)로 답하는 공급자([AiProvider.serverCli])는 열쇠 없이
+ * 서버만 거칩니다. 이 기기에는 CLI가 없어 서버가 꺼져 있으면 되돌아갈 길이 없습니다.
  *
  * 어느 쪽이든 나가는 글은 [GrowthPrompt]가 만든 것 하나뿐입니다.
  */
@@ -35,7 +37,12 @@ class AiFeedbackClient {
     ): String = withContext(Dispatchers.IO) {
         val provider = aiSettings.activeProvider
         val viaServer = syncSettings.serverUrl.isNotBlank()
-        if (viaServer) {
+        if (aiSettings.requiresServer) {
+            require(viaServer) {
+                "${provider.label}는 서버가 대신 돌립니다. 설정에서 서버 주소를 먼저 지정하거나 다른 곳을 골라 주세요."
+            }
+            askServer(system, user, model, provider, syncSettings)
+        } else if (viaServer) {
             runCatching { askServer(system, user, model, provider, syncSettings) }
                 .getOrElse { failure ->
                     // 서버가 꺼져 있거나 서버에 열쇠가 없을 수 있습니다. 이 기기 열쇠가 있으면 그것으로 갑니다.
@@ -62,6 +69,8 @@ class AiFeedbackClient {
     ): String = when (provider) {
         AiProvider.OPENAI -> askOpenAi(system, user, model, apiKey)
         AiProvider.ANTHROPIC -> askAnthropic(system, user, model, apiKey)
+        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI ->
+            error("${provider.label}는 이 기기에서 직접 부를 수 없습니다. 서버 주소를 지정해 주세요.")
     }
 
     private fun askServer(
@@ -187,7 +196,8 @@ class AiFeedbackClient {
             instanceFollowRedirects = false
             connectTimeout = 15_000
             // 글을 쓰는 데 시간이 걸립니다. 동기화보다 넉넉히 둡니다.
-            readTimeout = 180_000
+            // 서버는 180초에 포기하고 사유를 돌려주므로, 그 사유가 닿도록 서버보다 조금 더 기다립니다.
+            readTimeout = 200_000
             doOutput = true
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Content-Type", "application/json; charset=utf-8")

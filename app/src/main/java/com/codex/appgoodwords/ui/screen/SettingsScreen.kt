@@ -948,7 +948,8 @@ private fun AiFeedbackSection(
             Text("AI 돌아보기", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "기록을 AI에게 보내 잘한 점과 다음 걸음을 받아 옵니다. " +
-                    "서버 주소가 설정되어 있으면 서버를 먼저 쓰고, 없으면 아래 열쇠로 이 기기가 직접 부릅니다.",
+                    "서버 주소가 설정되어 있으면 서버를 먼저 쓰고, 없으면 아래 열쇠로 이 기기가 직접 부릅니다. " +
+                    "Claude CLI·Codex CLI는 서버에 로그인해 둔 CLI가 열쇠 없이 답합니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -965,24 +966,34 @@ private fun AiFeedbackSection(
                 }
             }
 
-            OutlinedTextField(
-                value = apiKeyText,
-                onValueChange = { apiKeyText = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(aiApiKeyFieldTag),
-                label = { Text("${provider.label} API 키") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                supportingText = {
-                    Text("${provider.keyHint}. 이 기기에만 저장됩니다. 백업·동기화에는 담기지 않습니다.")
+            if (provider.serverCli) {
+                // 열쇠 칸을 두면 무엇을 넣어야 하나 헤맵니다. 넣을 것이 없습니다.
+                Text(
+                    text = "서버에 설치되어 로그인된 ${provider.label}가 답합니다. 열쇠는 필요 없고, " +
+                        "위의 서버 주소가 있어야 합니다. 서버가 꺼져 있으면 이 기기에서 대신 부를 길은 없습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                OutlinedTextField(
+                    value = apiKeyText,
+                    onValueChange = { apiKeyText = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(aiApiKeyFieldTag),
+                    label = { Text("${provider.label} API 키") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = {
+                        Text("${provider.keyHint}. 이 기기에만 저장됩니다. 백업·동기화에는 담기지 않습니다.")
+                    }
+                )
+                OutlinedButton(
+                    onClick = { onChanged(settings.withKey(apiKeyText)) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("열쇠 저장")
                 }
-            )
-            OutlinedButton(
-                onClick = { onChanged(settings.withKey(apiKeyText)) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("열쇠 저장")
             }
 
             Text("모델", style = MaterialTheme.typography.titleSmall)
@@ -991,7 +1002,7 @@ private fun AiFeedbackSection(
                     FilterChip(
                         selected = settings.effectiveModel == model,
                         onClick = { onChanged(settings.copy(model = model)) },
-                        label = { Text(model) }
+                        label = { Text(provider.modelLabel(model)) }
                     )
                 }
             }

@@ -124,6 +124,15 @@ AI 돌아보기가 이미 주간 주기를 지원하니, **사람이 직접 5분
   나중에 웹에서 고치면 그때가 아니라 지금 기억하는 것이 남습니다
 - **하루의 걸음 기본값 바꾸기** — 글귀가 여전히 첫 걸음입니다. 기본을 바꾸면 쓰던 사람의
   연속 날수가 업데이트만으로 달라져서, 고르는 길만 열어 두고 기본은 그대로 뒀습니다
+- **CLI로 돌린 돌아보기에 실제 모델 이름 남기기** — 앱에서 "CLI 기본"을 고르면 서버가
+  `--model` 없이 돌려 무엇이 답했는지 앱은 모릅니다. 돌아보기에는 공급자 이름("Claude CLI")만
+  남깁니다(`AiFeedbackSettings.reportModel`). Claude는 JSON의 `modelUsage`에, Codex는 stderr
+  배너에 이름이 있지만, 그것을 돌려주려면 `/api/growth-feedback` 응답과 `AiFeedbackClient.ask`의
+  반환형을 함께 바꿔야 해서 미뤘습니다
+- **Codex CLI가 사용자 `config.toml`을 읽게 하기** — `--ignore-user-config`로 돌립니다. 그 파일의
+  MCP 서버(노션·피그마·브라우저)가 매번 뜨면 느리고 도구가 붙습니다. 대신 거기 적힌 기본
+  모델과 `model_reasoning_effort`도 무시되어, 서버가 effort를 medium으로 못 박고 모델은 앱에서
+  고르게 했습니다
 
 ## 알아 두면 좋은 것
 

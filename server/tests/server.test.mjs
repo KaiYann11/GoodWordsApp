@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,98 @@ const apiKey = "test-api-key";
 let child;
 let workDir;
 let baseUrl;
+/** 가짜 `claude`·`codex`가 놓인 폴더. 진짜 CLI를 돌리면 시험마다 값이 들고 답이 매번 다릅니다. */
+let fakeCliDir;
+let serverCount = 0;
+
+/**
+ * 서버를 띄우고 붙은 주소를 돌려줍니다.
+ *
+ * 포트는 OS가 고릅니다(`--port 0`). 고정 포트를 쓰면 이 PC에 설치된 서버(8765)와 겹칠 수
+ * 있고, 그러면 시험이 남의 DB에 요청을 보냅니다. 환경 변수를 달리 주어야 하는 시험(CLI를
+ * 못 찾는 경우 등)은 하나 더 띄우고 다 쓰면 `stop()`을 부릅니다.
+ */
+async function startServer(env = {}) {
+  const label = `server${serverCount++ || ""}`;
+  const process_ = spawn(
+    process.execPath,
+    [serverScript, "--host", "127.0.0.1", "--port", "0", "--db", join(workDir, `${label}.db.json`), "--api-key", apiKey],
+    { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } },
+  );
+  process_.stderr.on("data", (chunk) => console.error(`[${label}] ${chunk}`));
+  const url = await new Promise((resolvePort, rejectPort) => {
+    let output = "";
+    process_.stdout.on("data", (chunk) => {
+      output += chunk;
+      const match = output.match(/running at (http:\/\/127\.0\.0\.1:\d+)/);
+      if (match) resolvePort(match[1]);
+    });
+    process_.on("exit", (code) => rejectPort(new Error(`서버가 먼저 끝났습니다(${code}).`)));
+  });
+  await waitForServer(url);
+  return { url, stop: () => process_.kill() };
+}
+
+/**
+ * 진짜 CLI 대신 돌 가짜를 만듭니다.
+ *
+ * 서버가 CLI에 무엇을 어떻게 건네는지(표준 입력·파일·인자)를 그대로 되돌려 주어 시험이 볼 수
+ * 있게 합니다. Windows에서는 `.cmd`가 있어야 서버가 찾고 `cmd.exe`를 거쳐 돌기 때문에,
+ * 실제 배포와 같은 길을 밟습니다.
+ */
+async function writeFakeClis(dir) {
+  await mkdir(dir, { recursive: true });
+  const fakeClaude = `
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const stdin = fs.readFileSync(0, "utf8");
+const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
+const model = flag("--model") || "";
+if (model === "broken-model") {
+  console.log(JSON.stringify({ type: "result", is_error: true, result: "모델을 찾을 수 없습니다" }));
+  process.exit(1);
+}
+// 답을 영영 주지 않는 CLI. 서버가 기다리다 끝내는지 본다.
+if (model === "slow-model") {
+  setTimeout(() => {}, 60_000);
+} else {
+  const system = flag("--system-prompt-file") ? fs.readFileSync(flag("--system-prompt-file"), "utf8") : "";
+  console.log(JSON.stringify({
+    type: "result", subtype: "success", is_error: false,
+    result: JSON.stringify({ system, user: stdin, model, args, cwd: process.cwd() }),
+  }));
+}
+`;
+  const fakeCodex = `
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const stdin = fs.readFileSync(0, "utf8");
+const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
+const model = flag("--model") || "";
+if (model === "broken-model") {
+  process.stderr.write("OpenAI Codex v0.0.0\\n--------\\n");
+  process.stderr.write('ERROR: {"type":"error","error":{"message":"이 모델은 쓸 수 없습니다"}}\\n');
+  process.exit(1);
+}
+process.stderr.write("OpenAI Codex v0.0.0\\n--------\\nmodel: " + model + "\\n");
+fs.writeFileSync(flag("--output-last-message"), JSON.stringify({ input: stdin, model, args, cwd: process.cwd() }));
+console.log("done");
+`;
+  for (const [name, script] of [["claude", fakeClaude], ["codex", fakeCodex]]) {
+    await writeFile(join(dir, `${name}.cjs`), script, "utf8");
+    if (process.platform === "win32") {
+      await writeFile(join(dir, `${name}.cmd`), `@echo off\r\nnode "%~dp0${name}.cjs" %*\r\n`, "utf8");
+    } else {
+      const launcher = join(dir, name);
+      await writeFile(launcher, `#!/bin/sh\nexec node "$(dirname "$0")/${name}.cjs" "$@"\n`, "utf8");
+      await chmod(launcher, 0o755);
+    }
+  }
+}
+
+function fakeCliPath(name) {
+  return join(fakeCliDir, process.platform === "win32" ? `${name}.cmd` : name);
+}
 
 /** 서버가 요청을 받을 준비가 될 때까지 /api/health를 짧게 재시도한다. */
 async function waitForServer(url, timeoutMs = 15_000) {
@@ -63,20 +155,18 @@ function emptySnapshot(overrides = {}) {
 
 before(async () => {
   workDir = await mkdtemp(join(tmpdir(), "appgoodwords-test-"));
-  // 포트 0으로 띄우면 실제 포트를 알 수 없으므로 충돌 가능성이 낮은 고정 포트를 쓴다.
-  const port = 8700 + (process.pid % 90);
-  baseUrl = `http://127.0.0.1:${port}`;
-  child = spawn(
-    process.execPath,
-    [serverScript, "--host", "127.0.0.1", "--port", String(port), "--db", join(workDir, "test.db.json"), "--api-key", apiKey],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  child.stderr.on("data", (chunk) => console.error(`[server] ${chunk}`));
-  await waitForServer(baseUrl);
+  fakeCliDir = join(workDir, "fake-cli");
+  await writeFakeClis(fakeCliDir);
+  child = await startServer({
+    // 이 PC에 진짜 CLI가 깔려 있어도 가짜를 쓴다.
+    APP_GOOD_WORDS_CLAUDE_CLI: fakeCliPath("claude"),
+    APP_GOOD_WORDS_CODEX_CLI: fakeCliPath("codex"),
+  });
+  baseUrl = child.url;
 });
 
 after(async () => {
-  if (child) child.kill();
+  if (child) child.stop();
   if (workDir) await rm(workDir, { recursive: true, force: true });
 });
 
@@ -2146,6 +2236,152 @@ describe("AI 돌아보기", () => {
 
     assert.equal(response.status, 503);
     assert.ok(body.error.includes("OPENAI_API_KEY"), body.error);
+  });
+
+  it("Claude CLI에는 물음을 표준 입력과 파일로 건네고 도구 없이 돌린다", async () => {
+    // 물음을 인자로 넘기면 ps로 남에게 보이고, 따옴표·줄바꿈이 셸에서 깨진다.
+    const system = "코치입니다.\n\"따옴표\"와 %PATH% 같은 글자도 그대로 가야 합니다.";
+    const user = "기록입니다.\n둘째 줄 & 셋째 | 줄";
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system, user, provider: "claude_cli", model: "claude-opus-5" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const seen = JSON.parse(body.text);
+    assert.equal(seen.system, system);
+    assert.equal(seen.user, user);
+    assert.equal(seen.model, "claude-opus-5");
+    assert.ok(seen.args.includes("-p"), seen.args.join(" "));
+    assert.ok(seen.args.includes("--safe-mode"), seen.args.join(" "));
+    assert.ok(seen.args.includes("--no-session-persistence"), seen.args.join(" "));
+    // 도구를 끄는 빈 인자가 cmd.exe를 거쳐도 살아 있어야 한다. 사라지면 다음 옵션이 도구 이름이 된다.
+    assert.equal(seen.args[seen.args.indexOf("--tools") + 1], "", seen.args.join(" "));
+    // 서버 폴더가 아니라 빈 임시 폴더에서 돈다. 서버 DB 옆에서 돌면 CLAUDE.md든 DB든 손에 닿는다.
+    assert.ok(seen.cwd.includes("appgoodwords-ai-"), seen.cwd);
+  });
+
+  it("Codex CLI에는 일러 주는 말을 앞에 붙여 표준 입력으로 건네고 답은 파일로 받는다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "codex_cli", model: "gpt-5.5" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const seen = JSON.parse(body.text);
+    assert.equal(seen.input, "코치입니다\n\n기록입니다");
+    assert.equal(seen.model, "gpt-5.5");
+    assert.equal(seen.args[0], "exec");
+    assert.ok(seen.args.includes("--ephemeral"), seen.args.join(" "));
+    assert.ok(seen.args.includes("--ignore-user-config"), seen.args.join(" "));
+    assert.equal(seen.args.at(-1), "-");
+    assert.ok(seen.cwd.includes("appgoodwords-ai-"), seen.cwd);
+  });
+
+  it("모델을 비워 보내면 CLI의 기본 모델을 쓴다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "claude_cli", model: "" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const seen = JSON.parse(body.text);
+    assert.ok(!seen.args.includes("--model"), seen.args.join(" "));
+  });
+
+  it("셸이 다르게 읽을 글자가 든 모델 이름은 CLI에 넘기지 않는다", async () => {
+    // 모델 이름은 인자로 나가는 유일한 사용자 값이다.
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "claude_cli", model: 'opus" && echo pwned' },
+    });
+
+    assert.equal(response.status, 400);
+  });
+
+  it("CLI가 실패하면 그 사유를 돌려준다", async () => {
+    const claude = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "claude_cli", model: "broken-model" },
+    });
+    const claudeBody = await claude.json();
+    assert.equal(claude.status, 502);
+    assert.ok(claudeBody.error.includes("모델을 찾을 수 없습니다"), claudeBody.error);
+
+    // Codex는 사유를 stderr에 `ERROR: {json}`으로 찍는다. 배너에 묻히지 않게 message만 뽑는다.
+    const codex = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "codex_cli", model: "broken-model" },
+    });
+    const codexBody = await codex.json();
+    assert.equal(codex.status, 502);
+    assert.ok(codexBody.error.includes("이 모델은 쓸 수 없습니다"), codexBody.error);
+  });
+
+  it("서버에 CLI가 없으면 어디에 넣어야 하는지 알려 준다", async () => {
+    const server = await startServer({ APP_GOOD_WORDS_CLAUDE_CLI: join(workDir, "no-such-claude") });
+    try {
+      const response = await fetch(`${server.url}/api/growth-feedback`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "claude_cli" }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 503);
+      assert.ok(body.error.includes("APP_GOOD_WORDS_CLAUDE_CLI"), body.error);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("CLI가 답을 주지 않으면 기다리다 끝내고 504를 돌려준다", async () => {
+    // 영영 붙들고 있으면 앱은 사유 없이 시간 초과만 보고, 서버에는 CLI 프로세스가 쌓인다.
+    const server = await startServer({
+      APP_GOOD_WORDS_CLAUDE_CLI: fakeCliPath("claude"),
+      APP_GOOD_WORDS_AI_TIMEOUT_MS: "1500",
+    });
+    try {
+      const startedAt = Date.now();
+      const response = await fetch(`${server.url}/api/growth-feedback`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "claude_cli", model: "slow-model" }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 504, JSON.stringify(body));
+      assert.ok(body.error.includes("답하지 않았습니다"), body.error);
+      assert.ok(Date.now() - startedAt < 20_000, "시간 안에 끝내지 않았다");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("경로를 따로 주지 않으면 PATH에서 CLI를 찾는다", async () => {
+    // Windows에서는 `claude.cmd`처럼 확장자가 붙어 있어 spawn이 알아서 찾지 못한다.
+    // Windows의 환경 변수 이름은 `Path`일 수 있어, 있는 이름 그대로 덮어쓴다.
+    const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") || "PATH";
+    const server = await startServer({
+      APP_GOOD_WORDS_CLAUDE_CLI: "",
+      [pathKey]: `${fakeCliDir}${delimiter}${process.env[pathKey] || ""}`,
+    });
+    try {
+      const response = await fetch(`${server.url}/api/growth-feedback`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "claude_cli" }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.equal(JSON.parse(body.text).user, "기록입니다");
+    } finally {
+      server.stop();
+    }
   });
 });
 

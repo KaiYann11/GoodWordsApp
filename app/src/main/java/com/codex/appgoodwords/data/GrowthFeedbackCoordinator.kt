@@ -121,7 +121,8 @@ class GrowthFeedbackCoordinator(
             period = period,
             periodStart = digest.from.toString(),
             periodEnd = digest.to.toString(),
-            model = aiSettings.effectiveModel
+            // CLI 기본 모델로 돌리면 모델 이름이 비어 있어, 누가 썼는지는 공급자 이름으로 남깁니다.
+            model = aiSettings.reportModel
         )
         if (report == null) {
             val message = "AI가 보낸 답을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요."

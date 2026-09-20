@@ -265,6 +265,16 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 한 자리를 나눠 쓰면 바꿔 보는 사이에 앞서 넣은 열쇠가 지워집니다. 모델도 공급자마다 다르므로
 `effectiveModel`이 그 공급자에 없는 이름을 기본값으로 당겨 붙입니다.
 
+**CLI 공급자(`CLAUDE_CLI`·`CODEX_CLI`)는 서버가 돌립니다(`askCli`).** 열쇠 대신 서버 PC에 로그인해
+둔 `claude`·`codex`를 쓰므로 앱은 직접 부를 길이 없고(`AiProvider.serverCli`), 서버 주소가 없으면
+막습니다. **물음은 명령줄 인자로 넘기지 않습니다** — 인자는 `ps`로 보이고 따옴표·`%`·줄바꿈이
+셸에서 깨집니다. 사용자 글은 표준 입력, 일러 주는 말은 임시 파일로 건네고, 인자로 나가는 사용자
+값은 글자를 검사한 모델 이름뿐입니다(`aiModelPattern`). CLI는 **도구 없이**(`--tools ""` ·
+`--disable shell_tool`) **빈 임시 폴더에서** **대화를 남기지 않고**(`--no-session-persistence` ·
+`--ephemeral`) 돌립니다. 하나라도 풀면 기록 속 문장이 서버 파일을 읽게 하거나 일기가 CLI 세션
+기록으로 디스크에 쌓입니다. Claude에 `--bare`를 쓰지 마세요 — OAuth 로그인을 읽지 않아 열쇠가
+도로 필요해집니다. 빈 모델은 "CLI 기본"이라는 뜻이라 CLI 공급자에만 둡니다(`CLI_DEFAULT_MODEL`).
+
 **AI에 못 붙어도 막다른 길이 아니어야 합니다.** 물음을 복사해 채팅창에 붙여넣고 받아 온 답을
 도로 넣는 길이 있습니다(`GrowthPrompt.chatPrompt` · `GrowthFeedbackCoordinator.saveManualAnswer`).
 미리 보기와 복사되는 글은 **같아야 합니다.** 달라지면 무엇이 밖으로 나가는지 확인할 방법이

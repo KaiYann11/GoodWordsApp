@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
@@ -113,12 +115,13 @@ const defaultSettings = {
 const config = parseArgs(process.argv.slice(2));
 let writeQueue = Promise.resolve();
 
-createServer((request, response) => {
+const server = createServer((request, response) => {
   route(request, response).catch((error) => {
     const statusCode = error instanceof HttpError ? error.statusCode : 500;
     sendJson(response, statusCode, { error: error.message || "서버 오류가 발생했습니다." });
   });
-}).listen(config.port, config.host, async () => {
+});
+server.listen(config.port, config.host, async () => {
   if (config.seed) {
     await withDb((db) => {
       if (db.items.length > 0) return { seeded: false };
@@ -150,12 +153,18 @@ createServer((request, response) => {
       return { seeded: true };
     });
   }
-  console.log(`AppGoodWords server running at http://${config.host}:${config.port}`);
+  // `--port 0`으로 띄우면 OS가 빈 포트를 고릅니다. 실제 붙은 포트를 적어야 시험이 찾아옵니다.
+  console.log(`AppGoodWords server running at http://${config.host}:${server.address().port}`);
   console.log(`DB file: ${config.dbPath}`);
   console.log(`Attachments: ${config.attachmentsDir}`);
   if (config.apiKey) console.log("API key protection is enabled.");
   if (config.openAiKey) console.log("AI growth feedback is enabled (OPENAI_API_KEY).");
   if (config.anthropicKey) console.log("AI growth feedback is enabled (ANTHROPIC_API_KEY).");
+  for (const plan of Object.values(aiProviders)) {
+    if (!plan.cli) continue;
+    const executable = resolveCli(plan);
+    if (executable) console.log(`AI growth feedback is enabled (${plan.label}: ${executable}).`);
+  }
 });
 
 async function route(request, response) {
@@ -439,6 +448,10 @@ async function routeContentMember(method, parts, request, response) {
  *
  * 어디에 물어볼지도 기기가 정합니다(`provider`). 서버는 그에 맞는 열쇠를 골라 쓸 뿐입니다.
  * 옛 앱은 이 값을 보내지 않으므로, 없으면 OpenAI로 읽습니다.
+ *
+ * 길이 둘입니다. 열쇠로 HTTP API를 부르는 길(`askHttp`)과, 이 서버에 로그인해 둔
+ * Claude Code·Codex CLI를 그대로 돌리는 길(`askCli`)입니다. CLI 길은 열쇠가 없어도 되고
+ * 구독을 그대로 씁니다. 어느 길이든 돌려주는 모양은 같습니다 — `{ text }`.
  */
 async function askAi(payload) {
   const system = text(payload?.system);
@@ -449,6 +462,12 @@ async function askAi(payload) {
   const plan = aiProviders[provider];
   if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider}`);
 
+  const model = text(payload?.model);
+  const answer = plan.cli ? await askCli(plan, system, user, model) : await askHttp(plan, system, user, model);
+  return { text: answer };
+}
+
+async function askHttp(plan, system, user, model) {
   const key = plan.key();
   if (!key) {
     throw new HttpError(
@@ -462,9 +481,9 @@ async function askAi(payload) {
     response = await fetch(plan.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...plan.headers(key) },
-      body: JSON.stringify(plan.body(system, user, text(payload?.model))),
+      body: JSON.stringify(plan.body(system, user, model)),
       // 글을 쓰는 데 시간이 걸립니다. 그래도 영영 붙들고 있지는 않습니다.
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(aiTimeoutMs),
     });
   } catch (error) {
     throw new HttpError(502, `AI에 연결하지 못했습니다: ${error.message}`);
@@ -488,14 +507,150 @@ async function askAi(payload) {
   } catch {
     throw new HttpError(502, "AI 응답을 읽지 못했습니다.");
   }
-  return { text: plan.read(parsed) };
+  return plan.read(parsed);
 }
+
+/**
+ * 이 서버에 깔린 CLI(Claude Code·Codex)를 돌려 답을 받습니다.
+ *
+ * 열쇠 대신 CLI에 로그인해 둔 계정(구독)을 씁니다. 물음은 **명령줄 인자로 넘기지 않습니다.**
+ * 인자는 `ps`로 남에게 보이고, 따옴표·`%`·줄바꿈이 섞이면 셸이 다르게 읽습니다. 사용자 글은
+ * 표준 입력으로, 일러 주는 말은 임시 파일로 건넵니다. 인자로 나가는 것은 고정된 옵션과
+ * 글자를 검사한 모델 이름, 우리가 지은 임시 경로뿐입니다.
+ *
+ * CLI는 도구 없이 글만 쓰게 돌립니다. 기록 속 문장이 "파일을 읽어라"고 해도 읽을 도구가 없고,
+ * 작업 폴더도 빈 임시 폴더라 서버의 다른 것에 손댈 수 없습니다. 대화도 남기지 않습니다 —
+ * 일기가 CLI 세션 기록으로 서버 디스크에 쌓이면 안 됩니다.
+ */
+async function askCli(plan, system, user, model) {
+  if (!aiModelPattern.test(model)) throw new HttpError(400, `모델 이름이 올바르지 않습니다: ${model}`);
+  const executable = resolveCli(plan);
+  if (!executable) {
+    throw new HttpError(
+      503,
+      `서버에서 ${plan.label}(${plan.command})를 찾지 못했습니다. PATH에 넣거나 ${plan.envName}에 실행 파일 경로를 지정하고 서버를 다시 띄워 주세요.`,
+    );
+  }
+
+  const workDir = await mkdtemp(join(tmpdir(), "appgoodwords-ai-"));
+  try {
+    const invocation = await plan.invocation({ system, user, model, workDir });
+    const run = await runProcess(executable, invocation.args, { cwd: workDir, input: invocation.input });
+    if (run.timedOut) throw new HttpError(504, `${plan.label}가 ${Math.round(aiTimeoutMs / 1000)}초 안에 답하지 않았습니다.`);
+    const answer = await plan.read(run, workDir);
+    if (!answer) throw new HttpError(502, `${plan.label}가 빈 답을 돌려주었습니다.`);
+    return answer;
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * CLI 실행 파일을 찾습니다. 환경 변수로 지정한 경로가 먼저고, 없으면 PATH를 뒤집니다.
+ *
+ * `spawn`은 Windows에서 `claude.cmd` 같은 확장자를 알아서 붙여 주지 않아 직접 찾습니다.
+ * Windows에서는 확장자 없는 파일(Git Bash용 스크립트)은 건너뜁니다 — 실행할 수 없습니다.
+ */
+function resolveCli(plan) {
+  const override = text(process.env[plan.envName]);
+  if (override) return isFile(override) ? override : null;
+  const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".com"] : [""];
+  for (const dir of (process.env.PATH || "").split(delimiter)) {
+    if (!dir) continue;
+    for (const extension of extensions) {
+      const candidate = join(dir, plan.command + extension);
+      if (isFile(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+function isFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 프로세스를 돌리고 끝나기를 기다립니다. 표준 입력으로 `input`을 넣고 표준 출력·오류를 모읍니다.
+ *
+ * `.cmd`·`.bat`는 `cmd.exe`를 거쳐야 돕니다. 그때는 인자를 우리가 직접 따옴표로 감쌉니다 —
+ * `cmd.exe`는 인자 배열을 모르고 한 줄로만 받습니다. 여기 오는 인자는 고정 옵션과 검사한
+ * 모델 이름, 임시 경로뿐이라 따옴표만으로 충분합니다. 시간을 넘기면 죽입니다.
+ */
+function runProcess(executable, args, { cwd, input }) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const viaCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(executable);
+    const child = viaCmd
+      ? spawn(
+          process.env.ComSpec || "cmd.exe",
+          ["/d", "/s", "/c", `"${[executable, ...args].map(quoteForCmd).join(" ")}"`],
+          { cwd, windowsVerbatimArguments: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+        )
+      : spawn(executable, args, { cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Windows에서 `kill()`은 cmd.exe만 끝내고 그 밑의 CLI는 남깁니다. 나무째 끝냅니다.
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+      } else {
+        child.kill();
+      }
+    }, aiTimeoutMs);
+
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      rejectPromise(new HttpError(502, `AI CLI를 실행하지 못했습니다: ${error.message}`));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolvePromise({ code, stdout, stderr, timedOut });
+    });
+    child.stdin.on("error", () => {
+      // CLI가 입력을 다 읽기 전에 끝나면 EPIPE가 납니다. 그 사유는 종료 코드와 stderr에 있습니다.
+    });
+    child.stdin.end(input, "utf8");
+  });
+}
+
+function quoteForCmd(arg) {
+  return `"${String(arg).replace(/"/g, "")}"`;
+}
+
+/** stderr 끝자락만 남깁니다. CLI가 배너를 길게 찍어서 통째로 돌려주면 사유가 묻힙니다. */
+function tailLines(output, count = 3) {
+  return String(output || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-count)
+    .join(" ");
+}
+
+/**
+ * 글을 쓰는 데 시간이 걸립니다. 그래도 영영 붙들고 있지는 않습니다.
+ * 앱은 이보다 조금 더 기다리므로, 늘릴 때는 앱 `AiFeedbackClient`의 `readTimeout`도 함께 봅니다.
+ */
+const aiTimeoutMs = Number(process.env.APP_GOOD_WORDS_AI_TIMEOUT_MS) || 180_000;
+/** CLI에 인자로 나가는 유일한 사용자 값입니다. 셸이 다르게 읽을 글자는 들이지 않습니다. */
+const aiModelPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$|^$/;
 
 /**
  * 공급자마다 다른 것만 모아 둡니다.
  *
  * 앱과 같은 곳에 물어봐야 같은 결의 답이 옵니다. 앱 `AiProvider`의 이름을 소문자로 보내옵니다.
  * 열쇠는 환경 변수에서만 읽습니다. 명령줄은 ps로 남에게 보이고 셸 기록에도 남습니다.
+ *
+ * `cli`가 있는 공급자는 열쇠 대신 이 서버에 깔린 CLI를 돌립니다(`askCli`). 모델을 비워 보내면
+ * CLI의 기본 모델을 씁니다.
  */
 const aiProviders = {
   openai: {
@@ -538,7 +693,104 @@ const aiProviders = {
         .map((block) => block.text || "")
         .join(""),
   },
+  claude_cli: {
+    label: "Claude CLI",
+    cli: true,
+    command: "claude",
+    envName: "APP_GOOD_WORDS_CLAUDE_CLI",
+    invocation: async ({ system, user, model, workDir }) => {
+      // 일러 주는 말은 파일로 건넵니다. 인자로 넘기면 줄바꿈과 따옴표가 셸에서 깨집니다.
+      const systemFile = join(workDir, "system.txt");
+      await writeFile(systemFile, system, "utf8");
+      return {
+        args: [
+          "-p",
+          "--output-format",
+          "json",
+          // 훅·플러그인·MCP·CLAUDE.md를 모두 끕니다. 로그인과 모델 선택은 그대로 됩니다.
+          "--safe-mode",
+          // 도구 없이 글만 씁니다. 기록 속 문장이 무엇을 시켜도 할 수 있는 것이 없습니다.
+          "--tools",
+          "",
+          // 일기가 CLI 세션 기록으로 서버 디스크에 남으면 안 됩니다.
+          "--no-session-persistence",
+          "--system-prompt-file",
+          systemFile,
+          ...(model ? ["--model", model] : []),
+        ],
+        input: user,
+      };
+    },
+    // 답은 stdout의 JSON 한 덩이입니다. 실패해도 JSON으로 오고 `is_error`와 사유(`result`)가 실립니다.
+    read: (run) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(run.stdout);
+      } catch {
+        throw new HttpError(502, `Claude CLI 응답을 읽지 못했습니다(${run.code}): ${tailLines(run.stderr)}`);
+      }
+      if (parsed?.is_error) throw new HttpError(502, `Claude CLI 요청이 실패했습니다: ${text(parsed.result)}`);
+      return text(parsed?.result);
+    },
+  },
+  codex_cli: {
+    label: "Codex CLI",
+    cli: true,
+    command: "codex",
+    envName: "APP_GOOD_WORDS_CODEX_CLI",
+    invocation: ({ system, user, model, workDir }) => ({
+      args: [
+        "exec",
+        // 대화를 남기지 않고, 빈 임시 폴더라 git 저장소가 아니어도 돕니다.
+        "--ephemeral",
+        "--skip-git-repo-check",
+        // 사용자 설정(MCP 서버·훅)을 읽지 않습니다. 로그인은 그대로 됩니다.
+        "--ignore-user-config",
+        // 명령을 실행하는 도구를 끄고, 혹시 남은 것도 읽기 전용에 가둡니다.
+        "--disable",
+        "shell_tool",
+        "--disable",
+        "unified_exec",
+        "--sandbox",
+        "read-only",
+        "-c",
+        'model_reasoning_effort="medium"',
+        "--color",
+        "never",
+        // 마지막 답을 파일로 받습니다. stdout에는 배너와 진행 글이 섞입니다.
+        "--output-last-message",
+        join(workDir, "answer.txt"),
+        ...(model ? ["--model", model] : []),
+        // 물음은 표준 입력으로 읽게 합니다.
+        "-",
+      ],
+      // Codex에는 일러 주는 말을 따로 싣는 자리가 없어 앞에 붙입니다.
+      input: system ? `${system}\n\n${user}` : user,
+    }),
+    read: async (run, workDir) => {
+      const answer = await readFile(join(workDir, "answer.txt"), "utf8").catch(() => "");
+      if (run.code !== 0 && !answer.trim()) {
+        throw new HttpError(502, `Codex CLI 요청이 실패했습니다(${run.code}): ${codexFailure(run.stderr)}`);
+      }
+      return answer.trim();
+    },
+  },
 };
+
+/** Codex는 실패 사유를 stderr에 `ERROR: {json}`으로 찍습니다. 그 안의 message만 뽑습니다. */
+function codexFailure(stderr) {
+  const line = String(stderr || "")
+    .split(/\r?\n/)
+    .reverse()
+    .find((candidate) => candidate.startsWith("ERROR:"));
+  if (!line) return tailLines(stderr);
+  const body = line.slice("ERROR:".length).trim();
+  try {
+    return JSON.parse(body)?.error?.message || body;
+  } catch {
+    return body;
+  }
+}
 
 async function routeRoutineMember(method, parts, request, response) {
   const routineId = Number(parts[2]);
