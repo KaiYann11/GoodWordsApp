@@ -39,7 +39,11 @@ node server/app_good_words_server.mjs --host 127.0.0.1 --port 18875 --db capture
 # 위 별도 서버를 HTTPS로 제공한 뒤 에뮬레이터를 지정해 아래처럼 계측합니다.
 ```
 
-에뮬레이터에서도 인증서가 정상 검증되는 HTTPS 테스트 서버 주소를 사용합니다.
+에뮬레이터에서도 인증서가 정상 검증되는 HTTPS 테스트 서버 주소를 사용합니다. 이 PC에서는
+`tailscale serve --bg --https=8443 18875`로 위 서버를 잠깐 내보내고(끝나면
+`tailscale serve --https=8443 off`; 운영 443은 그대로), 에뮬레이터는 **`-dns-server 100.100.100.100`을
+붙여 띄웁니다.** 그래야 `*.ts.net` 이름이 풀립니다 — 기본 DNS로는 `UnknownHostException`만 나고,
+IP로 부르면 인증서 이름이 맞지 않아 앱이 막습니다.
 
 **실기기가 붙어 있을 때 `connectedDebugAndroidTest`를 돌리지 마세요.** AGP가 붙어 있는 기기
 **전부**를 대상으로 삼고, 끝난 뒤 앱을 지웁니다. 사용자 DB가 함께 사라집니다. 실기기가
@@ -54,6 +58,9 @@ adb -s emulator-5554 shell am instrument -w -e testServerUrl https://<test-serve
 **묶음 사이에 `pm clear`를 넣습니다.** 백업 파일이 앱 안에 쌓여서, 이어 돌리면
 `SyncStatusRefreshTest`처럼 목록 개수를 보는 시험이 옛 파일 때문에 깨집니다.
 계측 전체를 한 번에 돌리면 에뮬레이터가 자주 죽으므로 종류별로 나눠 부르는 편이 낫습니다.
+**`pm clear` 뒤에는 알림 권한을 도로 줍니다** — `pm grant com.codex.appgoodwords
+android.permission.POST_NOTIFICATIONS`. 지우면 `MainActivity`가 뜨자마자 권한 창이 덮어서,
+`NotToDoFlowTest`처럼 실제 화면을 여는 시험이 "No compose hierarchies found"로 깨집니다.
 
 **실기기에 설치하기 전에 DB를 먼저 빼 둡니다.** 마이그레이션이 틀리면
 `fallbackToDestructiveMigration()`이 조용히 전부 지웁니다.
@@ -139,6 +146,17 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 `ConceptExplanation`이 만드는 `AI 설명` 머리말로 구분합니다. 개념은 읽음·알림·위젯·지난해 글귀와
 AI 추천 원문에서 제외하고, 개념 탭과 검색에서는 연결된 설명까지 보여 줍니다. 19→20은 테이블 변경 없이
 종류를 늘리는 마이그레이션이며 형식 20에는 앱 1.3.0 이상을 연결합니다.
+**개념에도 직접 적고 다시 물을 수 있습니다.** 이미 개념인 것에 다시 물으면 `saveConceptExplanation`이
+앞서 받은 `AI 설명` 메모의 **같은 줄을 덮어씁니다** — 새 줄로 쌓으면 카드가 옛 답을 먼저 집고, 지우고
+새로 넣으면 삭제 표식이 필요해집니다. 사용자가 직접 적은 메모는 건드리지 않습니다. 답은 짧게 받습니다 —
+물음에 길이를 일러 두고, 그래도 길면 `parse`가 갈래마다 자릅니다(`SECTION_LIMIT`). 개념 카드는 훑어보는
+자리라 길면 접히고, 접힌 설명은 다시 읽지 않습니다.
+
+**보관함 탭의 차례는 `LibraryTab.ORDER`가 정합니다.** 번호(`QUOTE = 0` …)는 이름표일 뿐이라 차례로
+쓰지 마세요. 검색이 번호로 탭을 짚어 오므로, 번호를 차례에 맞춰 바꾸면 찾아온 사람이 엉뚱한 탭에
+떨어집니다. 글귀가 맨 앞, 임시저장소가 맨 뒤입니다. **임시저장소를 거치지 않고도 담을 수 있어야 합니다** —
+메모·개념은 `openFreshAddForm(type)`으로 종류를 짚어 담는 화면을 엽니다(`add:MEMO` 길). 담는 화면은
+그 종류를 지키고 종류 고르개를 감춥니다.
 
 **하지 않을 일(`NOT_TO_DO`)은 루틴 옆 탭에서 봅니다.** 기존 `content_items`에 제목과 선택 메모를
 저장하고, 추가·수정·삭제는 같은 기록의 `syncId`와 삭제 표식을 유지합니다. 루틴 수행이나 글귀 읽음,

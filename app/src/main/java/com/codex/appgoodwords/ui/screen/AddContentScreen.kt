@@ -126,10 +126,15 @@ fun AddContentScreen(
     ) {
         item {
             Text(
-                text = if (isEditing) {
-                    "기존 게시글을 수정 중입니다. 저장하면 같은 항목에 반영됩니다."
-                } else {
-                    "텍스트, 링크, 사진, 영상을 한 화면에서 같이 추가할 수 있습니다. 링크를 넣으면 자동으로 링크/영상 항목으로 분류됩니다."
+                text = when {
+                    isEditing -> "기존 게시글을 수정 중입니다. 저장하면 같은 항목에 반영됩니다."
+                    // 보관함에서 종류를 짚어 들어왔습니다. 주소를 넣어도 그 종류 그대로 담깁니다.
+                    collectionType == ContentType.CONCEPT ->
+                        "개념으로 담깁니다. 모르는 용어나 문장을 적어 두고, 담은 뒤 AI에게 의미를 물어볼 수 있습니다."
+                    collectionType == ContentType.MEMO ->
+                        "메모로 담깁니다. 참고할 정보와 문장을 적어 두세요."
+                    else ->
+                        "텍스트, 링크, 사진, 영상을 한 화면에서 같이 추가할 수 있습니다. 링크를 넣으면 자동으로 링크/영상 항목으로 분류됩니다."
                 },
                 style = MaterialTheme.typography.bodyMedium
             )

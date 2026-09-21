@@ -22,7 +22,12 @@ internal const val libraryInboxTabTag = "library_tab_inbox"
 internal const val libraryMemoTabTag = "library_tab_memo"
 internal const val libraryConceptTabTag = "library_tab_concept"
 
-/** 보관함 안의 자리. 검색에서 넘어올 때도 이 번호로 짚습니다. */
+/**
+ * 보관함 안의 자리. 검색에서 넘어올 때도 이 번호로 짚습니다.
+ *
+ * 번호는 이름표일 뿐이고 **늘어놓는 차례는 [ORDER]가 정합니다.** 번호로 차례를 매기면
+ * 탭을 옮길 때마다 저장된 번호가 다른 탭을 가리켜, 검색에서 넘어온 사람이 엉뚱한 곳에 떨어집니다.
+ */
 internal object LibraryTab {
     const val QUOTE = 0
     const val IDEA = 1
@@ -30,6 +35,15 @@ internal object LibraryTab {
     const val INBOX = 3
     const val MEMO = 4
     const val CONCEPT = 5
+
+    /**
+     * 자주 보는 것이 앞입니다.
+     *
+     * 글귀가 이 앱의 첫 자리이고, 번뜩인 것과 책이 그 둘레입니다. 개념과 메모는 찾아볼 때
+     * 들르는 곳이라 그 뒤에 둡니다. **임시저장소는 맨 뒤입니다** — 아직 무엇인지 정하지 않은
+     * 글 더미라, 보관함을 열 때마다 먼저 보이면 정리할 일부터 눈에 들어옵니다.
+     */
+    val ORDER = listOf(QUOTE, IDEA, BOOK, CONCEPT, MEMO, INBOX)
 }
 
 /**
@@ -65,34 +79,12 @@ fun LibraryTabsScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        val tabs = listOf(
-            LibraryTab.INBOX, LibraryTab.QUOTE, LibraryTab.MEMO,
-            LibraryTab.CONCEPT, LibraryTab.IDEA, LibraryTab.BOOK
-        )
-        ScrollableTabRow(selectedTabIndex = tabs.indexOf(selected), edgePadding = 8.dp) {
-            Tab(
-                selected = selected == LibraryTab.INBOX,
-                onClick = { selected = LibraryTab.INBOX },
-                text = { Text(if (inboxCount > 0) "임시저장소 $inboxCount" else "임시저장소") },
-                modifier = Modifier.testTag(libraryInboxTabTag)
-            )
+        ScrollableTabRow(selectedTabIndex = LibraryTab.ORDER.indexOf(selected), edgePadding = 8.dp) {
             Tab(
                 selected = selected == LibraryTab.QUOTE,
                 onClick = { selected = LibraryTab.QUOTE },
                 text = { Text("글귀") },
                 modifier = Modifier.testTag(libraryQuoteTabTag)
-            )
-            Tab(
-                selected = selected == LibraryTab.MEMO,
-                onClick = { selected = LibraryTab.MEMO },
-                text = { Text("메모") },
-                modifier = Modifier.testTag(libraryMemoTabTag)
-            )
-            Tab(
-                selected = selected == LibraryTab.CONCEPT,
-                onClick = { selected = LibraryTab.CONCEPT },
-                text = { Text("개념") },
-                modifier = Modifier.testTag(libraryConceptTabTag)
             )
             Tab(
                 selected = selected == LibraryTab.IDEA,
@@ -105,6 +97,25 @@ fun LibraryTabsScreen(
                 onClick = { selected = LibraryTab.BOOK },
                 text = { Text("독서") },
                 modifier = Modifier.testTag(libraryBookTabTag)
+            )
+            Tab(
+                selected = selected == LibraryTab.CONCEPT,
+                onClick = { selected = LibraryTab.CONCEPT },
+                text = { Text("개념") },
+                modifier = Modifier.testTag(libraryConceptTabTag)
+            )
+            Tab(
+                selected = selected == LibraryTab.MEMO,
+                onClick = { selected = LibraryTab.MEMO },
+                text = { Text("메모") },
+                modifier = Modifier.testTag(libraryMemoTabTag)
+            )
+            Tab(
+                selected = selected == LibraryTab.INBOX,
+                onClick = { selected = LibraryTab.INBOX },
+                // 맨 뒤에 있어도 쌓인 것이 보이도록 개수를 답니다.
+                text = { Text(if (inboxCount > 0) "임시저장소 $inboxCount" else "임시저장소") },
+                modifier = Modifier.testTag(libraryInboxTabTag)
             )
         }
         when (selected) {

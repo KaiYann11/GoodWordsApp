@@ -132,6 +132,13 @@ private data class AppDestination(
     val editingItemId: Long? = null,
     val returnTabAfterEdit: AppTab = AppTab.HOME,
     /**
+     * 담는 화면을 어느 종류로 열었는지.
+     *
+     * 메모·개념처럼 보관함 안에서 "여기에 직접 쓰기"로 들어온 경우입니다. 비워 두면 예전처럼
+     * 주소를 보고 알아서 정합니다.
+     */
+    val newItemType: ContentType? = null,
+    /**
      * 검색에서 고른 기록. 그 탭으로 가서 해당 항목까지 데려다줍니다.
      *
      * 탭만 바꿔 놓으면 찾아 놓고도 사용자가 다시 손으로 뒤져야 합니다.
@@ -357,21 +364,27 @@ fun AppGoodWordsApp(
         }
     }
 
-    fun explainInboxConcept(item: ContentItemEntity) {
+    fun explainConcept(item: ContentItemEntity) {
         if (askingConceptId != null) return
+        // 임시저장 글은 개념으로 옮겨 가고, 이미 개념인 것은 보던 자리에 그대로 있어야 합니다.
+        val moving = item.type == ContentType.INBOX
         askingConceptId = item.id
         coroutineScope.launch {
-            val result = viewModel.explainInboxConcept(item.id)
+            val result = viewModel.explainConcept(item.id)
             askingConceptId = null
             if (result.isSuccess) {
                 val concept = result.getOrThrow()
-                // 답을 바로 보여 주고, 뒤로 가면 새 개념 탭에 머뭅니다.
-                navStack = listOf(
-                    tabRoute(AppTab.LIBRARY),
-                    focusRoute(SearchKind.CONCEPT, concept.id),
-                    detailRoute(AppTab.LIBRARY, concept.id)
+                if (moving) {
+                    // 답을 바로 보여 주고, 뒤로 가면 새 개념 탭에 머뭅니다.
+                    navStack = listOf(
+                        tabRoute(AppTab.LIBRARY),
+                        focusRoute(SearchKind.CONCEPT, concept.id),
+                        detailRoute(AppTab.LIBRARY, concept.id)
+                    )
+                }
+                snackbarHostState.showSnackbar(
+                    if (moving) "AI 설명과 함께 개념으로 옮겼습니다." else "AI 설명을 새로 받았습니다."
                 )
-                snackbarHostState.showSnackbar("AI 설명과 함께 개념으로 옮겼습니다.")
             } else {
                 snackbarHostState.showSnackbar(
                     result.exceptionOrNull()?.message ?: "AI에게 의미를 묻지 못했습니다."
@@ -380,13 +393,15 @@ fun AppGoodWordsApp(
         }
     }
 
-    fun openFreshAddForm() {
+    /** @param type 보관함에서 "직접 쓰기"로 들어왔을 때 그 탭의 종류. 비우면 주소를 보고 정합니다. */
+    fun openFreshAddForm(type: ContentType? = null) {
         viewModel.clearSharedText()
         addFormVersion += 1
-        if (navStack.lastOrNull() == addRoute()) {
+        val route = addRoute(type)
+        if (navStack.lastOrNull() == route) {
             return
         }
-        pushRoute(addRoute())
+        pushRoute(route)
     }
 
     /**
@@ -413,7 +428,7 @@ fun AppGoodWordsApp(
     }
 
     LaunchedEffect(sharedText, destination.editingItemId) {
-        if (!sharedText.isNullOrBlank() && destination.editingItemId == null && navStack.last() != addRoute()) {
+        if (!sharedText.isNullOrBlank() && destination.editingItemId == null && !isAddRoute(navStack.last())) {
             pushRoute(addRoute())
         }
     }
@@ -504,6 +519,8 @@ fun AppGoodWordsApp(
                             text = when {
                                 selectedItem != null -> selectedItem.title.ifBlank { "상세 보기" }
                                 destination.editingItemId != null -> "항목 수정"
+                                destination.newItemType == ContentType.CONCEPT -> "개념 적기"
+                                destination.newItemType == ContentType.MEMO -> "메모 적기"
                                 else -> currentTab.title
                             },
                             style = MaterialTheme.typography.titleLarge,
@@ -606,7 +623,7 @@ fun AppGoodWordsApp(
                         item = selectedItem,
                         onClassify = { classifyingItemId = selectedItem.id },
                         askingConcept = askingConceptId == selectedItem.id,
-                        onAskConcept = { explainInboxConcept(selectedItem) },
+                        onAskConcept = { explainConcept(selectedItem) },
                         confirmedToday = selectedItem.id in confirmedTodayIds,
                         onEdit = { item ->
                             pushRoute(editRoute(currentTab, item.id))
@@ -727,7 +744,7 @@ fun AppGoodWordsApp(
                                     onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) },
                                     onClassifyItem = { item -> classifyingItemId = item.id },
                                     askingConceptId = askingConceptId,
-                                    onAskConcept = { item -> explainInboxConcept(item) },
+                                    onAskConcept = { item -> explainConcept(item) },
                                     onPaste = { text ->
                                         coroutineScope.launch {
                                             val result = viewModel.captureInboxText(text)
@@ -748,7 +765,9 @@ fun AppGoodWordsApp(
                                 TextCollectionScreen(
                                     items = allItems.filter { it.type == ContentType.MEMO },
                                     collectionType = ContentType.MEMO,
-                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) }
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) },
+                                    // 임시저장소를 거치지 않고 여기에 바로 적습니다.
+                                    onAddNew = { openFreshAddForm(ContentType.MEMO) }
                                 )
                             },
                             conceptContent = {
@@ -756,7 +775,11 @@ fun AppGoodWordsApp(
                                     items = allItems.filter { it.type == ContentType.CONCEPT },
                                     collectionType = ContentType.CONCEPT,
                                     contentMemos = contentMemos,
-                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) }
+                                    onOpenItem = { item -> openItemDetail(AppTab.LIBRARY, item.id) },
+                                    askingConceptId = askingConceptId,
+                                    // 직접 적어 둔 개념에도, 답이 아쉬운 개념에도 다시 물어봅니다.
+                                    onAskConcept = { item -> explainConcept(item) },
+                                    onAddNew = { openFreshAddForm(ContentType.CONCEPT) }
                                 )
                             },
                             requestedTab = when (destination.focusKind) {
@@ -1205,7 +1228,10 @@ fun AppGoodWordsApp(
                             categories = categories,
                             existingTags = existingTags,
                             sharedText = sharedText,
-                            initialDraft = editingItem?.let(ContentDraft::fromItem),
+                            // 고칠 것이 없으면 빈 칸입니다. 보관함에서 종류를 짚어 들어왔으면
+                            // 그 종류만 담아 둔 밑그림을 줍니다(담는 화면이 종류 고르개를 감춥니다).
+                            initialDraft = editingItem?.let(ContentDraft::fromItem)
+                                ?: destination.newItemType?.let { ContentDraft(type = it) },
                             formVersion = addFormVersion,
                             submitLabel = if (editingItem != null) "수정 완료" else "저장하기",
                             secondaryActionLabel = if (editingItem != null) "수정 취소" else null,
@@ -1237,7 +1263,7 @@ fun AppGoodWordsApp(
                                             popToRoute(tabRoute(destination.returnTabAfterEdit))
                                             "수정했습니다."
                                         } else {
-                                            if (navStack.size > 1 && navStack.last() == addRoute()) {
+                                            if (navStack.size > 1 && isAddRoute(navStack.last())) {
                                                 popRoute()
                                             } else {
                                                 selectTab(AppTab.HOME)
@@ -1492,7 +1518,10 @@ private fun buildTodayItems(
 
 private fun tabRoute(tab: AppTab): String = "tab:${tab.name}"
 
-private fun addRoute(): String = "add"
+/** 종류를 짚어 열면 담는 화면이 그 종류로 저장합니다(보관함의 "직접 쓰기"). */
+private fun addRoute(type: ContentType? = null): String = if (type == null) "add" else "add:${type.name}"
+
+private fun isAddRoute(route: String): Boolean = route == "add" || route.startsWith("add:")
 
 private fun detailRoute(tab: AppTab, itemId: Long): String = "detail:${tab.name}:$itemId"
 
@@ -1515,7 +1544,11 @@ private fun parseRoute(route: String): AppDestination {
     val parts = route.split(":")
     return when (parts.firstOrNull()) {
         "tab" -> AppDestination(tab = AppTab.valueOf(parts[1]))
-        "add" -> AppDestination(tab = AppTab.ADD)
+        "add" -> AppDestination(
+            tab = AppTab.ADD,
+            // 모르는 이름이 와도 담는 길을 막지 않습니다. 그때는 예전처럼 알아서 정합니다.
+            newItemType = parts.getOrNull(1)?.let { name -> ContentType.entries.firstOrNull { it.name == name } }
+        )
         "focus" -> {
             val kind = SearchKind.valueOf(parts[1])
             AppDestination(

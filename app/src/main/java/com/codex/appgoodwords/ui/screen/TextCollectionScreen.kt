@@ -36,10 +36,17 @@ import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ConceptExplanation
 
 internal const val inboxPasteTag = "inbox_paste"
+internal const val collectionAddTag = "collection_add"
 internal fun inboxClassifyTag(id: Long) = "inbox_classify_$id"
-internal fun inboxAskConceptTag(id: Long) = "inbox_ask_concept_$id"
+internal fun askConceptTag(id: Long) = "ask_concept_$id"
 
-/** 수집한 글과 정리한 메모는 읽음 횟수를 세지 않고 최신순으로 찾습니다. */
+/**
+ * 수집한 글과 정리한 메모는 읽음 횟수를 세지 않고 최신순으로 찾습니다.
+ *
+ * **임시저장소를 거치지 않고도 담을 수 있어야 합니다([onAddNew]).** 여기 모이는 것이 늘
+ * 남이 보내 준 글은 아닙니다. 메모도 개념도 그냥 떠올라서 적을 때가 있는데, 그때마다
+ * 임시저장소에 넣고 다시 옮기게 하면 한 번에 끝날 일이 두 번이 됩니다.
+ */
 @Composable
 fun TextCollectionScreen(
     items: List<ContentItemEntity>,
@@ -50,7 +57,10 @@ fun TextCollectionScreen(
     onPaste: (String) -> Unit = {},
     onClassifyItem: (ContentItemEntity) -> Unit = {},
     askingConceptId: Long? = null,
-    onAskConcept: (ContentItemEntity) -> Unit = {}
+    /** 걸어 두지 않으면 묻는 단추를 아예 두지 않습니다. */
+    onAskConcept: ((ContentItemEntity) -> Unit)? = null,
+    /** 걸어 두면 이 자리에 바로 적어 담는 단추가 생깁니다. */
+    onAddNew: (() -> Unit)? = null
 ) {
     val isInbox = collectionType == ContentType.INBOX
     val isConcept = collectionType == ContentType.CONCEPT
@@ -89,11 +99,16 @@ fun TextCollectionScreen(
                             Text("붙여넣기")
                         }
                     }
+                    if (onAddNew != null) {
+                        Button(onClick = onAddNew, modifier = Modifier.testTag(collectionAddTag)) {
+                            Text("+ 직접 쓰기")
+                        }
+                    }
                 }
                 Text(
                     text = when {
                         isInbox -> "먼저 담아 두고, AI에게 뜻을 묻거나 직접 정리하세요."
-                        isConcept -> "원문과 AI에게 받은 설명을 함께 모아 둔 곳입니다."
+                        isConcept -> "직접 적거나 임시저장소에서 옮겨 온 원문과, AI에게 받은 설명을 함께 둡니다."
                         else -> "참고할 정보와 문장을 모아 둔 곳입니다."
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -120,8 +135,8 @@ fun TextCollectionScreen(
                         else "아직 메모가 없습니다.",
                     body = if (query.isNotBlank()) "다른 검색어로 찾아보세요."
                         else if (isInbox) "다른 앱에서 텍스트를 공유하거나, 복사한 뒤 위의 붙여넣기를 눌러 주세요."
-                        else if (isConcept) "임시저장소에서 모르는 용어나 문장을 AI에게 물어보세요."
-                        else "임시저장소에서 글을 골라 메모로 옮겨 보세요."
+                        else if (isConcept) "모르는 용어를 직접 적거나, 임시저장소에서 골라 AI에게 물어보세요."
+                        else "직접 쓰거나, 임시저장소에서 글을 골라 메모로 옮겨 보세요."
                 )
             }
         }
@@ -153,38 +168,55 @@ fun TextCollectionScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (isConcept) {
+                    val explanation = if (isConcept) {
                         memoBodiesByItem[item.id]
                             .orEmpty()
                             .sortedBy { it.createdAt }
                             .firstNotNullOfOrNull { ConceptExplanation.fromMemo(it.body) }
-                            ?.let { explanation ->
-                                Text("AI 설명", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    text = explanation,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 8,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                    } else null
+                    explanation?.let {
+                        Text("AI 설명", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    if (isInbox) {
+                    if ((isInbox || isConcept) && onAskConcept != null) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(
                                 onClick = { onAskConcept(item) },
                                 enabled = askingConceptId == null,
-                                modifier = Modifier.fillMaxWidth().testTag(inboxAskConceptTag(item.id))
+                                modifier = Modifier.fillMaxWidth().testTag(askConceptTag(item.id))
                             ) {
-                                Text(if (askingConceptId == item.id) "AI에게 묻는 중…" else "AI에게 의미 묻기")
+                                Text(
+                                    when {
+                                        askingConceptId == item.id -> "AI에게 묻는 중…"
+                                        // 이미 받아 둔 답이 있으면 덮어쓰게 되므로 미리 알려 줍니다.
+                                        explanation != null -> "AI에게 다시 묻기"
+                                        else -> "AI에게 의미 묻기"
+                                    }
+                                )
                             }
-                            OutlinedButton(
-                                onClick = { onClassifyItem(item) },
-                                enabled = askingConceptId == null,
-                                modifier = Modifier.fillMaxWidth().testTag(inboxClassifyTag(item.id))
-                            ) {
-                                Text("직접 분류하기")
+                            if (isInbox) {
+                                OutlinedButton(
+                                    onClick = { onClassifyItem(item) },
+                                    enabled = askingConceptId == null,
+                                    modifier = Modifier.fillMaxWidth().testTag(inboxClassifyTag(item.id))
+                                ) {
+                                    Text("직접 분류하기")
+                                }
                             }
+                        }
+                    } else if (isInbox) {
+                        OutlinedButton(
+                            onClick = { onClassifyItem(item) },
+                            enabled = askingConceptId == null,
+                            modifier = Modifier.fillMaxWidth().testTag(inboxClassifyTag(item.id))
+                        ) {
+                            Text("직접 분류하기")
                         }
                     }
                 }

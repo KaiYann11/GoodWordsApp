@@ -117,23 +117,38 @@ class AppRepository(
     }
 
     /** AI 답을 붙이고 개념으로 옮기는 두 저장을 한꺼번에 끝냅니다. */
+    /**
+     * AI 설명을 원문 옆에 붙이고 개념으로 옮깁니다.
+     *
+     * 임시저장 글은 개념이 되고, 이미 개념인 것은 그 자리에서 답만 새로 받습니다
+     * (직접 적어 둔 개념과 다시 묻는 경우입니다).
+     */
     suspend fun saveConceptExplanation(id: Long, explanation: String): ContentItemEntity =
         database.withTransaction {
-            val item = contentItemDao.getById(id) ?: error("임시저장 글을 찾을 수 없습니다.")
-            check(item.type == ContentType.INBOX) { "이미 정리한 글입니다." }
+            val item = contentItemDao.getById(id) ?: error("설명할 글을 찾을 수 없습니다.")
+            check(item.type == ContentType.INBOX || item.type == ContentType.CONCEPT) {
+                "임시저장 글이나 개념만 AI에게 물어볼 수 있습니다."
+            }
             val answer = ConceptExplanation.memoBody(explanation)
             val changedAt = maxOf(System.currentTimeMillis(), item.updatedAt + 1L)
             val concept = item.copy(type = ContentType.CONCEPT, updatedAt = changedAt)
             contentItemDao.insert(concept)
+            // 다시 물으면 앞서 받은 설명 **자리에 덮어씁니다.** 새 줄로 쌓으면 카드가 옛 답을
+            // 먼저 집고, 사용자가 직접 적은 메모와도 섞입니다. 같은 줄을 고치는 것이라
+            // 삭제 표식은 필요 없습니다 — syncId가 그대로라 다른 기기도 고쳐진 것으로 읽습니다.
+            val previousAnswer = contentMemoDao.getByContentItemId(concept.id)
+                .filter { ConceptExplanation.fromMemo(it.body) != null }
+                .minByOrNull { it.createdAt }
             contentMemoDao.insert(
-                ContentMemoEntity(
-                    updatedAt = changedAt,
-                    contentItemId = concept.id,
-                    contentItemSyncId = concept.syncId,
-                    contentTitle = concept.title.ifBlank { concept.body.take(24) },
-                    body = answer,
-                    createdAt = changedAt
-                )
+                previousAnswer?.copy(updatedAt = changedAt, body = answer)
+                    ?: ContentMemoEntity(
+                        updatedAt = changedAt,
+                        contentItemId = concept.id,
+                        contentItemSyncId = concept.syncId,
+                        contentTitle = concept.title.ifBlank { concept.body.take(24) },
+                        body = answer,
+                        createdAt = changedAt
+                    )
             )
             concept
         }

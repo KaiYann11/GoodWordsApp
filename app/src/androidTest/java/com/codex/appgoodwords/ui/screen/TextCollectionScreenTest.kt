@@ -129,10 +129,70 @@ class TextCollectionScreenTest {
             }
         }
 
-        compose.onNodeWithTag(inboxAskConceptTag(item.id)).performClick()
+        compose.onNodeWithTag(askConceptTag(item.id)).performClick()
         compose.onNodeWithText(item.body).assertDoesNotExist()
         compose.onNodeWithTag(libraryConceptTabTag).performClick()
         compose.onNodeWithText("쉽게 이해할 수 있는 설명").assertIsDisplayed()
+    }
+
+    @Test
+    fun aConceptWrittenHereCanBeAskedAboutWithoutGoingThroughTheInbox() {
+        // 임시저장소를 거치지 않고 적은 개념에도 물어볼 수 있어야 합니다.
+        // 물음 단추가 임시저장소에만 있으면, 직접 적은 것은 설명을 받을 길이 없습니다.
+        val concept = item.copy(type = ContentType.CONCEPT)
+        val memos = mutableStateOf(emptyList<ContentMemoEntity>())
+        var addRequested = false
+        var asked: Long? = null
+        compose.setContent {
+            AppGoodWordsTheme {
+                TextCollectionScreen(
+                    items = listOf(concept),
+                    collectionType = ContentType.CONCEPT,
+                    contentMemos = memos.value,
+                    onOpenItem = {},
+                    onAskConcept = { target ->
+                        asked = target.id
+                        memos.value = listOf(
+                            ContentMemoEntity(
+                                contentItemId = concept.id,
+                                contentItemSyncId = concept.syncId,
+                                contentTitle = concept.title,
+                                body = ConceptExplanation.memoBody("직접 적은 개념의 설명")
+                            )
+                        )
+                    },
+                    onAddNew = { addRequested = true }
+                )
+            }
+        }
+
+        compose.onNodeWithTag(collectionAddTag).performClick()
+        assertEquals(true, addRequested)
+
+        compose.onNodeWithTag(askConceptTag(concept.id)).performClick()
+        assertEquals(concept.id, asked)
+        compose.onNodeWithText("직접 적은 개념의 설명").assertIsDisplayed()
+        // 받아 둔 답이 있으면 덮어쓴다는 것이 단추에 드러나야 합니다.
+        compose.onNodeWithText("AI에게 다시 묻기").assertIsDisplayed()
+    }
+
+    @Test
+    fun theMemoTabCanWriteDirectlyAndHasNoAiButton() {
+        var addRequested = false
+        compose.setContent {
+            AppGoodWordsTheme {
+                TextCollectionScreen(
+                    items = listOf(item.copy(type = ContentType.MEMO)),
+                    collectionType = ContentType.MEMO,
+                    onOpenItem = {},
+                    onAddNew = { addRequested = true }
+                )
+            }
+        }
+
+        compose.onNodeWithTag(collectionAddTag).performClick()
+        assertEquals(true, addRequested)
+        compose.onNodeWithTag(askConceptTag(item.id)).assertDoesNotExist()
     }
 
     @Test

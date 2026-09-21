@@ -878,10 +878,17 @@ class MainViewModel(
         Unit
     }
 
-    /** 임시저장 원문을 AI에게 설명받고, 성공한 경우에만 개념으로 옮깁니다. */
-    suspend fun explainInboxConcept(id: Long) = runCatching {
-        val item = container.repository.getContentItem(id) ?: error("임시저장 글을 찾을 수 없습니다.")
-        check(item.type == ContentType.INBOX) { "이미 정리한 글입니다." }
+    /**
+     * 원문을 AI에게 설명받고, 성공한 경우에만 기록을 바꿉니다.
+     *
+     * 임시저장 글은 개념으로 옮기고, 이미 개념인 것(직접 적었거나 다시 묻는 것)은
+     * 그 자리에서 설명만 새로 받습니다.
+     */
+    suspend fun explainConcept(id: Long) = runCatching {
+        val item = container.repository.getContentItem(id) ?: error("설명할 글을 찾을 수 없습니다.")
+        check(item.type == ContentType.INBOX || item.type == ContentType.CONCEPT) {
+            "임시저장 글이나 개념만 AI에게 물어볼 수 있습니다."
+        }
         val aiSettings = container.settingsStore.getAiFeedbackSettings()
         val rawAnswer = container.aiFeedbackClient.ask(
             system = ConceptExplanation.systemPrompt(),

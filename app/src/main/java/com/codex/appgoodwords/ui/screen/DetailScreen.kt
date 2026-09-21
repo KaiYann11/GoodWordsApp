@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.SubcomposeAsyncImage
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.ConceptExplanation
 import com.codex.appgoodwords.data.ContentMemoEntity
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.RoutineEntity
@@ -319,14 +320,25 @@ fun DetailScreen(
 
         item {
             SectionCard(title = "빠른 작업") {
-                if (item.type == ContentType.INBOX) {
+                // 개념에서도 물어볼 수 있습니다. 직접 적어 둔 개념에는 아직 설명이 없고,
+                // 받아 둔 설명이 아쉬울 때도 있습니다.
+                if (item.type == ContentType.INBOX || item.type == ContentType.CONCEPT) {
+                    val hasExplanation = memos.any { ConceptExplanation.fromMemo(it.body) != null }
                     Button(
                         onClick = onAskConcept,
                         enabled = !askingConcept,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (askingConcept) "AI에게 묻는 중…" else "AI에게 의미 묻기")
+                        Text(
+                            when {
+                                askingConcept -> "AI에게 묻는 중…"
+                                hasExplanation -> "AI에게 다시 묻기"
+                                else -> "AI에게 의미 묻기"
+                            }
+                        )
                     }
+                }
+                if (item.type == ContentType.INBOX) {
                     OutlinedButton(
                         onClick = onClassify,
                         enabled = !askingConcept,
