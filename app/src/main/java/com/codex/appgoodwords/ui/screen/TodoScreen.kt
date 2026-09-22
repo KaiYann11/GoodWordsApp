@@ -287,7 +287,15 @@ private fun TodoRow(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Checkbox(checked = todo.isDone, onCheckedChange = { onToggleDone() })
+            val haptics = rememberHaptics()
+            Checkbox(
+                checked = todo.isDone,
+                onCheckedChange = {
+                    // 끝냈을 때만 울립니다. 되돌리는 것은 기쁜 일이 아니라 고치는 일입니다.
+                    if (!todo.isDone) haptics.commit() else haptics.tap()
+                    onToggleDone()
+                }
+            )
             Column(
                 modifier = Modifier
                     .weight(1f)

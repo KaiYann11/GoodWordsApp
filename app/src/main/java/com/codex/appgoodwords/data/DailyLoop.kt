@@ -17,6 +17,13 @@ enum class DailyStep(val label: String, val hint: String) {
     QUOTE("글귀 읽기", "오늘의 글귀를 하나 확인해 보세요"),
     ROUTINE("루틴", "하기로 한 것을 하나 체크해 보세요"),
     TODO("할 일", "오늘 할 일을 하나 끝내 보세요"),
+    /**
+     * 읽은 쪽을 남긴 날이 독서한 날입니다.
+     *
+     * 책에는 마지막 쪽만 남아서 그것만으로는 언제 읽었는지 알 수 없습니다.
+     * 날짜는 [BookReadingLogEntity]에 쌓입니다.
+     */
+    READING("독서", "읽은 쪽까지 기록해 보세요"),
     DIARY("일기", "오늘을 한 줄이라도 남겨 보세요");
 
     companion object {
@@ -117,6 +124,7 @@ object DailyLoopCalculator {
         today: LocalDate,
         /** 하루의 축으로 삼기로 한 걸음들. 비어 있으면 [DailyStep.DEFAULTS]로 셉니다. */
         steps: List<DailyStep> = DailyStep.DEFAULTS,
+        readingLogs: List<BookReadingLogEntity> = emptyList(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): DailyProgress {
         val chosen = steps.distinct().ifEmpty { DailyStep.DEFAULTS }
@@ -130,7 +138,9 @@ object DailyLoopCalculator {
             DailyStep.TODO to todos.mapNotNullTo(mutableSetOf()) { todo ->
                 todo.doneAt?.takeIf { it > 0L }?.let { toDate(it, zoneId) }
             },
-            DailyStep.DIARY to diaries.mapNotNullTo(mutableSetOf()) { parseDate(it.entryDate) }
+            DailyStep.DIARY to diaries.mapNotNullTo(mutableSetOf()) { parseDate(it.entryDate) },
+            // 읽은 쪽을 남긴 날입니다. 쪽수가 늘지 않은 날(되돌려 적은 날)도 책을 펴 본 것으로 셉니다.
+            DailyStep.READING to readingLogs.mapNotNullTo(mutableSetOf()) { parseDate(it.readDate) }
         )
 
         val doneSteps = chosen.filterTo(mutableSetOf()) { today in daysByStep.getValue(it) }

@@ -16,7 +16,8 @@ data class AppImportResult(
     val todoCount: Int = 0,
     val bookCount: Int = 0,
     val growthReportCount: Int = 0,
-    val moodLogCount: Int = 0
+    val moodLogCount: Int = 0,
+    val bookReadingLogCount: Int = 0
 )
 
 class AppDataImporter(
@@ -69,6 +70,7 @@ class AppDataImporter(
         val bookDao = database.bookDao()
         val reportDao = database.growthReportDao()
         val moodLogDao = database.moodLogDao()
+        val readingLogDao = database.bookReadingLogDao()
 
         val previousReminders = database.todoDao().getPendingReminders()
         val deletedSyncIds = incoming.deletions.map { it.syncId }
@@ -88,6 +90,7 @@ class AppDataImporter(
                 bookDao.deleteBySyncIds(deletedSyncIds)
                 reportDao.deleteBySyncIds(deletedSyncIds)
                 moodLogDao.deleteBySyncIds(deletedSyncIds)
+                readingLogDao.deleteBySyncIds(deletedSyncIds)
             }
 
             val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
@@ -160,6 +163,19 @@ class AppDataImporter(
 
             val localMoodLogIds = moodLogDao.getAll().associate { it.syncId to it.id }
             moodLogDao.insertAll(incoming.moodLogs.map { it.copy(id = localMoodLogIds[it.syncId] ?: 0L) })
+
+            // 독서 기록은 책을 이 기기의 번호로 다시 이어 줍니다. 책이 없어도 버리지 않습니다 —
+            // 읽은 날은 책과 별개로 남습니다.
+            val localReadingLogIds = readingLogDao.getAll().associate { it.syncId to it.id }
+            val bookIdBySyncId = bookDao.getAll().associate { it.syncId to it.id }
+            readingLogDao.insertAll(
+                incoming.bookReadingLogs.map { log ->
+                    log.copy(
+                        id = localReadingLogIds[log.syncId] ?: 0L,
+                        bookId = bookIdBySyncId[log.bookSyncId] ?: 0L
+                    )
+                }
+            )
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
@@ -188,7 +204,8 @@ class AppDataImporter(
             todoCount = incoming.todos.size,
             bookCount = incoming.books.size,
             growthReportCount = incoming.growthReports.size,
-            moodLogCount = incoming.moodLogs.size
+            moodLogCount = incoming.moodLogs.size,
+            bookReadingLogCount = incoming.bookReadingLogs.size
         )
     }
 
@@ -207,6 +224,7 @@ class AppDataImporter(
         val previousReminders = database.todoDao().getPendingReminders()
 
         database.withTransaction {
+            database.bookReadingLogDao().clearAll()
             database.moodLogDao().clearAll()
             database.growthReportDao().clearAll()
             database.bookDao().clearAll()
@@ -267,6 +285,10 @@ class AppDataImporter(
             if (snapshot.books.isNotEmpty()) {
                 database.bookDao().insertAll(snapshot.books)
             }
+
+            if (snapshot.bookReadingLogs.isNotEmpty()) {
+                database.bookReadingLogDao().insertAll(snapshot.bookReadingLogs)
+            }
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
@@ -303,7 +325,8 @@ class AppDataImporter(
             todoCount = snapshot.todos.size,
             bookCount = snapshot.books.size,
             growthReportCount = snapshot.growthReports.size,
-            moodLogCount = snapshot.moodLogs.size
+            moodLogCount = snapshot.moodLogs.size,
+            bookReadingLogCount = snapshot.bookReadingLogs.size
         )
     }
 }

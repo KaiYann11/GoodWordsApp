@@ -27,7 +27,8 @@ enum class SyncEntityType {
     TODO,
     BOOK,
     GROWTH_REPORT,
-    MOOD_LOG;
+    MOOD_LOG,
+    BOOK_READING_LOG;
 
     companion object {
         fun fromNameOrNull(value: String?): SyncEntityType? =

@@ -26,12 +26,21 @@ data class DayScore(
     val todosDone: Int,
     val diaries: Int,
     val quotesRead: Int,
+    /** 그날 읽은 쪽을 남긴 책 수. 몇 쪽을 읽었는지가 아니라 **몇 권을 폈는지**입니다. */
+    val booksRead: Int = 0,
+    /** 그날 읽은 쪽수의 합. 덤 점수에는 세지 않습니다(아래 [deedCount] 설명). */
+    val pagesRead: Int = 0,
     /** 그날의 기분. 점수와는 상관없이 곁에 둡니다. */
     val mood: DiaryMood? = null
 ) {
-    /** 그날 한 일을 모두 센 수. 덤 점수의 바탕입니다. */
+    /**
+     * 그날 한 일을 모두 센 수. 덤 점수의 바탕입니다.
+     *
+     * **독서는 쪽수가 아니라 권으로 셉니다.** 쪽수로 세면 백 쪽 읽은 날 하나로 덤이 꽉 차서,
+     * 다른 걸음이 점수에서 사라집니다. 많이 읽은 것은 좋은 일이지 점수를 몰아 줄 일이 아닙니다.
+     */
     val deedCount: Int
-        get() = routineChecks + todosDone + diaries + quotesRead
+        get() = routineChecks + todosDone + diaries + quotesRead + booksRead
 
     /**
      * 고른 걸음을 얼마나 밟았는지. 다 밟으면 [STEP_POINTS]점입니다.
@@ -86,7 +95,8 @@ data class DayDigest(
     val routineTitles: List<String>,
     val todoTitles: List<String>,
     val diaryTitles: List<String>,
-    val quoteTitles: List<String>
+    val quoteTitles: List<String>,
+    val bookTitles: List<String> = emptyList()
 ) {
     val isEmpty: Boolean
         get() = score.isEmpty
@@ -142,6 +152,7 @@ object DayScoreCalculator {
         diaries: List<DiaryEntity>,
         moodLogs: List<MoodLogEntity> = emptyList(),
         steps: List<DailyStep> = DailyStep.DEFAULTS,
+        readingLogs: List<BookReadingLogEntity> = emptyList(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): DayDigest {
         val chosen = steps.distinct().ifEmpty { DailyStep.DEFAULTS }
@@ -155,12 +166,14 @@ object DayScoreCalculator {
         val quotesToday = events.filter {
             it.eventType == ExposureEventType.CONFIRMED && toDate(it.occurredAt, zoneId) == date
         }
+        val readToday = readingLogs.filter { parseDate(it.readDate) == date }
 
         val done = buildSet {
             if (quotesToday.isNotEmpty()) add(DailyStep.QUOTE)
             if (checksToday.isNotEmpty()) add(DailyStep.ROUTINE)
             if (todosToday.isNotEmpty()) add(DailyStep.TODO)
             if (diariesToday.isNotEmpty()) add(DailyStep.DIARY)
+            if (readToday.isNotEmpty()) add(DailyStep.READING)
         }
 
         val score = DayScore(
@@ -172,6 +185,8 @@ object DayScoreCalculator {
             todosDone = todosToday.size,
             diaries = diariesToday.size,
             quotesRead = quotesToday.size,
+            booksRead = readToday.size,
+            pagesRead = readToday.sumOf { it.pagesRead },
             // 그날의 기분은 DayMood가 정합니다. 여기서 따로 셈하면 화면마다 다른 말을 합니다.
             mood = DayMood.byDate(logs = moodLogs, diaries = diaries)[date]
         )
@@ -182,7 +197,9 @@ object DayScoreCalculator {
             routineTitles = checksToday.map { it.routineTitle }.filter { it.isNotBlank() }.distinct(),
             todoTitles = todosToday.map { it.title }.filter { it.isNotBlank() },
             diaryTitles = diariesToday.map { it.displayTitle.ifBlank { it.entryDate } },
-            quoteTitles = quotesToday.map { it.contentTitle }.filter { it.isNotBlank() }.distinct()
+            quoteTitles = quotesToday.map { it.contentTitle }.filter { it.isNotBlank() }.distinct(),
+            // 같은 책을 하루에 여러 번 적어도 한 줄입니다(하루에 책 하나당 기록 하나).
+            bookTitles = readToday.map { it.bookTitle }.filter { it.isNotBlank() }.distinct()
         )
     }
 
@@ -199,6 +216,7 @@ object DayScoreCalculator {
         todos: List<TodoEntity>,
         diaries: List<DiaryEntity>,
         steps: List<DailyStep> = DailyStep.DEFAULTS,
+        readingLogs: List<BookReadingLogEntity> = emptyList(),
         dayCount: Int = TREND_DAY_COUNT,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): ScoreTrend {
@@ -214,6 +232,7 @@ object DayScoreCalculator {
             .groupingBy { it }
             .eachCount()
         val diariesByDate = diaries.mapNotNull { parseDate(it.entryDate) }.groupingBy { it }.eachCount()
+        val readingByDate = readingLogs.mapNotNull { parseDate(it.readDate) }.groupingBy { it }.eachCount()
 
         val points = (dayCount - 1 downTo 0).map { daysAgo ->
             val date = today.minusDays(daysAgo.toLong())
@@ -221,12 +240,14 @@ object DayScoreCalculator {
             val checks = checksByDate[date] ?: 0
             val todosDone = todosByDate[date] ?: 0
             val diaryCount = diariesByDate[date] ?: 0
+            val booksRead = readingByDate[date] ?: 0
 
             val done = buildSet {
                 if (quotes > 0) add(DailyStep.QUOTE)
                 if (checks > 0) add(DailyStep.ROUTINE)
                 if (todosDone > 0) add(DailyStep.TODO)
                 if (diaryCount > 0) add(DailyStep.DIARY)
+                if (booksRead > 0) add(DailyStep.READING)
             }
 
             ScorePoint(
@@ -238,7 +259,8 @@ object DayScoreCalculator {
                     routineChecks = checks,
                     todosDone = todosDone,
                     diaries = diaryCount,
-                    quotesRead = quotes
+                    quotesRead = quotes,
+                    booksRead = booksRead
                 ).score
             )
         }

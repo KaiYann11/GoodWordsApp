@@ -31,11 +31,12 @@ class Migration17To18Test {
             .addMigrations(
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
-                AppDatabase.MIGRATION_19_20
+                AppDatabase.MIGRATION_19_20,
+                AppDatabase.MIGRATION_20_21
             ).allowMainThreadQueries().build()
         try {
             assertEquals(listOf(item), after.contentItemDao().getAll())
-            assertEquals(20, after.openHelper.writableDatabase.version)
+            assertEquals(21, after.openHelper.writableDatabase.version)
             val memo = item.copy(id = 2, syncId = "new-memo", type = ContentType.MEMO)
             after.contentItemDao().insert(memo)
             assertEquals(memo, after.contentItemDao().getById(2))

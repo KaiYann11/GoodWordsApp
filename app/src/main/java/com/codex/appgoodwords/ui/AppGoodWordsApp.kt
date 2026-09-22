@@ -196,6 +196,7 @@ fun AppGoodWordsApp(
     }
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val books by viewModel.books.collectAsStateWithLifecycle()
+    val bookReadingLogs by viewModel.bookReadingLogs.collectAsStateWithLifecycle()
     val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
     val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
     val diaryLockEnabled by viewModel.diaryLockEnabled.collectAsStateWithLifecycle()
@@ -709,6 +710,13 @@ fun AppGoodWordsApp(
                                     DailyStep.ROUTINE -> selectTab(AppTab.ROUTINE)
                                     DailyStep.TODO -> selectTab(AppTab.TODO)
                                     DailyStep.DIARY -> selectTab(AppTab.DIARY)
+                                    // 보관함 안의 독서 탭까지 데려갑니다. 보관함만 열면 글귀 탭이 나옵니다.
+                                    DailyStep.READING -> {
+                                        navStack = listOf(
+                                            tabRoute(AppTab.LIBRARY),
+                                            focusRoute(SearchKind.BOOK, 0L)
+                                        )
+                                    }
                                 }
                             },
                             latestReport = growthReports.firstOrNull(),
@@ -800,6 +808,13 @@ fun AppGoodWordsApp(
                                             .filter { it.bookSyncId.isNotBlank() }
                                             .groupingBy { it.bookSyncId }
                                             .eachCount()
+                                    },
+                                    // 같은 날 여러 번 적어도 하루입니다(하루에 책 하나당 기록 하나).
+                                    readingDaysBySyncId = remember(bookReadingLogs) {
+                                        bookReadingLogs
+                                            .filter { it.bookSyncId.isNotBlank() && it.readDate.isNotBlank() }
+                                            .groupBy { it.bookSyncId }
+                                            .mapValues { (_, logs) -> logs.map { it.readDate }.distinct().size }
                                     },
                                     onSaveBook = { draft ->
                                         coroutineScope.launch {

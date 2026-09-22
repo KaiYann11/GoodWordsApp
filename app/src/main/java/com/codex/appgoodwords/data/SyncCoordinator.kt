@@ -36,7 +36,8 @@ class SyncCoordinator(
         todos = database.todoDao().getAll(),
         books = database.bookDao().getAll(),
         growthReports = database.growthReportDao().getAll(),
-        moodLogs = database.moodLogDao().getAll()
+        moodLogs = database.moodLogDao().getAll(),
+        bookReadingLogs = database.bookReadingLogDao().getAll()
     )
 
     /**

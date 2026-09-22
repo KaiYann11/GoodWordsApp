@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -55,12 +57,16 @@ fun ContentItemCard(
     showTypeChip: Boolean = true
 ) {
     val context = LocalContext.current
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onOpenItem(item) },
-        shape = RoundedCornerShape(20.dp),
+            // 카드 전체가 눌리는 것이 보여야 탭이 먹었는지 압니다. 물결은 손가락에 가립니다.
+            .pressScale(interaction)
+            .clickable(interactionSource = interaction, indication = null) { onOpenItem(item) },
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -175,7 +181,13 @@ fun ContentItemCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    TextButton(onClick = { onConfirmItem(item) }) {
+                    TextButton(
+                        onClick = {
+                            // 읽었다는 기록이 남는 일입니다. 취소는 고치는 일이라 가볍게 둡니다.
+                            if (confirmedToday) haptics.tap() else haptics.commit()
+                            onConfirmItem(item)
+                        }
+                    ) {
                         Icon(
                             imageVector = if (confirmedToday) Icons.Outlined.DoneAll else Icons.Outlined.Done,
                             contentDescription = if (confirmedToday) "오늘 확인 완료" else "오늘 확인"

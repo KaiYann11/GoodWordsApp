@@ -26,7 +26,8 @@ class AppRepository(
     private val todoDao: TodoDao? = null,
     private val bookDao: BookDao? = null,
     private val growthReportDao: GrowthReportDao? = null,
-    private val moodLogDao: MoodLogDao? = null
+    private val moodLogDao: MoodLogDao? = null,
+    private val bookReadingLogDao: BookReadingLogDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -630,7 +631,11 @@ class AppRepository(
     }
 
     /** 읽은 쪽수만 고칩니다. 다 읽으면 상태도 함께 넘깁니다. */
-    suspend fun updateBookProgress(id: Long, currentPage: Int): BookEntity? {
+    suspend fun updateBookProgress(
+        id: Long,
+        currentPage: Int,
+        today: LocalDate = LocalDate.now()
+    ): BookEntity? {
         val dao = bookDao ?: return null
         val existing = dao.getById(id) ?: return null
         val page = currentPage.coerceAtLeast(0).let { value ->
@@ -645,8 +650,39 @@ class AppRepository(
             finishedAt = if (finished) existing.finishedAt ?: System.currentTimeMillis() else null
         )
         dao.insert(updated)
+        recordReading(book = updated, previousPage = existing.currentPage, today = today)
         return updated
     }
+
+    /**
+     * 오늘 이 책을 읽었다고 남깁니다.
+     *
+     * 책에는 마지막 쪽만 남아서, 이것이 없으면 "언제 읽었는지"를 되짚을 수 없습니다
+     * ([BookReadingLogEntity]). 하루에 책 하나당 한 줄이고, 같은 날 또 적으면 마지막 쪽만
+     * 올립니다. **처음 적을 때의 앞쪽은 그대로 둡니다** — 그래야 그날 읽은 쪽수가 맞습니다.
+     */
+    private suspend fun recordReading(book: BookEntity, previousPage: Int, today: LocalDate) {
+        val dao = bookReadingLogDao ?: return
+        val readDate = today.toString()
+        val existing = dao.getByBookAndDate(bookId = book.id, readDate = readDate)
+        val saved = existing?.copy(
+            updatedAt = System.currentTimeMillis(),
+            bookSyncId = book.syncId,
+            bookTitle = book.title,
+            endPage = book.currentPage
+        ) ?: BookReadingLogEntity(
+            bookId = book.id,
+            bookSyncId = book.syncId,
+            bookTitle = book.title,
+            readDate = readDate,
+            startPage = previousPage.coerceAtLeast(0),
+            endPage = book.currentPage
+        )
+        dao.insert(saved)
+    }
+
+    fun observeBookReadingLogs(): Flow<List<BookReadingLogEntity>> =
+        bookReadingLogDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
     /** 다 읽음/다시 읽는 중을 오갑니다. */
     suspend fun toggleBookFinished(id: Long): BookEntity? {

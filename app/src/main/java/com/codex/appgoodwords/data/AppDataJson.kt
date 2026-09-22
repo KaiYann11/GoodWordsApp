@@ -21,6 +21,8 @@ data class AppDataSnapshot(
     val books: List<BookEntity> = emptyList(),
     val growthReports: List<GrowthReportEntity> = emptyList(),
     val moodLogs: List<MoodLogEntity> = emptyList(),
+    /** 날짜별 독서 기록. 책에는 마지막 쪽만 남아서, 언제 읽었는지는 여기에만 있습니다. */
+    val bookReadingLogs: List<BookReadingLogEntity> = emptyList(),
     /** 글귀에 달아 둔 메모. 루틴 메모와 같은 자리이되 붙는 곳이 다릅니다. */
     val contentMemos: List<ContentMemoEntity> = emptyList(),
     /**
@@ -46,11 +48,11 @@ data class AppDataSnapshot(
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
             contentMemos.size + diaries.size + todos.size + books.size + growthReports.size +
-            moodLogs.size
+            moodLogs.size + bookReadingLogs.size
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 20
+    const val schemaVersion: Int = 21
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -134,6 +136,13 @@ object AppDataJson {
                 snapshot.moodLogs.forEach { log -> put(log.toJson()) }
             }
         )
+        .put("bookReadingLogCount", snapshot.bookReadingLogs.size)
+        .put(
+            "bookReadingLogs",
+            JSONArray().apply {
+                snapshot.bookReadingLogs.forEach { log -> put(log.toJson()) }
+            }
+        )
         .put("contentMemoCount", snapshot.contentMemos.size)
         .put(
             "contentMemos",
@@ -161,6 +170,7 @@ object AppDataJson {
             books = payload.optJSONArray("books").toBooks(),
             growthReports = payload.optJSONArray("growthReports").toGrowthReports(),
             moodLogs = payload.optJSONArray("moodLogs").toMoodLogs(),
+            bookReadingLogs = payload.optJSONArray("bookReadingLogs").toBookReadingLogs(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -230,6 +240,46 @@ object AppDataJson {
         .put("guide", guide)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
+
+    private fun BookReadingLogEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("bookId", bookId)
+        .put("bookSyncId", bookSyncId)
+        .put("bookTitle", bookTitle)
+        .put("readDate", readDate)
+        .put("startPage", startPage)
+        .put("endPage", endPage)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toBookReadingLogs(): List<BookReadingLogEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val log = optJSONObject(index) ?: continue
+                val readDate = log.optString("readDate")
+                // 어느 날 읽은 것인지 모르면 걸음에도 그래프에도 놓을 수 없습니다.
+                if (readDate.isBlank()) continue
+                add(
+                    BookReadingLogEntity(
+                        id = log.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(log.optString("syncId")),
+                        updatedAt = log.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: log.optLong("createdAt", 0L),
+                        bookId = log.optLong("bookId", 0L),
+                        bookSyncId = log.optString("bookSyncId"),
+                        bookTitle = log.optString("bookTitle"),
+                        readDate = readDate,
+                        startPage = log.optInt("startPage", 0),
+                        endPage = log.optInt("endPage", 0),
+                        createdAt = log.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
 
     private fun MoodLogEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)

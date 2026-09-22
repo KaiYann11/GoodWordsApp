@@ -245,6 +245,7 @@ class DailyLoopTest {
         diaryOn: List<LocalDate> = emptyList(),
         todoDoneOn: List<LocalDate> = emptyList(),
         steps: List<DailyStep> = DailyStep.DEFAULTS,
+        readOn: List<LocalDate> = emptyList(),
         brokenDiaryDates: List<String> = emptyList()
     ): DailyProgress = DailyLoopCalculator.build(
         events = confirmedOn.map { event(it, ExposureEventType.CONFIRMED) } +
@@ -273,8 +274,59 @@ class DailyLoopTest {
             },
         today = today,
         steps = steps,
+        readingLogs = readOn.mapIndexed { index, date ->
+            BookReadingLogEntity(
+                syncId = "reading-$index",
+                bookId = 1,
+                bookSyncId = "book-1",
+                bookTitle = "아주 작은 습관의 힘",
+                readDate = date.toString(),
+                startPage = 10,
+                endPage = 30
+            )
+        },
         zoneId = zone
     )
+
+    @Test
+    fun readingCountsTheDayThePageWasRecorded() {
+        // 책에는 마지막 쪽만 남아서, 읽은 날은 독서 기록에서만 알 수 있습니다.
+        val progress = build(steps = listOf(DailyStep.READING), readOn = listOf(today))
+
+        assertTrue(progress.isComplete)
+        assertEquals(setOf(DailyStep.READING), progress.doneSteps)
+        assertEquals(1, progress.streakDays)
+    }
+
+    @Test
+    fun aDayWithoutAPageRecordIsNotAReadingDay() {
+        // 책을 담아 두기만 한 날은 읽은 날이 아닙니다.
+        val progress = build(steps = listOf(DailyStep.READING), readOn = listOf(today.minusDays(1)))
+
+        assertFalse(progress.isComplete)
+        assertEquals(DailyStep.READING, progress.nextStep)
+        // 어제까지 이어 온 것은 지켜 줍니다. 아침에 0일로 보이면 쌓은 것이 사라진 것처럼 느껴집니다.
+        assertEquals(1, progress.streakDays)
+    }
+
+    @Test
+    fun readingJoinsTheOtherStepsOnlyWhenItIsChosen() {
+        // 고르지 않은 걸음은 밟았어도 오늘의 걸음에 들어오지 않습니다.
+        val chosen = build(
+            confirmedOn = listOf(today),
+            steps = listOf(DailyStep.QUOTE, DailyStep.READING),
+            readOn = listOf(today)
+        )
+        assertTrue(chosen.isComplete)
+
+        val notChosen = build(
+            confirmedOn = listOf(today),
+            steps = listOf(DailyStep.QUOTE),
+            readOn = listOf(today)
+        )
+        assertTrue(notChosen.isComplete)
+        assertFalse(DailyStep.READING in notChosen.doneSteps)
+    }
 
     private fun event(date: LocalDate, type: ExposureEventType) = ExposureEventEntity(
         syncId = "event-$date-$type",

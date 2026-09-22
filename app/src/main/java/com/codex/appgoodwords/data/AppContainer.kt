@@ -35,7 +35,8 @@ class AppContainer(
                 AppDatabase.MIGRATION_16_17,
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
-                AppDatabase.MIGRATION_19_20
+                AppDatabase.MIGRATION_19_20,
+                AppDatabase.MIGRATION_20_21
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -74,7 +75,8 @@ class AppContainer(
             todoDao = database.todoDao(),
             bookDao = database.bookDao(),
             growthReportDao = database.growthReportDao(),
-            moodLogDao = database.moodLogDao()
+            moodLogDao = database.moodLogDao(),
+            bookReadingLogDao = database.bookReadingLogDao()
         )
     }
 

@@ -107,6 +107,14 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            // 같은 날 같은 책을 두 기기에서 각각 적을 수 있습니다. 나중에 적은 쪽이 그날 닿은 쪽입니다.
+            bookReadingLogs = mergeMutable(
+                local = local.bookReadingLogs,
+                remote = remote.bookReadingLogs,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }

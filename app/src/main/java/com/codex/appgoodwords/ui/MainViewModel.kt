@@ -11,6 +11,7 @@ import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.BookEntity
+import com.codex.appgoodwords.data.BookReadingLogEntity
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ConceptExplanation
 import com.codex.appgoodwords.data.ContentNormalizer
@@ -85,6 +86,10 @@ class MainViewModel(
     val moodLogs = container.repository.observeMoodLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** 날짜별 독서 기록. 독서 걸음과 점수가 "언제 읽었는지"를 여기서 봅니다. */
+    val bookReadingLogs = container.repository.observeBookReadingLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val growthReports = container.repository.observeGrowthReports()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -145,19 +150,19 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyStep.DEFAULTS)
 
     val dailyLoop = combine(
-        historyEvents,
-        routineChecks,
-        todos,
-        diaries,
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
+        },
         container.settingsStore.dailyStepsFlow
-    ) { events, checks, todoList, diaryList, steps ->
+    ) { inputs, steps ->
         DailyLoopCalculator.build(
-            events = events,
-            routineChecks = checks,
-            todos = todoList,
-            diaries = diaryList,
+            events = inputs.events,
+            routineChecks = inputs.routineChecks,
+            todos = inputs.todos,
+            diaries = inputs.diaries,
             today = LocalDate.now(),
-            steps = steps
+            steps = steps,
+            readingLogs = inputs.readingLogs
         )
     }.stateIn(
         viewModelScope,
@@ -182,19 +187,19 @@ class MainViewModel(
      * 새 기준이 됩니다([DayScoreCalculator]).
      */
     val scoreTrend = combine(
-        historyEvents,
-        routineChecks,
-        todos,
-        diaries,
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
+        },
         container.settingsStore.dailyStepsFlow
-    ) { events, checks, todoList, diaryList, steps ->
+    ) { inputs, steps ->
         DayScoreCalculator.trend(
             today = LocalDate.now(),
-            events = events,
-            routineChecks = checks,
-            todos = todoList,
-            diaries = diaryList,
-            steps = steps
+            events = inputs.events,
+            routineChecks = inputs.routineChecks,
+            todos = inputs.todos,
+            diaries = inputs.diaries,
+            steps = steps,
+            readingLogs = inputs.readingLogs
         )
     }.stateIn(
         viewModelScope,
@@ -204,8 +209,8 @@ class MainViewModel(
 
     /** 오늘 점수. 홈 카드가 씁니다. 흐름의 마지막 점과 같은 규칙으로 셈합니다. */
     val todayScore = combine(
-        combine(historyEvents, routineChecks, todos, diaries) { events, checks, todoList, diaryList ->
-            DayInputs(events, checks, todoList, diaryList)
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
         },
         moodLogs,
         container.settingsStore.dailyStepsFlow
@@ -217,7 +222,8 @@ class MainViewModel(
             todos = inputs.todos,
             diaries = inputs.diaries,
             moodLogs = logs,
-            steps = steps
+            steps = steps,
+            readingLogs = inputs.readingLogs
         ).score
     }.stateIn(
         viewModelScope,
@@ -244,8 +250,8 @@ class MainViewModel(
      */
     val openedDayDigest = combine(
         _openedDay,
-        combine(historyEvents, routineChecks, todos, diaries) { events, checks, todoList, diaryList ->
-            DayInputs(events, checks, todoList, diaryList)
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
         },
         moodLogs,
         container.settingsStore.dailyStepsFlow
@@ -258,7 +264,8 @@ class MainViewModel(
                 todos = inputs.todos,
                 diaries = inputs.diaries,
                 moodLogs = logs,
-                steps = steps
+                steps = steps,
+                readingLogs = inputs.readingLogs
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -1078,7 +1085,8 @@ private data class DayInputs(
     val events: List<ExposureEventEntity>,
     val routineChecks: List<RoutineCheckEntity>,
     val todos: List<TodoEntity>,
-    val diaries: List<DiaryEntity>
+    val diaries: List<DiaryEntity>,
+    val readingLogs: List<BookReadingLogEntity> = emptyList()
 )
 
 /** combine이 한 번에 넷까지만 받아서, 통계에 넣을 것들을 한 덩어리로 묶습니다. */

@@ -23,6 +23,7 @@ object SyncDeduplicator {
         val books = resolve(snapshot.books, { it.syncId }, { it.updatedAt }, ::bookFingerprint)
         val reports = resolve(snapshot.growthReports, { it.syncId }, { it.updatedAt }, ::reportFingerprint)
         val moodLogs = resolve(snapshot.moodLogs, { it.syncId }, { it.updatedAt }, ::moodLogFingerprint)
+        val readingLogs = resolve(snapshot.bookReadingLogs, { it.syncId }, { it.updatedAt }, ::readingLogFingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -40,6 +41,11 @@ object SyncDeduplicator {
             books = books.kept,
             growthReports = reports.kept,
             moodLogs = moodLogs.kept,
+            // 사라진 책을 가리키던 독서 기록은 남은 책으로 옮겨 붙입니다.
+            bookReadingLogs = readingLogs.kept.map { log ->
+                if (log.bookSyncId.isBlank()) log
+                else log.copy(bookSyncId = books.survivorOf(log.bookSyncId))
+            },
             events = snapshot.events.map { event ->
                 event.copy(contentItemSyncId = items.survivorOf(event.contentItemSyncId))
             },
@@ -165,6 +171,15 @@ object SyncDeduplicator {
      * 서버 `moodLogFingerprint`와 같아야 합니다.
      */
     private fun moodLogFingerprint(log: MoodLogEntity): String = log.entryDate.trim()
+
+    /**
+     * 하루에 책 하나당 하나입니다. 읽은 쪽수는 견주지 않습니다.
+     *
+     * 두 기기에서 같은 날 같은 책을 적으면 쪽수가 서로 다르기 마련인데, 그것까지 견주면
+     * 둘 다 남아 그날 읽은 쪽수가 겹쳐 세집니다. 서버 `readingLogFingerprint`와 같아야 합니다.
+     */
+    private fun readingLogFingerprint(log: BookReadingLogEntity): String =
+        log.bookSyncId.trim() + "|" + log.readDate.trim()
 
     /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 봅니다. */
     private fun normalize(value: String): String = value.trim().lowercase().replace(WHITESPACE, " ")

@@ -67,6 +67,13 @@ fun BookScreen(
     modifier: Modifier = Modifier,
     /** 책마다 그 책에서 뽑은 글귀가 몇 개인지. syncId로 셉니다. */
     quoteCountBySyncId: Map<String, Int> = emptyMap(),
+    /**
+     * 책마다 읽은 쪽을 남긴 날이 며칠인지. syncId로 셉니다.
+     *
+     * 진도만 보면 "어디까지 왔는지"만 보이고 "얼마나 자주 폈는지"는 안 보입니다.
+     * 독서를 하루의 걸음으로 삼은 사람에게는 그쪽이 더 중요합니다.
+     */
+    readingDaysBySyncId: Map<String, Int> = emptyMap(),
     /** 검색에서 고른 책. 그 자리로 굴려 주고 잠깐 강조합니다. */
     focusId: Long? = null
 ) {
@@ -140,6 +147,7 @@ fun BookScreen(
                     focused = book.id == focusId,
                     focusKey = focusId,
                     quoteCount = quoteCountBySyncId[book.syncId] ?: 0,
+                    readingDays = readingDaysBySyncId[book.syncId] ?: 0,
                     onEdit = { editing = BookDraft.from(book) },
                     onProgress = { progressTarget = book },
                     onToggleFinished = { onToggleFinished(book.id) },
@@ -157,6 +165,7 @@ fun BookScreen(
                     focused = book.id == focusId,
                     focusKey = focusId,
                     quoteCount = quoteCountBySyncId[book.syncId] ?: 0,
+                    readingDays = readingDaysBySyncId[book.syncId] ?: 0,
                     onEdit = { editing = BookDraft.from(book) },
                     onProgress = { progressTarget = book },
                     onToggleFinished = { onToggleFinished(book.id) },
@@ -231,6 +240,7 @@ private fun SectionTitle(text: String) {
 private fun BookCard(
     book: BookEntity,
     quoteCount: Int,
+    readingDays: Int = 0,
     onEdit: () -> Unit,
     onProgress: () -> Unit,
     onToggleFinished: () -> Unit,
@@ -282,12 +292,23 @@ private fun BookCard(
             if (book.note.isNotBlank()) {
                 Text(book.note, style = MaterialTheme.typography.bodyMedium)
             }
-            if (quoteCount > 0) {
-                Text(
-                    text = "이 책에서 뽑은 글귀 ${quoteCount}개",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            if (quoteCount > 0 || readingDays > 0) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (readingDays > 0) {
+                        Text(
+                            text = "읽은 날 ${readingDays}일",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (quoteCount > 0) {
+                        Text(
+                            text = "뽑은 글귀 ${quoteCount}개",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

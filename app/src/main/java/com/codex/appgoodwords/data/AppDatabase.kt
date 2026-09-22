@@ -19,9 +19,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TodoEntity::class,
         BookEntity::class,
         GrowthReportEntity::class,
-        MoodLogEntity::class
+        MoodLogEntity::class,
+        BookReadingLogEntity::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -38,8 +39,46 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun growthReportDao(): GrowthReportDao
     abstract fun moodLogDao(): MoodLogDao
+    abstract fun bookReadingLogDao(): BookReadingLogDao
 
     companion object {
+        /**
+         * 날짜별 독서 기록을 담을 자리를 만듭니다.
+         *
+         * 지난 기록은 옮겨 올 것이 없습니다. 책에는 마지막 쪽만 남아 있어서 언제 읽었는지
+         * 알 수 없기 때문입니다. 독서 걸음은 이 표가 쌓이는 오늘부터 셉니다.
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS book_reading_logs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "bookId INTEGER NOT NULL, " +
+                        "bookSyncId TEXT NOT NULL, " +
+                        "bookTitle TEXT NOT NULL, " +
+                        "readDate TEXT NOT NULL, " +
+                        "startPage INTEGER NOT NULL, " +
+                        "endPage INTEGER NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_book_reading_logs_syncId " +
+                        "ON book_reading_logs (syncId)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_book_reading_logs_bookSyncId " +
+                        "ON book_reading_logs (bookSyncId)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_book_reading_logs_readDate " +
+                        "ON book_reading_logs (readDate)"
+                )
+            }
+        }
+
         /** 테이블은 그대로 두고, 개념 종류를 모르는 앱·서버와 형식을 구분합니다. */
         val MIGRATION_19_20 = object : Migration(19, 20) {
             override fun migrate(database: SupportSQLiteDatabase) = Unit

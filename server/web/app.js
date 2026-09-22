@@ -345,6 +345,7 @@ function emptySnapshot() {
     books: [],
     growthReports: [],
     moodLogs: [],
+    bookReadingLogs: [],
     settings: {},
   };
 }
@@ -1014,6 +1015,14 @@ function renderBooks() {
     if (!item.bookSyncId) continue;
     quoteCounts.set(item.bookSyncId, (quoteCounts.get(item.bookSyncId) || 0) + 1);
   }
+  // 책마다 읽은 날이 며칠인지. 읽은 쪽을 올린 날만 셉니다(앱의 독서 걸음과 같은 기준).
+  const readingDays = new Map();
+  for (const log of state.snapshot.bookReadingLogs || []) {
+    if (!log.bookSyncId || !log.readDate) continue;
+    const days = readingDays.get(log.bookSyncId) || new Set();
+    days.add(log.readDate);
+    readingDays.set(log.bookSyncId, days);
+  }
 
   app.innerHTML = `
     <section class="grid two">
@@ -1050,8 +1059,8 @@ function renderBooks() {
         ${quoting ? bookQuoteForm(quoting) : ""}
       </div>
       <section>
-        ${bookGroup(`읽고 있는 책 ${reading.length}권`, reading, quoteCounts)}
-        ${bookGroup(`읽은 책 ${finished.length}권`, finished, quoteCounts)}
+        ${bookGroup(`읽고 있는 책 ${reading.length}권`, reading, quoteCounts, readingDays)}
+        ${bookGroup(`읽은 책 ${finished.length}권`, finished, quoteCounts, readingDays)}
         ${books.length ? "" : empty("아직 담아 둔 책이 없습니다.")}
       </section>
     </section>
@@ -1083,15 +1092,18 @@ function bookQuoteForm(book) {
   `;
 }
 
-function bookGroup(title, books, quoteCounts) {
+function bookGroup(title, books, quoteCounts, readingDays) {
   if (!books.length) return "";
+  const cards = books
+    .map((book) => bookCard(book, quoteCounts.get(book.syncId) || 0, (readingDays.get(book.syncId) || new Set()).size))
+    .join("");
   return `
     <h2 class="sectionTitle">${escapeHtml(title)}</h2>
-    <div class="itemList">${books.map((book) => bookCard(book, quoteCounts.get(book.syncId) || 0)).join("")}</div>
+    <div class="itemList">${cards}</div>
   `;
 }
 
-function bookCard(book, quoteCount) {
+function bookCard(book, quoteCount, readingDayCount) {
   const finished = book.status === "FINISHED";
   // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
   const ratio = book.totalPages > 0 ? Math.min(1, book.currentPage / book.totalPages) : null;
@@ -1109,6 +1121,7 @@ function bookCard(book, quoteCount) {
             <span class="chip">${escapeHtml(book.author || "저자 미상")}</span>
             <span class="chip">${escapeHtml(progressText)}</span>
             ${quoteCount ? `<span class="chip">뽑은 글귀 ${quoteCount}개</span>` : ""}
+            ${readingDayCount ? `<span class="chip">읽은 날 ${readingDayCount}일</span>` : ""}
           </div>
         </div>
         <button type="button" data-action="toggle-book-finished" data-id="${book.id}">

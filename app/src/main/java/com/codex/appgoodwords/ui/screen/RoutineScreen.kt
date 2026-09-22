@@ -668,6 +668,7 @@ private fun RoutineCard(
     focusKey: Any? = null
 ) {
     val checkedToday = todayCount > 0
+    val haptics = rememberHaptics()
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -803,7 +804,11 @@ private fun RoutineCard(
                     Text("메모 $memoCount")
                 }
                 Button(
-                    onClick = { onCheckRoutine(routine) },
+                    // 기록이 남는 일이라 손에 한 번 닿게 합니다. 오늘 한 일이 하나 늘어납니다.
+                    onClick = {
+                        haptics.commit()
+                        onCheckRoutine(routine)
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(

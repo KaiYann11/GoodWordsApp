@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -36,7 +37,7 @@ class DailyLoopCardTest {
         }
 
         compose.onNodeWithText("오늘의 3걸음").assertIsDisplayed()
-        compose.onNodeWithText("1 / 3").assertIsDisplayed()
+        compose.onNodeWithContentDescription("3걸음 중 1걸음").assertIsDisplayed()
         // 지금 할 것에만 안내를 답니다. 모든 줄이 설명을 달면 어느 것부터인지 모릅니다.
         compose.onNodeWithText(DailyStep.ROUTINE.hint).assertIsDisplayed()
         compose.onNodeWithText(DailyStep.DIARY.hint).assertDoesNotExist()
@@ -60,7 +61,7 @@ class DailyLoopCardTest {
         }
 
         compose.onNodeWithText("오늘의 2걸음").assertIsDisplayed()
-        compose.onNodeWithText("1 / 2").assertIsDisplayed()
+        compose.onNodeWithContentDescription("2걸음 중 1걸음").assertIsDisplayed()
         compose.onNodeWithTag(dailyLoopStepTag(DailyStep.TODO)).assertIsDisplayed()
         compose.onNodeWithTag(dailyLoopStepTag(DailyStep.QUOTE)).assertDoesNotExist()
     }
@@ -118,7 +119,7 @@ class DailyLoopCardTest {
             )
         }
 
-        compose.onNodeWithText("3 / 3").assertIsDisplayed()
+        compose.onNodeWithContentDescription("3걸음 중 3걸음").assertIsDisplayed()
         compose.onNodeWithText("오늘도 3걸음을 다 밟았습니다. 3일째 이어 가는 중입니다.").assertIsDisplayed()
     }
 

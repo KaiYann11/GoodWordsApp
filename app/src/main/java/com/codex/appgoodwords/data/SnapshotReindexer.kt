@@ -21,6 +21,8 @@ object SnapshotReindexer {
         // 루틴이 뽑아낸 글귀를 가리키지만 숫자 id가 아니라 sourceContentSyncId로 가리켜서
         // 번호가 바뀌어도 그대로다.
         val routines = snapshot.routines.mapIndexed { index, routine -> routine.copy(id = index + 1L) }
+        val books = snapshot.books.mapIndexed { index, book -> book.copy(id = index + 1L) }
+        val bookIdBySyncId = books.associate { it.syncId to it.id }
         val itemIdBySyncId = items.associate { it.syncId to it.id }
         val routineIdBySyncId = routines.associate { it.syncId to it.id }
 
@@ -68,9 +70,14 @@ object SnapshotReindexer {
             // 글귀가 책을 가리키지만 숫자 id가 아니라 bookSyncId로 가리켜서 번호가 바뀌어도 그대로다.
             diaries = snapshot.diaries.mapIndexed { index, diary -> diary.copy(id = index + 1L) },
             todos = snapshot.todos.mapIndexed { index, todo -> todo.copy(id = index + 1L) },
-            books = snapshot.books.mapIndexed { index, book -> book.copy(id = index + 1L) },
+            books = books,
             growthReports = snapshot.growthReports.mapIndexed { index, report -> report.copy(id = index + 1L) },
-            moodLogs = snapshot.moodLogs.mapIndexed { index, log -> log.copy(id = index + 1L) }
+            moodLogs = snapshot.moodLogs.mapIndexed { index, log -> log.copy(id = index + 1L) },
+            // 독서 기록은 책이 지워진 뒤에도 남습니다(읽은 것은 책과 별개로 이미 내가 한 일입니다).
+            // 그래서 이력처럼 부모를 못 찾아도 버리지 않고 숫자 id만 0으로 끊습니다.
+            bookReadingLogs = snapshot.bookReadingLogs.mapIndexed { index, log ->
+                log.copy(id = index + 1L, bookId = bookIdBySyncId[log.bookSyncId] ?: 0L)
+            }
         )
     }
 

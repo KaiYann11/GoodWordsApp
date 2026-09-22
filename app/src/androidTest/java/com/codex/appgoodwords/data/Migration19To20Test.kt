@@ -20,9 +20,9 @@ class Migration19To20Test {
         } finally { before.close() }
 
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_19_20).build()
+            .addMigrations(AppDatabase.MIGRATION_19_20, AppDatabase.MIGRATION_20_21).build()
         try {
-            assertEquals(20, after.openHelper.writableDatabase.version)
+            assertEquals(21, after.openHelper.writableDatabase.version)
             assertEquals(inbox, after.contentItemDao().getById(inbox.id))
             val concept = inbox.copy(type = ContentType.CONCEPT, updatedAt = inbox.updatedAt + 1)
             after.contentItemDao().insert(concept)

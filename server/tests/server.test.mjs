@@ -149,6 +149,7 @@ function emptySnapshot(overrides = {}) {
     books: [],
     growthReports: [],
     moodLogs: [],
+    bookReadingLogs: [],
     ...overrides,
   };
 }
@@ -2413,7 +2414,8 @@ describe("임시저장소와 메모", () => {
     }));
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
-    assert.equal(stored.schemaVersion, 20);
+    // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
+    assert.equal(stored.schemaVersion, 21);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2587,6 +2589,115 @@ describe("오늘 기분", () => {
     const stored = await (await api("/api/snapshot")).json();
 
     assert.equal(stored.moodLogs.length, 2);
+  });
+});
+
+describe("독서 기록", () => {
+  function readingLog(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "reading-1",
+      updatedAt: 1_000,
+      bookId: 1,
+      bookSyncId: "book-1",
+      bookTitle: "아주 작은 습관의 힘",
+      readDate: "2026-09-23",
+      startPage: 10,
+      endPage: 42,
+      createdAt: 1_000,
+      ...overrides,
+    };
+  }
+
+  it("날짜별 독서 기록이 스냅샷에 그대로 남는다", async () => {
+    // 여기서 버리면 앱의 독서 걸음이 올릴 때마다 사라져, 연속 날수가 기기마다 달라진다.
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ bookReadingLogs: [readingLog()] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.bookReadingLogs.length, 1);
+    assert.equal(stored.bookReadingLogs[0].readDate, "2026-09-23");
+    assert.equal(stored.bookReadingLogs[0].endPage, 42);
+    assert.equal(stored.bookReadingLogCount, 1);
+  });
+
+  it("날짜가 없는 기록은 버린다", async () => {
+    // 어느 날 읽은 것인지 모르면 걸음에도 그래프에도 놓을 수 없다.
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({ bookReadingLogs: [readingLog({ readDate: "" })] }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.bookReadingLogs.length, 0);
+  });
+
+  it("두 기기가 같은 날 같은 책을 적으면 한 줄로 합치고 사라진 쪽에 표식을 남긴다", async () => {
+    // 쪽수까지 견주면 둘 다 남아 그날 읽은 쪽수가 겹쳐 세진다.
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          bookReadingLogs: [
+            readingLog({ id: 1, syncId: "reading-a", updatedAt: 1_000, endPage: 42 }),
+            readingLog({ id: 2, syncId: "reading-b", updatedAt: 2_000, endPage: 77 }),
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.bookReadingLogs.length, 1);
+    assert.equal(merged.bookReadingLogs[0].syncId, "reading-b");
+    assert.equal(merged.bookReadingLogs[0].endPage, 77);
+    // 바뀐 것만 받는 기기도 사라진 사실을 들어야 한다.
+    assert.ok(merged.deletions.some((entry) => entry.entityType === "BOOK_READING_LOG"));
+  });
+
+  it("다른 날이거나 다른 책이면 합치지 않는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          bookReadingLogs: [
+            readingLog({ id: 1, syncId: "reading-a" }),
+            readingLog({ id: 2, syncId: "reading-b", readDate: "2026-09-24" }),
+            readingLog({ id: 3, syncId: "reading-c", bookSyncId: "book-2" }),
+          ],
+        }),
+      })
+    ).json();
+
+    assert.equal(merged.bookReadingLogs.length, 3);
+  });
+
+  it("웹에서 읽은 쪽을 올리면 그날 읽은 것으로 남는다", async () => {
+    // 앱과 웹이 같은 날을 세야 독서 걸음이 기기마다 달라지지 않는다.
+    const book = await (await api("/api/books", { method: "POST", body: { title: "읽는 중인 책", currentPage: 10 } })).json();
+    await api(`/api/books/${book.id}`, { method: "PUT", body: { ...book, currentPage: 55 } });
+
+    const stored = await (await api("/api/snapshot")).json();
+    const logs = stored.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId);
+
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].endPage, 55);
+    // 하루에 책 하나당 한 줄이다. 한 번 더 올려도 줄이 늘지 않고 마지막 쪽만 오른다.
+    await api(`/api/books/${book.id}`, { method: "PUT", body: { ...book, currentPage: 80 } });
+    const again = await (await api("/api/snapshot")).json();
+    const sameDay = again.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId);
+    assert.equal(sameDay.length, 1);
+    assert.equal(sameDay[0].endPage, 80);
+  });
+
+  it("제목만 고친 날은 읽은 날로 세지 않는다", async () => {
+    const book = await (await api("/api/books", { method: "POST", body: { title: "안 읽은 책", currentPage: 0 } })).json();
+    await api(`/api/books/${book.id}`, { method: "PUT", body: { ...book, title: "이름만 고친 책" } });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId).length, 0);
   });
 });
 

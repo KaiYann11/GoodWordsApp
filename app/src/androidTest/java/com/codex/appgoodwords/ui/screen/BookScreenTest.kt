@@ -104,7 +104,7 @@ class BookScreenTest {
             )
         }
 
-        compose.onNodeWithText("이 책에서 뽑은 글귀 3개").assertIsDisplayed()
+        compose.onNodeWithText("뽑은 글귀 3개").assertIsDisplayed()
     }
 
     @Test

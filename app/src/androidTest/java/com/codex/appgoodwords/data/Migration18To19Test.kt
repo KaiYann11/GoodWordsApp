@@ -24,9 +24,9 @@ class Migration18To19Test {
             before.openHelper.writableDatabase.version = 18
         } finally { before.close() }
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_18_19, AppDatabase.MIGRATION_19_20).build()
+            .addMigrations(AppDatabase.MIGRATION_18_19, AppDatabase.MIGRATION_19_20, AppDatabase.MIGRATION_20_21).build()
         try {
-            assertEquals(20, after.openHelper.writableDatabase.version)
+            assertEquals(21, after.openHelper.writableDatabase.version)
             assertEquals(items.sortedBy { it.id }, after.contentItemDao().getAll().sortedBy { it.id })
             assertEquals(listOf(routine), after.routineDao().getAll())
             val rule = items.first().copy(id = 4, syncId = "new-rule", type = ContentType.NOT_TO_DO, body = "")

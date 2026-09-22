@@ -86,7 +86,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 20입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 21입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -243,7 +243,18 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 `DailyProgress.steps`를 쓰세요. 안 고른 걸음이 남으면 채울 수 없는 하나 때문에 이어 온 날이
 매일 끊깁니다. **연속 날수는 저장하지 않고 기록에서 다시 셉니다.** 그래서 축을 바꾸면 지난
 날수도 곧바로 새 기준이 됩니다. 저장해 두면 옛 기준으로 쌓인 숫자와 새 기준이 섞입니다.
-걸음을 늘리면 `DailyLoopCalculator`의 `daysByStep`과 앱의 탭 이동(`selectTab`)을 함께 늘립니다.
+걸음을 늘리면 **여섯 군데**를 함께 늘립니다 — `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`의
+`digest`와 `trend` · 홈의 탭 이동(`AppGoodWordsApp`의 `onOpenStep`) · 걸음마다 다른 색(`stepColors`) ·
+설정 화면(`DailyStep.entries`를 그대로 훑으므로 대개 저절로 됩니다). 셈하는 자리를 빠뜨리면 그 걸음은
+카드에서 영영 안 밟힌 것으로 남고, 고른 사람의 연속 날수가 매일 끊깁니다.
+
+**독서 걸음(`READING`)은 날짜별 기록을 봅니다(`BookReadingLogEntity`).** 책에는 마지막 쪽만 남아서
+그것만으로는 언제 읽었는지 되짚을 수 없습니다 — 연속 날수와 점수는 저장하지 않고 매번 기록에서
+다시 세기 때문에, 날짜가 남는 표가 따로 있어야 합니다. **하루에 책 하나당 한 줄**이고, 같은 날 또
+적으면 마지막 쪽만 올립니다(앱 `AppRepository.recordReading`, 서버 `recordReading`). 진도를 올리는
+자리가 앱·웹 둘이라 양쪽에서 남겨야 같은 날을 셉니다. 덤 점수는 쪽수가 아니라 **권**으로 셉니다 —
+쪽수로 세면 백 쪽 읽은 날 하나로 덤이 꽉 차 다른 걸음이 점수에서 사라집니다. **책을 지워도 독서
+기록은 남깁니다** — 읽은 것은 책과 별개로 이미 한 일이고, 지우면 지난 연속 날수가 조용히 달라집니다.
 
 **하루 점수(`DayScore`)에 기분을 넣지 않습니다.** 슬픈 날이 낮은 점수가 되면 앱이 감정을
 잘못한 일로 세는 셈이고, 힘든 날일수록 열기 싫어집니다. 기분은 점수 **곁에** 둡니다.
@@ -300,6 +311,14 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 사람이 옮겨 온 글을 "못 읽었다"며 되돌려 주면 그 자리에서 사라집니다.
 
 **동기화 JSON 포맷을 바꾸면 앱 `AppDataJson`과 서버를 함께 바꾸고 `schemaVersion`을 올립니다.**
+
+**색·글자·모서리·움직임·진동은 한 곳에서만 정합니다.** `ui/theme`의 `Color`·`Type`·`Theme`·`Motion`과
+`ui/screen/Feedback.kt`입니다. 화면마다 따로 정하면 같은 동작이 어떤 화면에서는 울리고 어떤 화면에서는
+조용해, 그 어긋남이 "만들다 만 앱" 같은 느낌을 만듭니다. 진동은 무게 셋뿐입니다 —
+`tap`(되돌리기 쉬운 것) · `commit`(기록이 남는 것) · `celebrate`(드물고 기쁜 것). **한 동작에 한 번**
+울립니다. 누를 때와 결과가 돌아올 때 두 번 울리면 고장 난 것처럼 느껴집니다.
+숫자는 오르는 것이 보람인 자리(점수·걸음)에만 `CountUpNumber`로 굴립니다. 목록 개수까지 굴리면
+화면이 쉴 새 없이 움직여 어지럽습니다.
 
 서명 정보(`keystore.properties`, `*.jks`)는 커밋하지 않습니다. `keystore.properties.example`을 참고하세요.
 

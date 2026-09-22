@@ -9,7 +9,7 @@ import { delimiter, dirname, extname, join, normalize, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 20;
+const schemaVersion = 21;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -86,6 +86,7 @@ const deletionEntityTypes = new Set([
   "BOOK",
   "GROWTH_REPORT",
   "MOOD_LOG",
+  "BOOK_READING_LOG",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
@@ -1161,6 +1162,7 @@ const revisionedCollections = [
   "books",
   "growthReports",
   "moodLogs",
+  "bookReadingLogs",
 ];
 
 async function withDb(mutator) {
@@ -1244,6 +1246,7 @@ function emptyDb() {
     books: [],
     growthReports: [],
     moodLogs: [],
+    bookReadingLogs: [],
   };
 }
 
@@ -1267,6 +1270,7 @@ function normalizeDb(db) {
     books: normalizeList(db?.books, normalizeBook),
     growthReports: normalizeList(db?.growthReports, normalizeGrowthReport),
     moodLogs: normalizeList(db?.moodLogs, normalizeMoodLog),
+    bookReadingLogs: normalizeList(db?.bookReadingLogs, normalizeBookReadingLog),
   };
 }
 
@@ -1326,6 +1330,7 @@ function snapshot(db, since = 0, epoch = null) {
     bookCount: normalized.books.length,
     growthReportCount: normalized.growthReports.length,
     moodLogCount: normalized.moodLogs.length,
+    bookReadingLogCount: normalized.bookReadingLogs.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -1341,6 +1346,7 @@ function snapshot(db, since = 0, epoch = null) {
     books: only(sortDesc(normalized.books, "updatedAt")),
     growthReports: only(sortDesc(normalized.growthReports, "createdAt")),
     moodLogs: only(sortDesc(normalized.moodLogs, "createdAt")),
+    bookReadingLogs: only(sortDesc(normalized.bookReadingLogs, "createdAt")),
   };
 }
 
@@ -1367,6 +1373,7 @@ function mergeSnapshot(db, payload) {
     books: payload?.books,
     growthReports: payload?.growthReports,
     moodLogs: payload?.moodLogs,
+    bookReadingLogs: payload?.bookReadingLogs,
   });
   const current = normalizeDb(db);
 
@@ -1389,6 +1396,8 @@ function mergeSnapshot(db, payload) {
   db.growthReports = mergeMutable(current.growthReports, incoming.growthReports, deletedAt);
   // 같은 날 기분을 두 기기에서 각각 찍을 수 있다. 나중에 고친 쪽이 그날의 기분이다.
   db.moodLogs = mergeMutable(current.moodLogs, incoming.moodLogs, deletedAt);
+  // 같은 날 같은 책을 두 기기에서 각각 적을 수 있다. 나중에 적은 쪽이 그날 닿은 쪽이다.
+  db.bookReadingLogs = mergeMutable(current.bookReadingLogs, incoming.bookReadingLogs, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -1424,6 +1433,7 @@ function deduplicate(db) {
   const books = resolveDuplicates(db.books, bookFingerprint);
   const reports = resolveDuplicates(db.growthReports, reportFingerprint);
   const moodLogs = resolveDuplicates(db.moodLogs, moodLogFingerprint);
+  const readingLogs = resolveDuplicates(db.bookReadingLogs, readingLogFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   db.items = items.kept.map((item) =>
@@ -1440,6 +1450,10 @@ function deduplicate(db) {
   db.books = books.kept;
   db.growthReports = reports.kept;
   db.moodLogs = moodLogs.kept;
+  // 사라진 책을 가리키던 독서 기록은 남은 책으로 옮겨 붙인다.
+  db.bookReadingLogs = readingLogs.kept.map((log) =>
+    log.bookSyncId ? { ...log, bookSyncId: books.movedTo.get(log.bookSyncId) || log.bookSyncId } : log,
+  );
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -1452,6 +1466,7 @@ function deduplicate(db) {
     [books.movedTo, "BOOK"],
     [reports.movedTo, "GROWTH_REPORT"],
     [moodLogs.movedTo, "MOOD_LOG"],
+    [readingLogs.movedTo, "BOOK_READING_LOG"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1563,6 +1578,19 @@ function todoFingerprint(todo) {
  * "어느 쪽이라 할 수 없는 날"로 보고 그날을 버린다. 기분이 무엇이었는지는 견주지 않고
  * 날짜만 본다. 그래야 나중에 고친 쪽 하나가 남는다. 앱의 moodLogFingerprint와 같아야 한다.
  */
+/**
+ * 하루에 책 하나당 하나다. 읽은 쪽수는 견주지 않는다.
+ *
+ * 두 기기에서 같은 날 같은 책을 적으면 쪽수가 서로 다르기 마련인데, 그것까지 견주면 둘 다 남아
+ * 그날 읽은 쪽수가 겹쳐 세진다. 앱 `SyncDeduplicator.readingLogFingerprint`와 같아야 한다.
+ */
+function readingLogFingerprint(log) {
+  const book = text(log.bookSyncId);
+  const date = text(log.readDate);
+  if (!book || !date) return "";
+  return book + "|" + date;
+}
+
 function moodLogFingerprint(log) {
   return text(log.entryDate);
 }
@@ -1654,6 +1682,13 @@ function reindex(db) {
   db.books = withStableIds(db.books);
   db.growthReports = withStableIds(db.growthReports);
   db.moodLogs = withStableIds(db.moodLogs);
+  // 독서 기록은 책이 지워진 뒤에도 남는다(읽은 것은 책과 별개로 이미 한 일이다).
+  // 그래서 이력처럼 부모를 못 찾아도 버리지 않고 숫자 id만 0으로 끊는다.
+  const bookIds = new Map(db.books.map((book) => [book.syncId, book.id]));
+  db.bookReadingLogs = withStableIds(db.bookReadingLogs).map((log) => ({
+    ...log,
+    bookId: bookIds.get(log.bookSyncId) || 0,
+  }));
 
   return db;
 }
@@ -1780,6 +1815,9 @@ function replaceSnapshot(db, payload) {
     ? payload.growthReports.map(normalizeGrowthReport).filter(Boolean)
     : [];
   db.moodLogs = Array.isArray(payload.moodLogs) ? payload.moodLogs.map(normalizeMoodLog).filter(Boolean) : [];
+  db.bookReadingLogs = Array.isArray(payload.bookReadingLogs)
+    ? payload.bookReadingLogs.map(normalizeBookReadingLog).filter(Boolean)
+    : [];
   return db;
 }
 
@@ -1967,7 +2005,48 @@ function saveBook(db, payload, bookId = null) {
     normalized.finishedAt = null;
   }
   upsert(db.books, normalized);
+  // 읽은 쪽이 앞으로 갔으면 그날 읽은 것으로 남깁니다. 웹에서 올린 진도도 독서 걸음에 들어가야
+  // 앱과 웹이 같은 날을 셉니다. 제목만 고친 경우에는 남기지 않습니다.
+  if (normalized.currentPage > (existing?.currentPage || 0)) {
+    recordReading(db, normalized, existing?.currentPage || 0);
+  }
   return normalized;
+}
+
+/**
+ * 오늘 이 책을 읽었다고 남깁니다.
+ *
+ * 책에는 마지막 쪽만 남아서, 이것이 없으면 언제 읽었는지 되짚을 수 없습니다.
+ * 하루에 책 하나당 한 줄이고, 같은 날 또 적으면 마지막 쪽만 올립니다.
+ * 앱 `AppRepository.recordReading`과 같은 규칙입니다.
+ */
+function recordReading(db, book, previousPage) {
+  if (!Array.isArray(db.bookReadingLogs)) db.bookReadingLogs = [];
+  const readDate = todayDate();
+  const existing = db.bookReadingLogs.find(
+    (log) => log.bookSyncId === book.syncId && log.readDate === readDate,
+  );
+  if (existing) {
+    existing.updatedAt = nowMs();
+    existing.bookId = book.id;
+    existing.bookTitle = book.title;
+    existing.endPage = book.currentPage;
+    return existing;
+  }
+  const log = normalizeBookReadingLog({
+    id: nextId(db.bookReadingLogs),
+    syncId: randomUUID(),
+    updatedAt: nowMs(),
+    bookId: book.id,
+    bookSyncId: book.syncId,
+    bookTitle: book.title,
+    readDate,
+    startPage: Math.max(0, previousPage),
+    endPage: book.currentPage,
+    createdAt: nowMs(),
+  });
+  db.bookReadingLogs.push(log);
+  return log;
 }
 
 /**
@@ -2368,6 +2447,30 @@ function normalizeBook(book) {
  * 날짜나 기분이 없으면 버린다. 어느 날의 무엇인지 알 수 없어 그래프에 놓을 수 없다.
  * 기분 값은 검사하지 않는다. 선택지는 앱과 웹이 정하고, 서버는 그대로 실어 나른다.
  */
+/**
+ * 어느 날 어느 책을 어디까지 읽었는지.
+ *
+ * 날짜가 없으면 버린다. 어느 날 읽은 것인지 모르면 걸음에도 그래프에도 놓을 수 없다.
+ * 쪽수는 검사하지 않는다 — 전체 쪽수를 모르는 책도 있고, 되돌려 적는 일도 있다.
+ */
+function normalizeBookReadingLog(log) {
+  if (!log) return null;
+  const readDate = text(log.readDate);
+  if (!readDate) return null;
+  return {
+    id: positiveInt(log.id),
+    syncId: syncId(log.syncId),
+    updatedAt: integer(log.updatedAt, integer(log.createdAt, nowMs())),
+    bookId: positiveInt(log.bookId),
+    bookSyncId: text(log.bookSyncId),
+    bookTitle: text(log.bookTitle),
+    readDate,
+    startPage: Math.max(0, positiveInt(log.startPage)),
+    endPage: Math.max(0, positiveInt(log.endPage)),
+    createdAt: integer(log.createdAt, nowMs()),
+  };
+}
+
 function normalizeMoodLog(log) {
   if (!log) return null;
   const entryDate = text(log.entryDate);
@@ -2487,6 +2590,14 @@ function sortDesc(items, key) {
 
 function nowMs() {
   return Date.now();
+}
+
+/** 오늘 날짜(`yyyy-MM-dd`). 기기와 같은 자리 시각을 씁니다. */
+function todayDate() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 function todayRange() {
