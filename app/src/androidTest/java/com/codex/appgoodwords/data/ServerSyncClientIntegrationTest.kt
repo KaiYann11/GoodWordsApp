@@ -187,11 +187,47 @@ class ServerSyncClientIntegrationTest {
         assertEquals("누르지 않은 완료 표시가 생겼습니다.", null, todo?.doneAt)
     }
 
+    @Test
+    fun mergeSnapshot_carriesBookReadingLogs() = runBlocking {
+        // 독서 걸음은 이 기록으로 "언제 읽었는지"를 셉니다. 서버가 이 종류를 떨어뜨리면
+        // 기기마다 연속 날수가 달라지고, 사용자는 한참 뒤에야 알아차립니다.
+        val bookSyncId = "e2e-book-" + SyncIdentity.newId()
+        val logSyncId = "e2e-reading-" + SyncIdentity.newId()
+        // 날짜도 매번 달라야 합니다. 같으면 지난 실행이 남긴 기록과 합치기에 걸립니다.
+        val readDate = "2026-09-" + (10 + (System.nanoTime() % 18).toInt()).toString().padStart(2, '0')
+
+        val merged = client.mergeSnapshot(
+            settings,
+            snapshotWith(
+                bookReadingLogs = listOf(
+                    BookReadingLogEntity(
+                        syncId = logSyncId,
+                        updatedAt = 2_000L,
+                        bookSyncId = bookSyncId,
+                        bookTitle = "기기에서 읽은 책 " + bookSyncId,
+                        readDate = readDate,
+                        startPage = 12,
+                        endPage = 47,
+                        createdAt = 2_000L
+                    )
+                )
+            )
+        )
+
+        val log = merged.bookReadingLogs.firstOrNull { it.syncId == logSyncId }
+        assertEquals("독서 기록이 서버를 다녀오며 사라졌습니다.", readDate, log?.readDate)
+        assertEquals(bookSyncId, log?.bookSyncId)
+        assertEquals(47, log?.endPage)
+        // 그날 읽은 쪽수는 두 쪽 번호의 차이입니다. 앞쪽을 잃으면 쪽수가 부풀어 보입니다.
+        assertEquals(35, log?.pagesRead)
+    }
+
     private fun snapshotWith(
         items: List<ContentItemEntity> = emptyList(),
         deletions: List<DeletionEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
-        todos: List<TodoEntity> = emptyList()
+        todos: List<TodoEntity> = emptyList(),
+        bookReadingLogs: List<BookReadingLogEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = emptyList(),
@@ -202,7 +238,8 @@ class ServerSyncClientIntegrationTest {
         settingsUpdatedAt = 0L,
         deletions = deletions,
         diaries = diaries,
-        todos = todos
+        todos = todos,
+        bookReadingLogs = bookReadingLogs
     )
 
     @Test
