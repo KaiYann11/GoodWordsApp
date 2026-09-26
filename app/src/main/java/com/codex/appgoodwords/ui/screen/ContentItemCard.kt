@@ -256,6 +256,7 @@ private fun ContentType.displayLabel(): String {
         ContentType.INBOX -> "임시저장소"
         ContentType.MEMO -> "메모"
         ContentType.NOT_TO_DO -> "하지 않을 일"
+        ContentType.PRINCIPLE -> "원칙"
         ContentType.CONCEPT -> "개념"
     }
 }

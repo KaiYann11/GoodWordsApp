@@ -26,16 +26,18 @@ class Migration20To21Test {
         try {
             before.bookDao().insert(book)
             before.contentItemDao().insert(quote)
+            // Room이 만든 표에는 22의 칸이 이미 있습니다. 옛 모양으로 되돌려야 ALTER가 실제로 걸립니다.
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE books DROP COLUMN review")
             before.openHelper.writableDatabase.version = 20
         } finally {
             before.close()
         }
 
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_20_21)
+            .addMigrations(AppDatabase.MIGRATION_20_21, AppDatabase.MIGRATION_21_22)
             .build()
         try {
-            assertEquals(21, after.openHelper.writableDatabase.version)
+            assertEquals(22, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(book, after.bookDao().getById(book.id))
             assertEquals(quote, after.contentItemDao().getById(quote.id))

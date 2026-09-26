@@ -76,6 +76,9 @@ import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.AppLock
 import com.codex.appgoodwords.ui.screen.AppLockScreen
 import com.codex.appgoodwords.ui.screen.AppLockState
+import com.codex.appgoodwords.ui.screen.BookReviewScreen
+import com.codex.appgoodwords.ui.screen.PrincipleScreen
+import com.codex.appgoodwords.ui.screen.RoutineTab
 import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DaySummaryDialog
@@ -117,6 +120,8 @@ private enum class AppTab(
     ADD("추가"),
     /** 이력은 매일 볼 화면이 아니라 설정 안으로 옮겼습니다. 하단 바에는 없습니다. */
     HISTORY("이력"),
+    /** 독후감. 책 목록에서 엽니다. 하단 바에는 없습니다. */
+    BOOK_REVIEW("독후감"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
@@ -144,7 +149,9 @@ private data class AppDestination(
      * 탭만 바꿔 놓으면 찾아 놓고도 사용자가 다시 손으로 뒤져야 합니다.
      */
     val focusKind: SearchKind? = null,
-    val focusId: Long? = null
+    val focusId: Long? = null,
+    /** 독후감을 펼친 책. 책 목록에서 열립니다. */
+    val reviewBookId: Long? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -590,6 +597,7 @@ fun AppGoodWordsApp(
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
+                                                AppTab.BOOK_REVIEW -> Icons.Outlined.EditNote
                                                 AppTab.GROWTH -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.SEARCH -> Icons.Outlined.Search
@@ -855,7 +863,8 @@ fun AppGoodWordsApp(
                                                 else result.exceptionOrNull()?.message ?: "글귀를 넣지 못했습니다."
                                             )
                                         }
-                                    }
+                                    },
+                                    onOpenReview = { id -> pushRoute(reviewRoute(id)) }
                                 )
                             },
                             // 번뜩인 것은 아이디어 탭에서 봅니다. 글귀 목록에 섞으면 둘 다 흐려집니다.
@@ -919,9 +928,10 @@ fun AppGoodWordsApp(
 
                         AppTab.ROUTINE -> RoutineTabsScreen(
                             modifier = Modifier.padding(innerPadding),
-                            requestedNotToDo = when (destination.focusKind) {
-                                SearchKind.NOT_TO_DO -> true
-                                SearchKind.ROUTINE -> false
+                            requestedTab = when (destination.focusKind) {
+                                SearchKind.NOT_TO_DO -> RoutineTab.NOT_TO_DO
+                                SearchKind.PRINCIPLE -> RoutineTab.PRINCIPLE
+                                SearchKind.ROUTINE -> RoutineTab.ROUTINE
                                 else -> null
                             },
                             requestKey = navStack.last(),
@@ -931,6 +941,14 @@ fun AppGoodWordsApp(
                                     onSave = viewModel::saveContent,
                                     onDelete = viewModel::deleteContent,
                                     focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.NOT_TO_DO }
+                                )
+                            },
+                            principleContent = {
+                                PrincipleScreen(
+                                    items = allItems,
+                                    onSave = viewModel::saveContent,
+                                    onDelete = viewModel::deleteContent,
+                                    focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.PRINCIPLE }
                                 )
                             },
                             routineContent = {
@@ -1110,6 +1128,37 @@ fun AppGoodWordsApp(
                                 }
                             }
                         )
+
+                        AppTab.BOOK_REVIEW -> {
+                            val book = books.firstOrNull { it.id == destination.reviewBookId }
+                            if (book == null) {
+                                // 다른 기기에서 지운 책일 수 있습니다. 빈 화면을 두느니 목록으로 돌립니다.
+                                LaunchedEffect(destination.reviewBookId) { popRoute() }
+                            } else {
+                                BookReviewScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    book = book,
+                                    onSave = { review ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.saveBookReview(book.id, review)
+                                            snackbarHostState.showSnackbar(
+                                                if (result.isSuccess) "독후감을 저장했습니다."
+                                                else result.exceptionOrNull()?.message ?: "독후감을 저장하지 못했습니다."
+                                            )
+                                        }
+                                    },
+                                    onExtractQuote = { body, page ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.extractQuoteFromBook(book.id, body, page)
+                                            snackbarHostState.showSnackbar(
+                                                if (result.isSuccess) "보관함에 글귀를 넣었습니다."
+                                                else result.exceptionOrNull()?.message ?: "글귀를 넣지 못했습니다."
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                        }
 
                         AppTab.HISTORY -> HistoryScreen(
                             modifier = Modifier.padding(innerPadding),
@@ -1540,6 +1589,9 @@ private fun isAddRoute(route: String): Boolean = route == "add" || route.startsW
 
 private fun detailRoute(tab: AppTab, itemId: Long): String = "detail:${tab.name}:$itemId"
 
+/** 독후감은 긴 글이라 대화상자가 아니라 제 화면을 씁니다. */
+private fun reviewRoute(bookId: Long): String = "review:$bookId"
+
 private fun editRoute(returnTab: AppTab, itemId: Long): String = "edit:${returnTab.name}:$itemId"
 
 /** 검색 결과로 가는 길. 어느 탭인지는 종류가 정합니다. */
@@ -1551,7 +1603,7 @@ private fun tabOf(kind: SearchKind): AppTab = when (kind) {
     SearchKind.BOOK -> AppTab.LIBRARY
     SearchKind.DIARY -> AppTab.DIARY
     SearchKind.TODO -> AppTab.TODO
-    SearchKind.ROUTINE, SearchKind.NOT_TO_DO -> AppTab.ROUTINE
+    SearchKind.ROUTINE, SearchKind.NOT_TO_DO, SearchKind.PRINCIPLE -> AppTab.ROUTINE
     SearchKind.GROWTH -> AppTab.GROWTH
 }
 
@@ -1575,6 +1627,10 @@ private fun parseRoute(route: String): AppDestination {
         "detail" -> AppDestination(
             tab = AppTab.valueOf(parts[1]),
             selectedItemId = parts.getOrNull(2)?.toLongOrNull()
+        )
+        "review" -> AppDestination(
+            tab = AppTab.BOOK_REVIEW,
+            reviewBookId = parts.getOrNull(1)?.toLongOrNull()
         )
         "edit" -> AppDestination(
             tab = AppTab.ADD,

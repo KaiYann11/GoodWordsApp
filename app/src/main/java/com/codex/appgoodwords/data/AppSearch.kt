@@ -11,6 +11,7 @@ enum class SearchKind(val label: String) {
     BOOK("독서"),
     ROUTINE("루틴"),
     NOT_TO_DO("하지 않을 일"),
+    PRINCIPLE("원칙"),
     GROWTH("돌아보기")
 }
 
@@ -76,6 +77,7 @@ object AppSearch {
                     ContentType.CONCEPT -> SearchKind.CONCEPT
                     ContentType.INBOX -> SearchKind.INBOX
                     ContentType.NOT_TO_DO -> SearchKind.NOT_TO_DO
+                    ContentType.PRINCIPLE -> SearchKind.PRINCIPLE
                     else -> SearchKind.QUOTE
                 }
             }

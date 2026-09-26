@@ -245,7 +245,7 @@ class AppRepository(
         trigger: ExposureTrigger
     ) {
         val item = contentItemDao.getById(contentItemId) ?: return
-        if (item.type in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT)) return
+        if (item.type.isPersonalRecord) return
         val viewedAt = System.currentTimeMillis()
 
         exposureEventDao.insert(
@@ -266,7 +266,7 @@ class AppRepository(
         trigger: ExposureTrigger
     ): Boolean {
         val item = contentItemDao.getById(contentItemId) ?: return false
-        if (item.type in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT)) return false
+        if (item.type.isPersonalRecord) return false
         val (start, end) = todayRange()
         val existingCount = exposureEventDao.countEventsForRange(
             contentItemId = contentItemId,
@@ -622,6 +622,9 @@ class AppRepository(
             },
             status = draft.status.trim().ifBlank { BookStatus.READING.name },
             note = draft.note.trim(),
+            // 독후감은 따로 쓰는 글이라 이 폼에 실려 오지 않습니다. 지키지 않으면 책 제목만
+            // 고쳐도 써 둔 글이 통째로 사라집니다(startedAt과 같은 이유).
+            review = existing?.review.orEmpty(),
             startedAt = existing?.startedAt ?: System.currentTimeMillis(),
             finishedAt = existing?.finishedAt,
             createdAt = existing?.createdAt ?: System.currentTimeMillis()
@@ -683,6 +686,21 @@ class AppRepository(
 
     fun observeBookReadingLogs(): Flow<List<BookReadingLogEntity>> =
         bookReadingLogDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /**
+     * 독후감을 저장합니다.
+     *
+     * 책의 다른 값은 건드리지 않습니다. 진도·상태까지 함께 쓰면, 글을 쓰는 동안 다른 기기에서
+     * 올린 진도가 되돌아갑니다. `updatedAt`은 올려야 이 글이 다음 병합에서 이깁니다.
+     */
+    suspend fun saveBookReview(id: Long, review: String): BookEntity? {
+        val dao = bookDao ?: return null
+        val existing = dao.getById(id) ?: return null
+        // 끝의 빈 줄만 떼어 냅니다. 가운데 빈 줄은 사용자가 문단을 나눈 자리입니다.
+        val updated = existing.copy(review = review.trimEnd(), updatedAt = System.currentTimeMillis())
+        dao.insert(updated)
+        return updated
+    }
 
     /** 다 읽음/다시 읽는 중을 오갑니다. */
     suspend fun toggleBookFinished(id: Long): BookEntity? {

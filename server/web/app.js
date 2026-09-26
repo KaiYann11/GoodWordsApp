@@ -131,6 +131,8 @@ app.addEventListener("submit", async (event) => {
       await submitContent(form);
     } else if (form.dataset.form === "not-to-do") {
       await submitNotToDo(form);
+    } else if (form.dataset.form === "principle") {
+      await submitPrinciple(form);
     } else if (form.dataset.form === "routine") {
       await submitRoutine(form);
     } else if (form.dataset.form === "memo") {
@@ -173,6 +175,34 @@ app.addEventListener("click", async (event) => {
       await api(`/api/content/${id}`, { method: "DELETE" });
       if (state.editingContentId === id) state.editingContentId = null;
       showToast("하지 않을 일을 삭제했습니다.");
+      await loadSnapshot(false);
+    } else if (action === "quote-selection") {
+      const field = document.querySelector("#bookReview");
+      const selected = field
+        ? String(field.value).slice(field.selectionStart || 0, field.selectionEnd || 0).trim()
+        : "";
+      // 고른 곳이 없으면 아무 일도 하지 않습니다. 글 전체를 글귀로 넣으면 되돌리기 번거롭습니다.
+      if (!selected) {
+        showToast("독후감에서 글귀로 뽑을 문장을 먼저 골라 주세요.");
+        return;
+      }
+      if (!id) {
+        showToast("책을 먼저 저장한 뒤에 뽑을 수 있습니다.");
+        return;
+      }
+      const book = findById(state.snapshot.books, id);
+      await api(`/api/books/${id}/quotes`, {
+        method: "POST",
+        body: { body: selected, page: Number(book?.currentPage || 0) },
+      });
+      showToast("보관함에 글귀를 넣었습니다.");
+      await loadSnapshot(false);
+    } else if (action === "delete-principle") {
+      const item = findById(state.snapshot.items, id);
+      if (!window.confirm(`'${item?.title || "이 원칙"}' 항목을 삭제할까요?`)) return;
+      await api(`/api/content/${id}`, { method: "DELETE" });
+      if (state.editingContentId === id) state.editingContentId = null;
+      showToast("원칙을 삭제했습니다.");
       await loadSnapshot(false);
     } else if (action === "favorite") {
       const item = findById(state.snapshot.items, id);
@@ -332,6 +362,12 @@ snapshotFile.addEventListener("change", async () => {
 
 loadSnapshot();
 
+/** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`·서버 `personalContentTypes`와 같아야 합니다. */
+const personalTypes = ["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"];
+
+/** 제 탭에서만 보는 기준. 보관함·홈의 목록에 섞이면 담아 둔 글귀가 밀려납니다. */
+const ruleTypes = ["NOT_TO_DO", "PRINCIPLE"];
+
 function emptySnapshot() {
   return {
     items: [],
@@ -452,6 +488,7 @@ function render() {
   if (state.activeTab === "library") renderLibrary();
   if (state.activeTab === "routines") renderRoutines();
   if (state.activeTab === "not-to-do") renderNotToDo();
+  if (state.activeTab === "principles") renderPrinciples();
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
@@ -470,7 +507,7 @@ function syncTabs() {
 function renderHome() {
   const summary = todaySummary();
   const recent = [...state.snapshot.items]
-    .filter(item => item.type !== "NOT_TO_DO")
+    .filter(item => !ruleTypes.includes(item.type))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 8);
   app.innerHTML = `
@@ -676,6 +713,48 @@ function renderNotToDo() {
                 <button type="button" data-action="delete-not-to-do" data-id="${item.id}">삭제</button>
               </div>
             </article>`).join("") : empty("아직 기록한 항목이 없습니다. 피하고 싶은 행동부터 하나 적어 보세요.")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderPrinciples() {
+  const items = state.snapshot.items.filter(item => item.type === "PRINCIPLE")
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const editing = findById(items, state.editingContentId) || {};
+  app.innerHTML = `
+    <section class="grid two">
+      <form class="panel" data-form="principle">
+        <h2>${editing.id ? "원칙 수정" : "원칙 추가"}</h2>
+        <p class="muted">지키기로 한 기준을 적어 두세요. 지킨 날을 세지 않습니다.</p>
+        <div class="formGrid">
+          <div class="field full">
+            <label for="principleTitle">원칙</label>
+            <input id="principleTitle" name="title" value="${attr(editing.title)}" placeholder="예: 화가 난 채로 답하지 않는다" required>
+          </div>
+          <div class="field full">
+            <label for="principleMemo">이유 (선택)</label>
+            <textarea id="principleMemo" name="body" placeholder="왜 그렇게 정했는지">${escapeHtml(editing.body)}</textarea>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button class="primary" type="submit">저장</button>
+          ${editing.id ? `<button type="button" data-action="cancel-content">취소</button>` : ""}
+        </div>
+      </form>
+      <section>
+        <h2 class="sectionTitle">원칙 ${items.length}개</h2>
+        <div class="itemList">
+          ${items.length ? items.map(item => `
+            <article class="item">
+              <h3>${escapeHtml(item.title)}</h3>
+              ${item.body ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.body)}</p>` : ""}
+              <div class="actions">
+                <button type="button" data-action="edit-content" data-id="${item.id}">수정</button>
+                <button type="button" data-action="delete-principle" data-id="${item.id}">삭제</button>
+              </div>
+            </article>`).join("") : empty("아직 적어 둔 원칙이 없습니다. 흔들릴 때 다시 읽고 싶은 문장을 하나 적어 보세요.")}
         </div>
       </section>
     </section>
@@ -1050,6 +1129,14 @@ function renderBooks() {
               <label for="bookNote">메모 (선택)</label>
               <textarea id="bookNote" name="note">${escapeHtml(editing.note)}</textarea>
             </div>
+            <div class="field full">
+              <label for="bookReview">독후감 (선택)</label>
+              <textarea id="bookReview" name="review" rows="10" placeholder="읽으며 남기고 싶은 것을 적어 두세요.">${escapeHtml(editing.review)}</textarea>
+              <p class="hint">글 안에서 문장을 끌어 고른 뒤 <strong>고른 문장 글귀로</strong>를 누르면 보관함에 들어갑니다.</p>
+              <div class="actions">
+                <button type="button" data-action="quote-selection" data-id="${editing.id || 0}">고른 문장 글귀로</button>
+              </div>
+            </div>
           </div>
           <div class="actions" style="margin-top:14px">
             <button class="primary" type="submit">${editing.id ? "수정 완료" : "저장"}</button>
@@ -1122,6 +1209,7 @@ function bookCard(book, quoteCount, readingDayCount) {
             <span class="chip">${escapeHtml(progressText)}</span>
             ${quoteCount ? `<span class="chip">뽑은 글귀 ${quoteCount}개</span>` : ""}
             ${readingDayCount ? `<span class="chip">읽은 날 ${readingDayCount}일</span>` : ""}
+            ${book.review ? `<span class="chip">독후감 ${[...String(book.review)].length}자</span>` : ""}
           </div>
         </div>
         <button type="button" data-action="toggle-book-finished" data-id="${book.id}">
@@ -1253,6 +1341,20 @@ async function submitNotToDo(form) {
   await loadSnapshot(false);
 }
 
+async function submitPrinciple(form) {
+  const data = new FormData(form);
+  const title = String(data.get("title") || "").trim();
+  if (!title) throw new Error("원칙을 입력해 주세요.");
+  const id = state.editingContentId;
+  await api(id ? `/api/content/${id}` : "/api/content", {
+    method: id ? "PUT" : "POST",
+    body: { type: "PRINCIPLE", title, body: data.get("body") },
+  });
+  state.editingContentId = null;
+  showToast(id ? "원칙을 수정했습니다." : "원칙을 저장했습니다.");
+  await loadSnapshot(false);
+}
+
 async function submitRoutine(form) {
   const data = new FormData(form);
   const payload = {
@@ -1348,6 +1450,7 @@ async function submitBook(form) {
     title: data.get("title"),
     author: data.get("author"),
     note: data.get("note"),
+    review: data.get("review"),
     currentPage: Number(data.get("currentPage") || 0),
     totalPages: Number(data.get("totalPages") || 0),
   };
@@ -1374,7 +1477,7 @@ async function submitBookQuote(form) {
 }
 
 function contentCard(item) {
-  const canConfirm = !["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(item.type);
+  const canConfirm = !personalTypes.includes(item.type);
   const confirmed = todaySummary().confirmedIds.has(item.id);
   // 최근 것이 위로. 앱 상세 화면과 같은 줄로 보여야 합니다.
   const memos = state.snapshot.contentMemos
@@ -1543,7 +1646,7 @@ function summaryLine(line) {
 function filteredItems() {
   const query = state.query.trim().toLowerCase();
   return [...state.snapshot.items]
-    .filter((item) => item.type !== "NOT_TO_DO")
+    .filter((item) => !ruleTypes.includes(item.type))
     .filter((item) => state.typeFilter === "ALL" || item.type === state.typeFilter)
     .filter((item) => !state.categoryFilter || item.category === state.categoryFilter)
     .filter((item) => {
@@ -1665,7 +1768,7 @@ function formatDate(timestamp) {
 }
 
 function labelForType(type) {
-  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념" }[type] || type || "";
+  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념", PRINCIPLE: "원칙" }[type] || type || "";
 }
 
 function labelForEvent(type) {

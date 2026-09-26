@@ -86,7 +86,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 
 **Room 스키마를 바꾸면 `Migration`과 `Migration{N}To{M}Test`를 함께 추가합니다.**
 `AppContainer`에 `fallbackToDestructiveMigration()`이 걸려 있어서, 마이그레이션이 없거나 틀리면
-사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 21입니다.
+사용자 DB가 오류 없이 통째로 지워집니다. 현재 버전은 22입니다.
 
 **새 레코드 종류를 추가하면 여섯 군데를 함께 고칩니다.** 하나만 빠져도 조용히 어긋납니다.
 `AppDataJson`(직렬화) · `SyncMerger`(병합) · `SyncDeduplicator`(같은 내용 합치기) ·
@@ -115,6 +115,17 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 "오늘의 글귀"인데 내가 적어 둔 생각이 거기 뜨면 남의 좋은 말인 척 돌아오고, 새로 담은 것은
 `lastSurfacedAt`이 없어 **가장 먼저** 뽑힙니다. 목록도 나눕니다 — 보관함의 아이디어 탭
 (`LibraryTab`)입니다. 앞으로 "내가 쓴 것" 종류를 더하면 이 두 곳에서 함께 빼야 합니다.
+
+**읽음으로 세지 않는 종류는 `ContentType.personalTypes` 한 곳에만 적습니다.** 예전에는 이 목록이
+다섯 군데에 따로 적혀 있어서, 종류를 늘릴 때 한 곳만 빠뜨리면 내가 적어 둔 기준이 "오늘의 글귀"라며
+알림에 뜨거나 읽음 횟수로 세어졌습니다. 서버는 `personalContentTypes`, 웹은 `personalTypes`로
+같은 목록을 둡니다. **세 곳이 같아야 합니다.**
+
+**원칙(`PRINCIPLE`)은 하지 않을 일의 반대편입니다.** 지키기로 한 기준을 적는 자리이고,
+**수행 버튼이 없습니다.** 지킨 날을 세기 시작하면 원칙이 또 하나의 루틴이 되어, 못 지킨 날
+목록만 쌓입니다. 하지 않을 일과 화면을 함께 씁니다(`RuleListScreen` + `RuleListLabels`) —
+방향만 반대이고 하는 일이 같아서, 따로 두면 한쪽만 고쳐져 어느 날부터 두 탭이 다르게 동작합니다.
+루틴 탭 안의 세 자리는 `RoutineTab`이 정합니다.
 
 **보관함 종류(`ContentType`)는 앱·서버·웹이 같아야 합니다.** 앱 `ContentType` · 서버 `contentTypes` ·
 웹 `app.js`의 종류 고르개와 이름표. 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 담아 둔 것이
@@ -256,6 +267,16 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 쪽수로 세면 백 쪽 읽은 날 하나로 덤이 꽉 차 다른 걸음이 점수에서 사라집니다. **책을 지워도 독서
 기록은 남깁니다** — 읽은 것은 책과 별개로 이미 한 일이고, 지우면 지난 연속 날수가 조용히 달라집니다.
 
+**독후감(`BookEntity.review`)은 책 수정 폼에 실려 오지 않습니다.** 따로 쓰는 긴 글이라
+`BookReviewScreen`에서만 고칩니다. 그래서 `AppRepository.saveBook`은 **기존 독후감을 지켜야**
+합니다(`startedAt`과 같은 이유) — 안 지키면 책 제목만 고쳐도 써 둔 글이 통째로 사라집니다.
+서버 `saveBook`도 `{...existing, ...payload}`라 같은 규칙입니다.
+독후감은 짧은 메모(`note`)와 자리를 나눕니다. 한 칸에 합치면 책 카드가 글 전체를 싣고 길어져
+목록이 문서 더미가 됩니다. **책을 합칠 때 독후감은 견주지 않습니다**(기준은 제목·저자) —
+견주면 같은 책이 두 벌 남습니다. 글 안에서 고른 문장은 `TextFieldValue.selection`으로 읽어
+`extractQuoteFromBook`에 그대로 넘깁니다. 고른 곳이 없으면 뽑기 버튼을 잠급니다 —
+글 전체가 보관함에 들어가면 되돌리기 번거롭습니다.
+
 **하루 점수(`DayScore`)에 기분을 넣지 않습니다.** 슬픈 날이 낮은 점수가 되면 앱이 감정을
 잘못한 일로 세는 셈이고, 힘든 날일수록 열기 싫어집니다. 기분은 점수 **곁에** 둡니다.
 점수의 뼈대는 사용자가 고른 걸음(`DailyStep`)입니다 — 앱이 따로 정한 잣대로 매기면 자기가
@@ -311,6 +332,12 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 사람이 옮겨 온 글을 "못 읽었다"며 되돌려 주면 그 자리에서 사라집니다.
 
 **동기화 JSON 포맷을 바꾸면 앱 `AppDataJson`과 서버를 함께 바꾸고 `schemaVersion`을 올립니다.**
+
+**자판이 올라오면 창을 줄입니다(`windowSoftInputMode="adjustResize"`).** 미는 방식에서는 화면
+위쪽이 통째로 밀려 나가, 긴 글을 쓰는 동안 제목 줄과 저장 버튼이 화면 밖으로 사라집니다.
+창이 줄어드니 화면에서 `imePadding()`을 또 붙이지 마세요 — 글 칸 아래에 쓰지 못하는 빈자리가 생깁니다.
+**긴 글을 쓰는 화면의 버튼은 글 위에 둡니다.** 아래에 두면 자판에 가려, 한창 쓰는 중에는
+정작 저장도 누를 수 없습니다.
 
 **색·글자·모서리·움직임·진동은 한 곳에서만 정합니다.** `ui/theme`의 `Color`·`Type`·`Theme`·`Motion`과
 `ui/screen/Feedback.kt`입니다. 화면마다 따로 정하면 같은 동작이 어떤 화면에서는 울리고 어떤 화면에서는

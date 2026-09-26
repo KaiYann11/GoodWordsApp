@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MoodLogEntity::class,
         BookReadingLogEntity::class
     ],
-    version = 21,
+    version = 22,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -42,6 +42,18 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookReadingLogDao(): BookReadingLogDao
 
     companion object {
+        /**
+         * 책에 독후감 자리를 만듭니다. 원칙 종류는 표를 건드리지 않습니다.
+         *
+         * 빈 문자열을 기본값으로 둡니다. NULL을 허용하면 읽는 쪽마다 "없음"과 "빈 글"을
+         * 따로 다뤄야 하는데, 안 쓴 독후감과 지운 독후감은 사용자에게 같은 것입니다.
+         */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE books ADD COLUMN review TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /**
          * 날짜별 독서 기록을 담을 자리를 만듭니다.
          *

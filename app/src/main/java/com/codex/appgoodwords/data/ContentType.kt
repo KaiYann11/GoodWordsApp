@@ -19,13 +19,34 @@ enum class ContentType {
     INBOX,
     MEMO,
     NOT_TO_DO,
-    CONCEPT;
+    CONCEPT,
+
+    /**
+     * 지키기로 한 인생의 기준. [NOT_TO_DO]의 반대편입니다.
+     *
+     * 루틴과 다릅니다. 루틴은 **오늘 밟았는지**를 세는 것이고, 원칙은 세지 않습니다.
+     * 지킨 날을 세기 시작하면 원칙이 또 하나의 할 일이 되어, 못 지킨 날 목록만 쌓입니다.
+     * 그래서 수행 버튼이 없습니다 — 그냥 거기 있고, 흔들릴 때 다시 읽는 것입니다.
+     */
+    PRINCIPLE;
 
     /** 글귀 목록과 알림에서 다시 보여 줄 종류. 미분류 글과 개인 메모는 따로 둡니다. */
     val isReadingContent: Boolean
         get() = this in readingTypes
 
+    /** 읽음·알림·위젯·AI 추천 원문에서 빼는 종류. 남의 좋은 말이 아니라 내가 적어 둔 것입니다. */
+    val isPersonalRecord: Boolean
+        get() = this in personalTypes
+
     companion object {
         val readingTypes = listOf(QUOTE, LINK, VIDEO)
+
+        /**
+         * 읽음으로 세지 않는 종류.
+         *
+         * 한곳에 모아 둡니다. 예전에는 이 목록이 여러 군데에 따로 적혀 있어서, 종류를 늘릴 때
+         * 한 곳만 빠뜨리면 그 종류가 "오늘의 글귀"라며 알림에 뜨거나 읽음 횟수로 세어졌습니다.
+         */
+        val personalTypes = listOf(INBOX, MEMO, NOT_TO_DO, CONCEPT, PRINCIPLE)
     }
 }

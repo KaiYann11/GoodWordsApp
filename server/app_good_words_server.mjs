@@ -9,7 +9,7 @@ import { delimiter, dirname, extname, join, normalize, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 21;
+const schemaVersion = 22;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -62,7 +62,9 @@ for (const [mime, ext] of attachmentExtensions) {
 }
 
 /** 보관함에 담기는 종류. 앱 `ContentType`과 같은 이름이어야 한다. */
-const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"]);
+const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"]);
+/** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`와 같아야 한다. */
+const personalContentTypes = new Set(["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
 const triggers = new Set([
   "APP_LAUNCH",
@@ -1836,6 +1838,9 @@ function saveContent(db, payload, itemId = null) {
   });
   if (normalized.type === "NOT_TO_DO") {
     if (!normalized.title) throw new HttpError(400, "하지 않을 일을 입력해 주세요.");
+  } else if (normalized.type === "PRINCIPLE") {
+    // 기준은 제목 한 줄이면 충분하다. 이유는 안 적어도 된다.
+    if (!normalized.title) throw new HttpError(400, "원칙을 입력해 주세요.");
   } else if (!normalized.body && !normalized.sourceUrl && normalized.imageUris.length === 0 && normalized.videoUris.length === 0) {
     throw new HttpError(400, "본문, 링크, 사진, 영상 중 하나는 필요합니다.");
   }
@@ -2193,7 +2198,7 @@ function recordContentEvent(db, itemId, eventType, trigger, incrementRead) {
 }
 
 function markConfirmedOnce(db, itemId, trigger) {
-  if (["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(db.items.find(item => item.id === itemId)?.type)) return false;
+  if (personalContentTypes.has(db.items.find(item => item.id === itemId)?.type)) return false;
   const [start, end] = todayRange();
   const exists = db.exposureEvents.some(
     (event) =>
@@ -2208,7 +2213,7 @@ function markConfirmedOnce(db, itemId, trigger) {
 }
 
 function toggleConfirmed(db, itemId, trigger) {
-  if (["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT"].includes(db.items.find(item => item.id === itemId)?.type)) return false;
+  if (personalContentTypes.has(db.items.find(item => item.id === itemId)?.type)) return false;
   const [start, end] = todayRange();
   const before = db.exposureEvents.length;
   db.exposureEvents = db.exposureEvents.filter(
@@ -2428,6 +2433,8 @@ function normalizeBook(book) {
     currentPage: totalPages > 0 ? Math.min(currentPage, totalPages) : currentPage,
     status: normalizeEnum(book.status, bookStatuses, "READING"),
     note: text(book.note),
+    // 독후감은 긴 글이라 다듬지 않는다. 앞뒤 공백까지 사용자가 적은 그대로 둔다.
+    review: typeof book.review === "string" ? book.review : "",
     // 시작·완독 시각은 없을 수 있다. 0으로 바꾸면 1970년에 읽은 책이 된다.
     startedAt: nullableInteger(book.startedAt),
     finishedAt: nullableInteger(book.finishedAt),

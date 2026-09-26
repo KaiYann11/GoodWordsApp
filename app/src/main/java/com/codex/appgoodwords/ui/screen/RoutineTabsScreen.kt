@@ -18,39 +18,54 @@ import androidx.compose.ui.platform.testTag
 
 internal const val routineTabTag = "routine_tab"
 internal const val notToDoTabTag = "not_to_do_tab"
+internal const val principleTabTag = "principle_tab"
 
-/** 할 행동과 피할 행동을 나란히 두고, 각 목록의 보던 위치를 유지합니다. */
+/**
+ * 루틴 탭 안의 세 자리.
+ *
+ * 밟는 것(루틴)과 지키는 것(하지 않을 일·원칙)을 나란히 둡니다. 셋 다 "어떻게 살기로 했나"를
+ * 적는 자리라 한 탭에 모으고, 세는 방식이 다르므로 화면만 나눕니다.
+ */
+enum class RoutineTab(val label: String, val tag: String) {
+    ROUTINE("루틴", routineTabTag),
+    NOT_TO_DO("하지 않을 일", notToDoTabTag),
+    PRINCIPLE("원칙", principleTabTag)
+}
+
+/** 할 행동과 피할 행동, 지킬 기준을 나란히 두고, 각 목록의 보던 위치를 유지합니다. */
 @Composable
 fun RoutineTabsScreen(
     routineContent: @Composable () -> Unit,
     notToDoContent: @Composable () -> Unit,
+    principleContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    requestedNotToDo: Boolean? = null,
+    requestedTab: RoutineTab? = null,
     requestKey: Any? = null
 ) {
-    var showNotToDo by rememberSaveable { mutableStateOf(requestedNotToDo == true) }
+    var selected by rememberSaveable { mutableStateOf(requestedTab ?: RoutineTab.ROUTINE) }
     val stateHolder = rememberSaveableStateHolder()
-    LaunchedEffect(requestedNotToDo, requestKey) {
-        if (requestedNotToDo != null) showNotToDo = requestedNotToDo
+    LaunchedEffect(requestedTab, requestKey) {
+        if (requestedTab != null) selected = requestedTab
     }
     Column(modifier = modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = if (showNotToDo) 1 else 0) {
-            Tab(
-                selected = !showNotToDo,
-                onClick = { showNotToDo = false },
-                text = { Text("루틴") },
-                modifier = Modifier.testTag(routineTabTag)
-            )
-            Tab(
-                selected = showNotToDo,
-                onClick = { showNotToDo = true },
-                text = { Text("하지 않을 일") },
-                modifier = Modifier.testTag(notToDoTabTag)
-            )
+        TabRow(selectedTabIndex = selected.ordinal) {
+            RoutineTab.entries.forEach { tab ->
+                Tab(
+                    selected = selected == tab,
+                    onClick = { selected = tab },
+                    text = { Text(tab.label) },
+                    modifier = Modifier.testTag(tab.tag)
+                )
+            }
         }
         Box(modifier = Modifier.weight(1f)) {
-            stateHolder.SaveableStateProvider(showNotToDo) {
-                if (showNotToDo) notToDoContent() else routineContent()
+            // 탭마다 보던 자리를 따로 기억합니다. 한 벌만 두면 탭을 옮길 때마다 맨 위로 튑니다.
+            stateHolder.SaveableStateProvider(selected) {
+                when (selected) {
+                    RoutineTab.ROUTINE -> routineContent()
+                    RoutineTab.NOT_TO_DO -> notToDoContent()
+                    RoutineTab.PRINCIPLE -> principleContent()
+                }
             }
         }
     }

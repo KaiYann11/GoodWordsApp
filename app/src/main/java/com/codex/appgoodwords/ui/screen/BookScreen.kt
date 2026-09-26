@@ -50,6 +50,8 @@ internal fun bookExtractButtonTag(bookId: Long) = "book_extract_$bookId"
 
 internal fun bookProgressButtonTag(bookId: Long) = "book_progress_$bookId"
 
+internal fun bookReviewButtonTag(bookId: Long) = "book_review_$bookId"
+
 /**
  * 읽고 있는 책과 읽은 책.
  *
@@ -64,6 +66,8 @@ fun BookScreen(
     onToggleFinished: (Long) -> Unit,
     onDeleteBook: (Long) -> Unit,
     onExtractQuote: (Long, String, Int) -> Unit,
+    /** 독후감 화면을 엽니다. 긴 글이라 대화상자가 아니라 화면을 따로 씁니다. */
+    onOpenReview: (Long) -> Unit,
     modifier: Modifier = Modifier,
     /** 책마다 그 책에서 뽑은 글귀가 몇 개인지. syncId로 셉니다. */
     quoteCountBySyncId: Map<String, Int> = emptyMap(),
@@ -152,6 +156,7 @@ fun BookScreen(
                     onProgress = { progressTarget = book },
                     onToggleFinished = { onToggleFinished(book.id) },
                     onExtract = { quoteTarget = book },
+                    onOpenReview = { onOpenReview(book.id) },
                     onDelete = { pendingDelete = book }
                 )
             }
@@ -170,6 +175,7 @@ fun BookScreen(
                     onProgress = { progressTarget = book },
                     onToggleFinished = { onToggleFinished(book.id) },
                     onExtract = { quoteTarget = book },
+                    onOpenReview = { onOpenReview(book.id) },
                     onDelete = { pendingDelete = book }
                 )
             }
@@ -241,6 +247,7 @@ private fun BookCard(
     book: BookEntity,
     quoteCount: Int,
     readingDays: Int = 0,
+    onOpenReview: () -> Unit = {},
     onEdit: () -> Unit,
     onProgress: () -> Unit,
     onToggleFinished: () -> Unit,
@@ -330,6 +337,13 @@ private fun BookCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = onOpenReview,
+                    modifier = Modifier.testTag(bookReviewButtonTag(book.id))
+                ) {
+                    // 한 자라도 적어 두었으면 "이어 쓰기"입니다. 빈 화면과 쓰던 글은 다른 마음가짐입니다.
+                    Text(if (book.hasReview) "독후감 이어 쓰기" else "독후감 쓰기")
+                }
                 TextButton(onClick = onEdit) { Text("수정") }
                 TextButton(onClick = onToggleFinished) {
                     Text(if (book.isFinished) "다시 읽는 중" else "다 읽음")

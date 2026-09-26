@@ -2415,7 +2415,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 21);
+    assert.equal(stored.schemaVersion, 22);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2698,6 +2698,99 @@ describe("독서 기록", () => {
     const stored = await (await api("/api/snapshot")).json();
 
     assert.equal(stored.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId).length, 0);
+  });
+});
+
+describe("원칙", () => {
+  it("원칙을 저장하고 스냅샷에 그대로 둔다", async () => {
+    const created = await (
+      await api("/api/content", {
+        method: "POST",
+        body: { type: "PRINCIPLE", title: "화가 난 채로 답하지 않는다", body: "하루 자고 나서 다시 읽기" },
+      })
+    ).json();
+
+    assert.equal(created.type, "PRINCIPLE");
+
+    const stored = await (await api("/api/snapshot")).json();
+    const principle = stored.items.find((item) => item.syncId === created.syncId);
+    // 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 원칙 탭에서 사라진다.
+    assert.equal(principle.type, "PRINCIPLE");
+    assert.equal(principle.body, "하루 자고 나서 다시 읽기");
+  });
+
+  it("제목이 없으면 거절한다", async () => {
+    const response = await api("/api/content", { method: "POST", body: { type: "PRINCIPLE", title: "   " } });
+
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /원칙/);
+  });
+
+  it("본문이 없어도 저장된다", async () => {
+    // 기준은 한 줄이면 충분하다. 글귀처럼 본문을 요구하면 적을 수 없다.
+    const response = await api("/api/content", { method: "POST", body: { type: "PRINCIPLE", title: "먼저 듣는다" } });
+
+    assert.equal(response.status, 201);
+  });
+
+  it("읽음으로 세지 않는다", async () => {
+    const created = await (
+      await api("/api/content", { method: "POST", body: { type: "PRINCIPLE", title: "몸이 힘들면 하루 쉰다" } })
+    ).json();
+
+    await api(`/api/content/${created.id}/toggle-confirm`, { method: "POST" });
+
+    const stored = await (await api("/api/snapshot")).json();
+    // 내가 정한 기준을 읽음으로 세면 "오늘 읽은 글귀"가 저절로 늘어난다.
+    assert.equal(stored.exposureEvents.filter((event) => event.contentItemId === created.id).length, 0);
+  });
+});
+
+describe("독후감", () => {
+  it("책에 적어 둔 독후감이 스냅샷에 남는다", async () => {
+    const book = await (
+      await api("/api/books", { method: "POST", body: { title: "독후감 쓰는 책", currentPage: 10 } })
+    ).json();
+    const review = "첫 문단입니다.\n\n빈 줄을 사이에 둔 둘째 문단입니다.";
+
+    await api(`/api/books/${book.id}`, { method: "PUT", body: { ...book, review } });
+
+    const stored = await (await api("/api/snapshot")).json();
+    // 가운데 빈 줄은 사용자가 문단을 나눈 자리다. 다듬으면 글의 모양이 달라진다.
+    assert.equal(stored.books.find((one) => one.syncId === book.syncId).review, review);
+  });
+
+  it("독후감을 싣지 않은 수정은 써 둔 글을 지우지 않는다", async () => {
+    // 앱의 책 수정 폼은 독후감을 싣지 않는다. 여기서 비우면 제목만 고쳐도 글이 사라진다.
+    const book = await (
+      await api("/api/books", { method: "POST", body: { title: "고칠 책", review: "읽고 남긴 글" } })
+    ).json();
+
+    await api(`/api/books/${book.id}`, { method: "PUT", body: { title: "고친 책" } });
+
+    const stored = await (await api("/api/snapshot")).json();
+    const saved = stored.books.find((one) => one.syncId === book.syncId);
+    assert.equal(saved.title, "고친 책");
+    assert.equal(saved.review, "읽고 남긴 글");
+  });
+
+  it("독후감이 달라도 같은 책은 하나로 합친다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          books: [
+            { id: 1, syncId: "book-a", updatedAt: 1_000, title: "같은 책", author: "같은 저자", review: "먼저 쓴 글", createdAt: 1_000 },
+            { id: 2, syncId: "book-b", updatedAt: 2_000, title: "같은 책", author: "같은 저자", review: "나중에 쓴 글", createdAt: 2_000 },
+          ],
+        }),
+      })
+    ).json();
+
+    // 합치는 기준은 제목·저자다. 독후감까지 견주면 같은 책이 두 벌 남는다.
+    assert.equal(merged.books.length, 1);
+    assert.equal(merged.books[0].review, "나중에 쓴 글");
   });
 });
 

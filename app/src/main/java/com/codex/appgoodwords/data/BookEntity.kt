@@ -29,6 +29,14 @@ data class BookEntity(
     val currentPage: Int = 0,
     val status: String = BookStatus.READING.name,
     val note: String = "",
+    /**
+     * 독후감. 읽으며 적어 두는 긴 글입니다.
+     *
+     * [note]와 자리를 나눈 이유가 있습니다. 메모는 목록에서 한눈에 보이는 한 줄이고, 독후감은
+     * 따로 펼쳐 읽고 고치는 글입니다. 한 칸에 합치면 책 카드가 글 전체를 싣고 길어져,
+     * 목록이 아니라 문서 더미가 됩니다. 여기서 문장을 골라 글귀로 뽑아낼 수 있습니다.
+     */
+    val review: String = "",
     val startedAt: Long? = null,
     val finishedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis()
@@ -52,6 +60,10 @@ data class BookEntity(
 
     val displayAuthor: String
         get() = author.ifBlank { "저자 미상" }
+
+    /** 독후감을 한 자라도 적었는지. 목록에서 "쓰기"와 "이어 쓰기"를 가릅니다. */
+    val hasReview: Boolean
+        get() = review.isNotBlank()
 }
 
 /** 책의 상태. 읽고 싶은 책은 아직 다루지 않습니다. */

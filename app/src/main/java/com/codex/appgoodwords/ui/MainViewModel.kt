@@ -750,6 +750,12 @@ class MainViewModel(
         container.repository.deleteBook(id)
     }
 
+    /** 독후감만 저장합니다. 진도·상태는 건드리지 않습니다. */
+    suspend fun saveBookReview(bookId: Long, review: String): Result<Unit> = runCatching {
+        container.repository.saveBookReview(bookId, review)
+        Unit
+    }
+
     suspend fun extractQuoteFromBook(bookId: Long, body: String, page: Int): Result<Unit> = runCatching {
         container.repository.extractQuoteFromBook(bookId, body, page)
         Unit

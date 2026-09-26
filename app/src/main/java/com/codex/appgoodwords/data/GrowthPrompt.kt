@@ -148,7 +148,7 @@ object GrowthPrompt {
 
         // 아직 정리하지 않은 글과 개인 메모는 AI 글귀 추천을 위한 제외 목록에도 보내지 않습니다.
         val ownedQuoteLines = items
-            .filter { it.type !in listOf(ContentType.INBOX, ContentType.MEMO, ContentType.NOT_TO_DO, ContentType.CONCEPT) }
+            .filter { !it.type.isPersonalRecord }
             .sortedByDescending { it.updatedAt }
             .take(MAX_LINES)
             .mapNotNull { item ->

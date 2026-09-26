@@ -38,6 +38,11 @@ object ContentNormalizer {
 
     /** 담을 것이 하나도 없으면 알려 줍니다. */
     fun validate(draft: ContentDraft) {
+        // 기준은 제목 한 줄이면 충분합니다. 이유는 안 적어도 됩니다.
+        if (draft.type == ContentType.PRINCIPLE) {
+            require(draft.title.isNotBlank()) { "원칙을 입력해 주세요." }
+            return
+        }
         if (draft.type == ContentType.NOT_TO_DO) {
             require(draft.title.isNotBlank()) { "하지 않을 일을 입력해 주세요." }
             return

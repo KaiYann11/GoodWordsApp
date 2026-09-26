@@ -72,15 +72,16 @@ class NotToDoScreenTest {
         assertEquals(2, attempts)
     }
 
-    @Test fun theTwoTabsRemainSeparateAndSearchCanRequestEitherOne() {
-        val request = mutableStateOf<Boolean?>(null)
+    @Test fun theThreeTabsRemainSeparateAndSearchCanRequestAnyOne() {
+        val request = mutableStateOf<RoutineTab?>(null)
         val requestKey = mutableStateOf(0)
         compose.setContent {
             AppGoodWordsTheme {
                 RoutineTabsScreen(
                     routineContent = { Text("실천할 루틴 목록") },
                     notToDoContent = { Text("피할 행동 목록") },
-                    requestedNotToDo = request.value, requestKey = requestKey.value
+                    principleContent = { Text("지킬 기준 목록") },
+                    requestedTab = request.value, requestKey = requestKey.value
                 )
             }
         }
@@ -88,9 +89,16 @@ class NotToDoScreenTest {
         compose.onNodeWithTag(notToDoTabTag).performClick()
         compose.onNodeWithText("피할 행동 목록").assertIsDisplayed()
         compose.onNodeWithText("실천할 루틴 목록").assertDoesNotExist()
-        compose.runOnIdle { request.value = false; requestKey.value++ }
+        compose.onNodeWithTag(principleTabTag).performClick()
+        compose.onNodeWithText("지킬 기준 목록").assertIsDisplayed()
+        compose.onNodeWithText("피할 행동 목록").assertDoesNotExist()
+        // 검색에서 찾아오면 그 탭이 열려야 합니다. 탭만 세 개 두고 데려다주지 않으면
+        // 찾아 놓고도 사용자가 다시 손으로 뒤져야 합니다.
+        compose.runOnIdle { request.value = RoutineTab.ROUTINE; requestKey.value++ }
         compose.onNodeWithText("실천할 루틴 목록").assertIsDisplayed()
-        compose.runOnIdle { request.value = true; requestKey.value++ }
+        compose.runOnIdle { request.value = RoutineTab.PRINCIPLE; requestKey.value++ }
+        compose.onNodeWithText("지킬 기준 목록").assertIsDisplayed()
+        compose.runOnIdle { request.value = RoutineTab.NOT_TO_DO; requestKey.value++ }
         compose.onNodeWithText("피할 행동 목록").assertIsDisplayed()
     }
 }

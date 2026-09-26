@@ -52,7 +52,7 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 21
+    const val schemaVersion: Int = 22
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -187,6 +187,7 @@ object AppDataJson {
         .put("currentPage", currentPage)
         .put("status", status)
         .put("note", note)
+        .put("review", review)
         // 없으면 JSONObject.NULL로 보냅니다. 0으로 보내면 1970년에 읽기 시작한 책이 됩니다.
         .put("startedAt", startedAt ?: JSONObject.NULL)
         .put("finishedAt", finishedAt ?: JSONObject.NULL)
@@ -215,6 +216,7 @@ object AppDataJson {
                         // 모르는 상태가 와도 그대로 둡니다. 지우면 다음 업로드에서 서버 값까지 사라집니다.
                         status = book.optString("status").trim().ifBlank { BookStatus.READING.name },
                         note = book.optString("note"),
+                        review = book.optString("review"),
                         startedAt = book.optNullableLong("startedAt"),
                         finishedAt = book.optNullableLong("finishedAt"),
                         createdAt = book.optLong("createdAt", System.currentTimeMillis())

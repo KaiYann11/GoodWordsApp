@@ -104,7 +104,7 @@ fun SearchScreen(
                 } else null,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                supportingText = { Text("글귀와 메모, 루틴·하지 않을 일 등 저장한 기록을 찾습니다.") },
+                supportingText = { Text("글귀와 메모, 루틴·하지 않을 일·원칙 등 저장한 기록을 찾습니다.") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(searchInputTag)

@@ -23,6 +23,8 @@ class Migration17To18Test {
         try {
             before.contentItemDao().insert(item)
             // 17과 18의 테이블 구조는 같습니다. 실제 파일을 17로 열었다가 Room의 업그레이드를 거칩니다.
+            // Room이 만든 표에는 22의 칸이 이미 있습니다. 옛 모양으로 되돌려야 ALTER가 실제로 걸립니다.
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE books DROP COLUMN review")
             before.openHelper.writableDatabase.version = 17
         } finally {
             before.close()
@@ -32,11 +34,12 @@ class Migration17To18Test {
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
-                AppDatabase.MIGRATION_20_21
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22
             ).allowMainThreadQueries().build()
         try {
             assertEquals(listOf(item), after.contentItemDao().getAll())
-            assertEquals(21, after.openHelper.writableDatabase.version)
+            assertEquals(22, after.openHelper.writableDatabase.version)
             val memo = item.copy(id = 2, syncId = "new-memo", type = ContentType.MEMO)
             after.contentItemDao().insert(memo)
             assertEquals(memo, after.contentItemDao().getById(2))
