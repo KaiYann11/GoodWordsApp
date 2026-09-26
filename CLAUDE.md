@@ -81,6 +81,9 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 
 **PowerShell로 소스 파일을 일괄 치환하지 마세요.** Windows PowerShell 5.1은 UTF-8 파일을 ANSI로 읽어서
 `Get-Content ... | Set-Content`를 거치면 한글 주석과 UI 문구가 전부 깨집니다. 파일 수정은 Edit 도구로 합니다.
+같은 이유로 **한글이 든 `.ps1`은 BOM을 붙여 저장합니다** — 없으면 따옴표가 어긋나 스크립트가 파싱조차
+안 됩니다. 그리고 `Invoke-RestMethod -Body`는 본문을 ANSI로 보내므로, **배포 확인용 요청에는 한글을
+쓰지 마세요.** 보낸 글과 돌려받은 글이 달라 멀쩡한 서버를 되돌리게 됩니다.
 
 주석과 사용자에게 보이는 문구는 한국어로 씁니다.
 

@@ -222,12 +222,72 @@ class ServerSyncClientIntegrationTest {
         assertEquals(35, log?.pagesRead)
     }
 
+    @Test
+    fun mergeSnapshot_carriesPrinciples() = runBlocking {
+        // 서버가 모르는 종류로 보면 글귀로 바꿔 버립니다. 그러면 적어 둔 기준이 원칙 탭에서
+        // 사라지고, 읽음으로 세어져 "오늘 읽은 글귀"까지 늘어납니다.
+        val syncId = "e2e-principle-" + SyncIdentity.newId()
+        val title = "기기에서 적은 원칙 " + syncId
+
+        val merged = client.mergeSnapshot(
+            settings,
+            snapshotWith(
+                items = listOf(
+                    ContentItemEntity(
+                        syncId = syncId,
+                        updatedAt = 2_000L,
+                        type = ContentType.PRINCIPLE,
+                        title = title,
+                        body = "왜 그렇게 정했는지",
+                        createdAt = 2_000L
+                    )
+                )
+            )
+        )
+
+        val principle = merged.items.firstOrNull { it.syncId == syncId }
+        assertEquals("원칙이 서버를 다녀오며 종류를 잃었습니다.", ContentType.PRINCIPLE, principle?.type)
+        assertEquals(title, principle?.title)
+        assertEquals("왜 그렇게 정했는지", principle?.body)
+    }
+
+    @Test
+    fun mergeSnapshot_carriesBookReviews() = runBlocking {
+        // 독후감은 긴 글이라 한 번 잃으면 되돌릴 수 없습니다.
+        val syncId = "e2e-book-" + SyncIdentity.newId()
+        val title = "기기에서 읽은 책 " + syncId
+        val review = "첫 문단입니다.\n\n빈 줄을 사이에 둔 둘째 문단입니다."
+
+        val merged = client.mergeSnapshot(
+            settings,
+            snapshotWith(
+                books = listOf(
+                    BookEntity(
+                        syncId = syncId,
+                        updatedAt = 2_000L,
+                        title = title,
+                        author = "저자",
+                        currentPage = 42,
+                        review = review,
+                        createdAt = 2_000L
+                    )
+                )
+            )
+        )
+
+        val book = merged.books.firstOrNull { it.syncId == syncId }
+        // 가운데 빈 줄은 사용자가 문단을 나눈 자리입니다. 다듬으면 글의 모양이 달라집니다.
+        assertEquals("독후감이 서버를 다녀오며 사라졌습니다.", review, book?.review)
+        assertEquals(42, book?.currentPage)
+    }
+
     private fun snapshotWith(
         items: List<ContentItemEntity> = emptyList(),
         deletions: List<DeletionEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
-        bookReadingLogs: List<BookReadingLogEntity> = emptyList()
+        bookReadingLogs: List<BookReadingLogEntity> = emptyList(),
+        books: List<BookEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = emptyList(),
@@ -239,7 +299,8 @@ class ServerSyncClientIntegrationTest {
         deletions = deletions,
         diaries = diaries,
         todos = todos,
-        bookReadingLogs = bookReadingLogs
+        bookReadingLogs = bookReadingLogs,
+        books = books
     )
 
     @Test
