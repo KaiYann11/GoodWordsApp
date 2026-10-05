@@ -12,7 +12,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,6 +34,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
@@ -52,6 +57,9 @@ internal fun bookProgressButtonTag(bookId: Long) = "book_progress_$bookId"
 
 internal fun bookReviewButtonTag(bookId: Long) = "book_review_$bookId"
 
+/** 진도 줄을 눌러 날짜별 보기로 들어가는 자리. 진도를 적는 `bookProgressButtonTag`와 다릅니다. */
+internal fun bookProgressOpenTag(bookId: Long) = "book_progress_open_$bookId"
+
 /**
  * 읽고 있는 책과 읽은 책.
  *
@@ -68,6 +76,8 @@ fun BookScreen(
     onExtractQuote: (Long, String, Int) -> Unit,
     /** 독후감 화면을 엽니다. 긴 글이라 대화상자가 아니라 화면을 따로 씁니다. */
     onOpenReview: (Long) -> Unit,
+    /** 날짜별 진행 화면을 엽니다. 카드에는 지금 몇 쪽인지만 있어 어제와 견줄 수 없습니다. */
+    onOpenProgress: (Long) -> Unit,
     modifier: Modifier = Modifier,
     /** 책마다 그 책에서 뽑은 글귀가 몇 개인지. syncId로 셉니다. */
     quoteCountBySyncId: Map<String, Int> = emptyMap(),
@@ -157,6 +167,7 @@ fun BookScreen(
                     onToggleFinished = { onToggleFinished(book.id) },
                     onExtract = { quoteTarget = book },
                     onOpenReview = { onOpenReview(book.id) },
+                    onOpenProgress = { onOpenProgress(book.id) },
                     onDelete = { pendingDelete = book }
                 )
             }
@@ -176,6 +187,7 @@ fun BookScreen(
                     onToggleFinished = { onToggleFinished(book.id) },
                     onExtract = { quoteTarget = book },
                     onOpenReview = { onOpenReview(book.id) },
+                    onOpenProgress = { onOpenProgress(book.id) },
                     onDelete = { pendingDelete = book }
                 )
             }
@@ -248,6 +260,7 @@ private fun BookCard(
     quoteCount: Int,
     readingDays: Int = 0,
     onOpenReview: () -> Unit = {},
+    onOpenProgress: () -> Unit = {},
     onEdit: () -> Unit,
     onProgress: () -> Unit,
     onToggleFinished: () -> Unit,
@@ -283,17 +296,43 @@ private fun BookCard(
                 }
             }
 
-            Text(
-                text = progressText(book),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
-            book.progress?.let { ratio ->
-                LinearProgressIndicator(
-                    progress = { ratio },
-                    modifier = Modifier.fillMaxWidth()
-                )
+            // 진도 줄을 그대로 눌러 날짜별 보기로 들어갑니다. 버튼을 또 늘리면 카드가 버튼밭이 되고,
+            // 정작 자주 쓰는 "글귀 뽑기"와 "진도 기록"이 묻힙니다.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .clickable(role = Role.Button, onClick = onOpenProgress)
+                    .testTag(bookProgressOpenTag(book.id))
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = progressText(book),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "날짜별 보기",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
+                book.progress?.let { ratio ->
+                    LinearProgressIndicator(
+                        progress = { ratio },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             if (book.note.isNotBlank()) {

@@ -63,6 +63,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.BookProgressCalculator
 import com.codex.appgoodwords.data.DayMood
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ContentType
@@ -76,6 +77,7 @@ import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.AppLock
 import com.codex.appgoodwords.ui.screen.AppLockScreen
 import com.codex.appgoodwords.ui.screen.AppLockState
+import com.codex.appgoodwords.ui.screen.BookProgressScreen
 import com.codex.appgoodwords.ui.screen.BookReviewScreen
 import com.codex.appgoodwords.ui.screen.PrincipleScreen
 import com.codex.appgoodwords.ui.screen.RoutineTab
@@ -122,6 +124,8 @@ private enum class AppTab(
     HISTORY("이력"),
     /** 독후감. 책 목록에서 엽니다. 하단 바에는 없습니다. */
     BOOK_REVIEW("독후감"),
+    /** 날짜별 독서 진행. 책 카드의 진도 줄에서 엽니다. */
+    BOOK_PROGRESS("독서 진행률"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
@@ -151,7 +155,9 @@ private data class AppDestination(
     val focusKind: SearchKind? = null,
     val focusId: Long? = null,
     /** 독후감을 펼친 책. 책 목록에서 열립니다. */
-    val reviewBookId: Long? = null
+    val reviewBookId: Long? = null,
+    /** 날짜별 진행을 펼친 책. */
+    val progressBookId: Long? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -598,6 +604,7 @@ fun AppGoodWordsApp(
                                                 AppTab.ADD -> Icons.Outlined.Add
                                                 AppTab.HISTORY -> Icons.Outlined.History
                                                 AppTab.BOOK_REVIEW -> Icons.Outlined.EditNote
+                                                AppTab.BOOK_PROGRESS -> Icons.Outlined.AutoAwesome
                                                 AppTab.GROWTH -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.SEARCH -> Icons.Outlined.Search
@@ -864,7 +871,8 @@ fun AppGoodWordsApp(
                                             )
                                         }
                                     },
-                                    onOpenReview = { id -> pushRoute(reviewRoute(id)) }
+                                    onOpenReview = { id -> pushRoute(reviewRoute(id)) },
+                                    onOpenProgress = { id -> pushRoute(progressRoute(id)) }
                                 )
                             },
                             // 번뜩인 것은 아이디어 탭에서 봅니다. 글귀 목록에 섞으면 둘 다 흐려집니다.
@@ -1128,6 +1136,24 @@ fun AppGoodWordsApp(
                                 }
                             }
                         )
+
+                        AppTab.BOOK_PROGRESS -> {
+                            val book = books.firstOrNull { it.id == destination.progressBookId }
+                            if (book == null) {
+                                // 다른 기기에서 지운 책일 수 있습니다. 빈 화면을 두느니 목록으로 돌립니다.
+                                LaunchedEffect(destination.progressBookId) { popRoute() }
+                            } else {
+                                BookProgressScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    book = book,
+                                    // 저장하지 않고 그때그때 셉니다. 기록을 고치면 곧바로 따라옵니다.
+                                    report = remember(book, bookReadingLogs) {
+                                        BookProgressCalculator.build(book, bookReadingLogs)
+                                    },
+                                    today = LocalDate.now()
+                                )
+                            }
+                        }
 
                         AppTab.BOOK_REVIEW -> {
                             val book = books.firstOrNull { it.id == destination.reviewBookId }
@@ -1592,6 +1618,9 @@ private fun detailRoute(tab: AppTab, itemId: Long): String = "detail:${tab.name}
 /** 독후감은 긴 글이라 대화상자가 아니라 제 화면을 씁니다. */
 private fun reviewRoute(bookId: Long): String = "review:$bookId"
 
+/** 날짜별 진행. 책 카드의 진도 줄에서 엽니다. */
+private fun progressRoute(bookId: Long): String = "progress:$bookId"
+
 private fun editRoute(returnTab: AppTab, itemId: Long): String = "edit:${returnTab.name}:$itemId"
 
 /** 검색 결과로 가는 길. 어느 탭인지는 종류가 정합니다. */
@@ -1631,6 +1660,10 @@ private fun parseRoute(route: String): AppDestination {
         "review" -> AppDestination(
             tab = AppTab.BOOK_REVIEW,
             reviewBookId = parts.getOrNull(1)?.toLongOrNull()
+        )
+        "progress" -> AppDestination(
+            tab = AppTab.BOOK_PROGRESS,
+            progressBookId = parts.getOrNull(1)?.toLongOrNull()
         )
         "edit" -> AppDestination(
             tab = AppTab.ADD,

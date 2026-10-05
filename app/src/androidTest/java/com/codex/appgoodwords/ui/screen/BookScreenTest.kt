@@ -156,7 +156,8 @@ class BookScreenTest {
             onToggleFinished = {},
             onDeleteBook = {},
             onExtractQuote = onExtractQuote,
-            onOpenReview = {}
+            onOpenReview = {},
+            onOpenProgress = {}
         )
     }
 }

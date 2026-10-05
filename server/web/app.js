@@ -1190,6 +1190,72 @@ function bookGroup(title, books, quoteCounts, readingDays) {
   `;
 }
 
+/**
+ * 책 하나의 날짜별 진행. 최근 날이 위입니다.
+ *
+ * 앱 `BookProgressCalculator`와 규칙이 같아야 합니다 — 하루에 한 줄(같은 날이 둘이면 나중에 적은 쪽),
+ * 되돌려 적은 날은 0쪽, 전체 쪽수를 모르면 퍼센트를 말하지 않습니다.
+ */
+function readingDaysOf(book) {
+  const byDate = new Map();
+  for (const log of state.snapshot.bookReadingLogs || []) {
+    if (log.bookSyncId !== book.syncId || !log.readDate) continue;
+    const current = byDate.get(log.readDate);
+    if (!current || Number(log.updatedAt || 0) > Number(current.updatedAt || 0)) byDate.set(log.readDate, log);
+  }
+  return [...byDate.values()]
+    .sort((a, b) => String(b.readDate).localeCompare(String(a.readDate)))
+    .map((log) => {
+      const start = Math.max(0, Number(log.startPage) || 0);
+      const end = Math.max(0, Number(log.endPage) || 0);
+      return {
+        date: log.readDate,
+        start,
+        end,
+        pagesRead: Math.max(0, end - start),
+        // 전체 쪽수를 모르면 null입니다. 0%라고 적으면 안 읽은 책처럼 보입니다.
+        percent: book.totalPages > 0 ? Math.round(Math.min(1, end / book.totalPages) * 100) : null,
+      };
+    });
+}
+
+/** 오늘·어제는 날짜 대신 그렇게 부릅니다. 사용자가 궁금한 것은 어제와 오늘의 차이입니다. */
+function readingDayLabel(iso) {
+  const today = todayIso();
+  if (iso === today) return "오늘";
+  const yesterday = new Date(`${today}T00:00:00`);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayIso = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+  if (iso === yesterdayIso) return "어제";
+  const [, month, day] = String(iso).split("-");
+  return `${Number(month)}월 ${Number(day)}일`;
+}
+
+function bookProgressList(book) {
+  const days = readingDaysOf(book);
+  if (!days.length) return "";
+  const total = days.reduce((sum, day) => sum + day.pagesRead, 0);
+  const rows = days
+    .slice(0, 14)
+    .map(
+      (day) => `
+        <li>
+          <strong>${escapeHtml(readingDayLabel(day.date))}</strong>
+          <span>${day.end}쪽${day.percent === null ? "" : ` (${day.percent}%)`}</span>
+          <span class="muted">${day.start} → ${day.end}쪽 · ${day.pagesRead > 0 ? `${day.pagesRead}쪽 읽음` : "앞으로 돌아갔습니다"}</span>
+        </li>`,
+    )
+    .join("");
+  // 안 읽은 날은 나누는 수에 넣지 않습니다. 쉰 날이 평균을 깎으면 꾸준함이 숫자에서 사라집니다.
+  const average = Math.round(total / days.length);
+  return `
+    <details class="bookProgress">
+      <summary>날짜별 보기 · 읽은 날 ${days.length}일 · 하루 평균 ${average}쪽</summary>
+      <ul class="readingDays">${rows}</ul>
+      ${days.length > 14 ? `<p class="muted">최근 14일만 보여 줍니다.</p>` : ""}
+    </details>`;
+}
+
 function bookCard(book, quoteCount, readingDayCount) {
   const finished = book.status === "FINISHED";
   // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
@@ -1217,6 +1283,7 @@ function bookCard(book, quoteCount, readingDayCount) {
         </button>
       </div>
       ${ratio === null ? "" : `<div class="bookBar"><span style="width:${Math.round(ratio * 100)}%"></span></div>`}
+      ${bookProgressList(book)}
       ${book.note ? `<p>${escapeHtml(book.note)}</p>` : ""}
       <div class="actions">
         <button type="button" data-action="quote-book" data-id="${book.id}">글귀 뽑기</button>
