@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        설정의 "앱 업데이트"가 받아 둔 설치 파일을 안드로이드 설치 화면으로 넘기는 데 씁니다.
+        앱이 직접 설치하는 권한이 아닙니다 — 설치 여부는 사용자가 그 화면에서 정하고,
+        처음에는 "이 출처의 앱 설치 허용"을 한 번 더 물어봅니다.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 할 일 알람은 사용자가 정한 시각에 울려야 해서 정확한 알람이 필요합니다.
          Android 12+에서는 사용자가 시스템 설정에서 한 번 켜 줘야 하고, 앱이 그 화면으로 안내합니다. -->

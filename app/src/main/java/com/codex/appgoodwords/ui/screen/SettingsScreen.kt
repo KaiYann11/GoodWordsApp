@@ -46,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.AppUpdateState
 import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.GrowthCadence
@@ -126,6 +127,14 @@ fun SettingsScreen(
     /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
     dailySteps: List<DailyStep> = DailyStep.DEFAULTS,
     onDailyStepsChanged: (List<DailyStep>) -> Unit = {},
+    /** 지금 깔려 있는 버전. 화면이 BuildConfig를 직접 보지 않아야 시험에서 값을 정해 줄 수 있습니다. */
+    currentVersionName: String = "",
+    currentVersionCode: Int = 0,
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckAppUpdate: () -> Unit = {},
+    onDownloadAppUpdate: () -> Unit = {},
+    onInstallAppUpdate: (String) -> Unit = {},
+    onDismissAppUpdate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -555,6 +564,19 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+
+        item {
+            AppUpdateCard(
+                state = appUpdateState,
+                currentVersionName = currentVersionName,
+                currentVersionCode = currentVersionCode,
+                serverConfigured = serverUrlText.isNotBlank(),
+                onCheck = onCheckAppUpdate,
+                onDownload = onDownloadAppUpdate,
+                onInstall = onInstallAppUpdate,
+                onDismiss = onDismissAppUpdate
+            )
         }
 
         item {

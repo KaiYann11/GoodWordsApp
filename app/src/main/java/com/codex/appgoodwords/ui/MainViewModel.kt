@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
+import com.codex.appgoodwords.data.AppUpdateInstaller
+import com.codex.appgoodwords.data.AppUpdateJson
+import com.codex.appgoodwords.data.AppUpdateState
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.AttachmentGallery
 import com.codex.appgoodwords.data.BookDraft
@@ -354,6 +357,62 @@ class MainViewModel(
 
     val syncStatus = container.settingsStore.syncStatusFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncStatus())
+
+    /**
+     * 앱 업데이트를 확인하고 받는 동안의 상태.
+     *
+     * 저장하지 않습니다. 앱을 껐다 켜면 처음부터 다시 묻습니다 — 그 사이에 서버에 새 버전이
+     * 올라왔을 수 있고, 받아 둔 파일은 캐시라 시스템이 비웠을 수도 있습니다.
+     */
+    private val _appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val appUpdateState: StateFlow<AppUpdateState> = _appUpdateState.asStateFlow()
+
+    /**
+     * 서버에 새 버전이 있는지 묻습니다.
+     *
+     * 사용자가 눌러야만 묻습니다. 앱을 켤 때마다 묻는 길은 두지 않았습니다 — 서버가 꺼져 있거나
+     * 밖에 있을 때 켤 때마다 실패 문구를 보게 됩니다.
+     */
+    fun checkForAppUpdate(currentVersionCode: Int) {
+        if (_appUpdateState.value is AppUpdateState.Checking) return
+        viewModelScope.launch {
+            _appUpdateState.value = AppUpdateState.Checking
+            val serverUrl = container.settingsStore.getServerSyncSettings().serverUrl
+            _appUpdateState.value = runCatching {
+                require(serverUrl.isNotBlank()) { "서버 주소를 먼저 넣어 주세요." }
+                AppUpdateJson.decide(currentVersionCode, container.appUpdateClient.fetchLatest(serverUrl))
+            }.getOrElse { error ->
+                AppUpdateState.Failed(error.message ?: "업데이트를 확인하지 못했습니다.")
+            }
+        }
+    }
+
+    /**
+     * 설치 파일을 받아 둡니다. 해시가 맞아야 [AppUpdateState.Ready]가 됩니다.
+     *
+     * 설치는 여기서 하지 않습니다. 안드로이드 설치 화면을 띄우는 일이라 화면 쪽이 맡습니다.
+     */
+    fun downloadAppUpdate() {
+        val info = (_appUpdateState.value as? AppUpdateState.Available)?.info ?: return
+        viewModelScope.launch {
+            _appUpdateState.value = AppUpdateState.Downloading(info, 0L)
+            val serverUrl = container.settingsStore.getServerSyncSettings().serverUrl
+            _appUpdateState.value = runCatching {
+                val target = AppUpdateInstaller.targetFile(container.appContext, info)
+                val file = container.appUpdateClient.download(serverUrl, info, target) { received ->
+                    _appUpdateState.value = AppUpdateState.Downloading(info, received)
+                }
+                AppUpdateState.Ready(info, file.absolutePath)
+            }.getOrElse { error ->
+                AppUpdateState.Failed(error.message ?: "설치 파일을 받지 못했습니다.")
+            }
+        }
+    }
+
+    /** 실패했거나 다 끝난 뒤 처음으로 되돌립니다. */
+    fun clearAppUpdateState() {
+        _appUpdateState.value = AppUpdateState.Idle
+    }
 
     private val _sharedText = MutableStateFlow<String?>(null)
     val sharedText: StateFlow<String?> = _sharedText.asStateFlow()

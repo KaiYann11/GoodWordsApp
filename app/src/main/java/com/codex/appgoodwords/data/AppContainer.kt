@@ -47,6 +47,11 @@ class AppContainer(
         SettingsStore(appContext)
     }
 
+    /** 설정의 "앱 업데이트"가 씁니다. 동기화와 같은 HTTPS 규칙을 따릅니다. */
+    val appUpdateClient: AppUpdateClient by lazy {
+        AppUpdateClient()
+    }
+
     val reminderScheduler: ReminderScheduler by lazy {
         ReminderScheduler(appContext)
     }

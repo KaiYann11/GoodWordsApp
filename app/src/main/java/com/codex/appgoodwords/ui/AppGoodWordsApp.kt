@@ -61,6 +61,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.codex.appgoodwords.BuildConfig
+import java.io.File
+import com.codex.appgoodwords.data.AppUpdateInstaller
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.BookProgressCalculator
@@ -210,6 +213,7 @@ fun AppGoodWordsApp(
     val todos by viewModel.todos.collectAsStateWithLifecycle()
     val books by viewModel.books.collectAsStateWithLifecycle()
     val bookReadingLogs by viewModel.bookReadingLogs.collectAsStateWithLifecycle()
+    val appUpdateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
     val shuffleSeed by viewModel.shuffleSeed.collectAsStateWithLifecycle()
     val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
     val diaryLockEnabled by viewModel.diaryLockEnabled.collectAsStateWithLifecycle()
@@ -1383,6 +1387,23 @@ fun AppGoodWordsApp(
                         ) else SettingsScreen(
                             modifier = Modifier.padding(innerPadding),
                             settings = settings,
+                            currentVersionName = BuildConfig.VERSION_NAME,
+                            currentVersionCode = BuildConfig.VERSION_CODE,
+                            appUpdateState = appUpdateState,
+                            onCheckAppUpdate = { viewModel.checkForAppUpdate(BuildConfig.VERSION_CODE) },
+                            onDownloadAppUpdate = { viewModel.downloadAppUpdate() },
+                            onInstallAppUpdate = { path ->
+                                // 설치 화면을 띄우는 것은 화면 쪽 일입니다. 뷰모델에는 Context가 없습니다.
+                                runCatching { AppUpdateInstaller.install(context, File(path)) }
+                                    .onFailure { error ->
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                error.message ?: "설치 화면을 열지 못했습니다."
+                                            )
+                                        }
+                                    }
+                            },
+                            onDismissAppUpdate = { viewModel.clearAppUpdateState() },
                             serverSyncSettings = serverSyncSettings,
                             syncStatus = syncStatus,
                             categories = categories,
