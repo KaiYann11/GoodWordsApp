@@ -1130,6 +1130,7 @@ fun AppGoodWordsApp(
                             todos = todos,
                             books = books,
                             routines = routines,
+                            routineMemos = routineMemos,
                             growthReports = growthReports,
                             onOpenHit = { hit ->
                                 if (hit.kind in listOf(SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT)) {

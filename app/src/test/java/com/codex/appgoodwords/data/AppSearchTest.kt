@@ -39,7 +39,8 @@ class AppSearchTest {
         syncId = "b1",
         title = "아주 작은 습관의 힘",
         author = "제임스 클리어",
-        note = "3장부터 다시"
+        note = "3장부터 다시",
+        review = "습관은 정체성의 결과라는 말이 오래 남았다."
     )
     private val routine = RoutineEntity(
         id = 5,
@@ -47,6 +48,14 @@ class AppSearchTest {
         title = "아침 산책",
         note = "30분",
         category = "건강"
+    )
+    private val routineMemo = RoutineMemoEntity(
+        id = 7,
+        syncId = "rm1",
+        routineId = 5,
+        routineSyncId = "r1",
+        routineTitle = "아침 산책",
+        body = "무릎이 아파서 오늘은 천천히 걸었다. 산책은 거르지 않았다."
     )
 
     private val report = GrowthReportEntity(
@@ -67,6 +76,7 @@ class AppSearchTest {
         todos = listOf(todo),
         books = listOf(book),
         routines = listOf(routine),
+        routineMemos = listOf(routineMemo),
         growthReports = listOf(report)
     )
 
@@ -184,6 +194,38 @@ class AppSearchTest {
 
         // 한 종류가 화면을 다 차지하면 다른 종류가 밀려 나갑니다.
         assertEquals(AppSearch.LIMIT_PER_KIND, hits.size)
+    }
+
+    @Test
+    fun aRoutineIsFoundByWhatWasWrittenInItsMemo() {
+        // 루틴에서 글을 쓰는 자리는 메모뿐입니다. 여기서 못 찾으면 "그때 뭐라고 적었더라"를
+        // 찾을 방법이 목록을 끝까지 굴리는 것밖에 없습니다.
+        val hit = search("무릎").hits.single()
+
+        assertEquals(SearchKind.ROUTINE, hit.kind)
+        // 눌렀을 때 메모가 아니라 그 루틴으로 가야 합니다. 메모는 루틴 안에서만 보입니다.
+        assertEquals(routine.id, hit.id)
+        assertTrue(hit.snippet, hit.snippet.contains("무릎"))
+        assertTrue(hit.meta, hit.meta.contains("메모"))
+    }
+
+    @Test
+    fun aRoutineMatchedTwiceIsStillOneResult() {
+        // 제목과 메모에 같은 말이 들어 있어도 루틴은 하나입니다. 두 줄로 나오면 목록이
+        // 같은 것으로 차서 다른 갈래가 밀려납니다.
+        val hits = search("산책").hits.filter { it.kind == SearchKind.ROUTINE }
+
+        assertEquals(1, hits.size)
+    }
+
+    @Test
+    fun aBookIsFoundByWhatWasWrittenInItsReview() {
+        // 독후감이 책에서 가장 긴 글입니다. 빼 두면 정작 쓴 것을 못 찾습니다.
+        val hit = search("정체성").hits.single()
+
+        assertEquals(SearchKind.BOOK, hit.kind)
+        assertEquals(book.id, hit.id)
+        assertTrue(hit.snippet, hit.snippet.contains("정체성"))
     }
 
     @Test

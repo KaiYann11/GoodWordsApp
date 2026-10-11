@@ -15,7 +15,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,11 +42,15 @@ import com.codex.appgoodwords.data.ContentMemoEntity
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineMemoEntity
 import com.codex.appgoodwords.data.SearchHit
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.data.TodoEntity
 
 internal const val searchInputTag = "search_input"
+
+/** 갈래 거르개. null은 전체입니다. */
+internal fun searchKindChipTag(kind: SearchKind?) = "search_kind_${kind?.name ?: "ALL"}"
 
 /**
  * 앱에 쌓인 모든 기록을 한 곳에서 찾습니다.
@@ -60,6 +66,7 @@ fun SearchScreen(
     todos: List<TodoEntity>,
     books: List<BookEntity>,
     routines: List<RoutineEntity>,
+    routineMemos: List<RoutineMemoEntity> = emptyList(),
     onOpenHit: (SearchHit) -> Unit,
     growthReports: List<GrowthReportEntity> = emptyList(),
     modifier: Modifier = Modifier,
@@ -67,10 +74,14 @@ fun SearchScreen(
     onUnlockDiaries: () -> Unit = {}
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    /** 좁혀 둔 갈래. null이면 전체입니다. */
+    var onlyKind by rememberSaveable { mutableStateOf<SearchKind?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
 
     // 글자를 칠 때마다 다시 찾습니다. 목록이 기기 안에 있어 따로 늦출 이유가 없습니다.
-    val results = remember(query, items, contentMemos, diaries, todos, books, routines, growthReports, diaryLocked) {
+    val results = remember(
+        query, items, contentMemos, diaries, todos, books, routines, routineMemos, growthReports, diaryLocked
+    ) {
         AppSearch.search(
             query = query,
             items = items,
@@ -79,9 +90,17 @@ fun SearchScreen(
             todos = todos,
             books = books,
             routines = routines,
+            routineMemos = routineMemos,
             growthReports = if (diaryLocked) emptyList() else growthReports
         )
     }
+
+    // 찾은 것이 있는 갈래만 거르개에 내놓습니다. 없는 갈래를 눌러 빈 화면을 보게 하지 않습니다.
+    val kinds = results.byKind.map { (kind, _) -> kind }
+    // 좁혀 둔 갈래가 이번 결과에 없으면 전체로 돌립니다. 글자를 더 치는 사이에 결과가
+    // 통째로 비어 "안 나온다"고 여기게 되기 때문입니다.
+    val activeKind = onlyKind?.takeIf { it in kinds }
+    val shownGroups = results.byKind.filter { (kind, _) -> activeKind == null || kind == activeKind }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -104,7 +123,9 @@ fun SearchScreen(
                 } else null,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                supportingText = { Text("글귀와 메모, 루틴·하지 않을 일·원칙 등 저장한 기록을 찾습니다.") },
+                supportingText = {
+                    Text("글귀·메모·일기·할 일·루틴과 그 메모·독후감·돌아보기까지 한 번에 찾습니다.")
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(searchInputTag)
@@ -113,6 +134,32 @@ fun SearchScreen(
 
         if (diaryLocked) {
             item { DiaryUnlockCard(onUnlock = onUnlockDiaries) }
+        }
+
+        // 갈래가 하나뿐이면 거르개가 할 일이 없습니다.
+        if (kinds.size > 1) {
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = activeKind == null,
+                            onClick = { onlyKind = null },
+                            label = { Text("전체 ${results.hits.size}") },
+                            modifier = Modifier.testTag(searchKindChipTag(null))
+                        )
+                    }
+                    items(kinds, key = { it.name }) { kind ->
+                        val count = results.hits.count { it.kind == kind }
+                        FilterChip(
+                            selected = activeKind == kind,
+                            // 누른 것을 다시 누르면 전체로 돌아옵니다.
+                            onClick = { onlyKind = if (activeKind == kind) null else kind },
+                            label = { Text("${kind.label} $count") },
+                            modifier = Modifier.testTag(searchKindChipTag(kind))
+                        )
+                    }
+                }
+            }
         }
 
         if (query.isBlank()) {
@@ -134,7 +181,7 @@ fun SearchScreen(
             }
         }
 
-        results.byKind.forEach { (kind, hits) ->
+        shownGroups.forEach { (kind, hits) ->
             item(key = "header-${kind.name}") {
                 Text(
                     text = "${kind.label} ${hits.size}",

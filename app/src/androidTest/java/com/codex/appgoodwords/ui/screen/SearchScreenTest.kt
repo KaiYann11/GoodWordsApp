@@ -12,6 +12,7 @@ import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.DiaryEntity
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineMemoEntity
 import com.codex.appgoodwords.data.SearchHit
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.data.TodoEntity
@@ -72,8 +73,12 @@ class SearchScreenTest {
 
         compose.onNodeWithTag(searchInputTag).performTextInput("아침")
 
-        compose.onNodeWithText("할 일 1").assertIsDisplayed()
-        compose.onNodeWithText("루틴 1").assertIsDisplayed()
+        // 찾은 것 자체로 봅니다. 갈래 이름은 묶음 제목과 거르개 두 곳에 나오므로
+        // 글자만으로 세면 어느 쪽을 본 것인지 알 수 없습니다.
+        compose.onNodeWithText("아침 약 먹기").assertIsDisplayed()
+        compose.onNodeWithText("아침 산책").assertIsDisplayed()
+        compose.onNodeWithTag(searchKindChipTag(SearchKind.TODO)).assertIsDisplayed()
+        compose.onNodeWithTag(searchKindChipTag(SearchKind.ROUTINE)).assertIsDisplayed()
     }
 
     @Test
@@ -107,6 +112,49 @@ class SearchScreenTest {
         assertOpens(query = "산책", label = "아침 산책", kind = SearchKind.ROUTINE, id = 5L)
 
     /** 검색어와 결과 제목이 똑같으면 검색창까지 함께 걸려서 어느 것을 누를지 정할 수 없습니다. */
+    @Test
+    fun resultsCanBeNarrowedToOneKind() {
+        compose.setContent { searchScreen() }
+
+        // "아침"은 할 일과 루틴에 둘 다 있습니다.
+        compose.onNodeWithTag(searchInputTag).performTextInput("아침")
+        compose.onNodeWithText("아침 약 먹기").assertIsDisplayed()
+        compose.onNodeWithText("아침 산책").assertIsDisplayed()
+
+        compose.onNodeWithTag(searchKindChipTag(SearchKind.ROUTINE)).performClick()
+
+        compose.onNodeWithText("아침 산책").assertIsDisplayed()
+        compose.onNodeWithText("아침 약 먹기").assertDoesNotExist()
+
+        // 누른 것을 다시 누르면 전체로 돌아옵니다.
+        compose.onNodeWithTag(searchKindChipTag(SearchKind.ROUTINE)).performClick()
+        compose.onNodeWithText("아침 약 먹기").assertIsDisplayed()
+    }
+
+    @Test
+    fun theFilterOnlyOffersKindsThatWereActuallyFound() {
+        compose.setContent { searchScreen() }
+
+        compose.onNodeWithTag(searchInputTag).performTextInput("아침")
+
+        // 없는 갈래를 눌러 빈 화면을 보게 하지 않습니다.
+        compose.onNodeWithTag(searchKindChipTag(SearchKind.DIARY)).assertDoesNotExist()
+        compose.onNodeWithTag(searchKindChipTag(null)).assertIsDisplayed()
+    }
+
+    @Test
+    fun aRoutineMemoIsSearchableAndOpensItsRoutine() {
+        var opened: SearchHit? = null
+        compose.setContent { searchScreen(onOpenHit = { opened = it }) }
+
+        // 루틴에서 글을 쓰는 자리는 메모뿐입니다.
+        compose.onNodeWithTag(searchInputTag).performTextInput("무릎")
+        compose.onNodeWithText("아침 산책").performClick()
+
+        assertEquals(SearchKind.ROUTINE, opened?.kind)
+        assertEquals(5L, opened?.id)
+    }
+
     private fun assertOpens(query: String, label: String, kind: SearchKind, id: Long) {
         var opened: SearchHit? = null
         compose.setContent { searchScreen(onOpenHit = { opened = it }) }
@@ -138,6 +186,16 @@ class SearchScreenTest {
             ),
             books = listOf(BookEntity(id = 4, syncId = "b1", title = "몰입의 즐거움", author = "칙센트미하이")),
             routines = listOf(RoutineEntity(id = 5, syncId = "r1", title = "아침 산책")),
+            routineMemos = listOf(
+                RoutineMemoEntity(
+                    id = 6,
+                    syncId = "rm1",
+                    routineId = 5,
+                    routineSyncId = "r1",
+                    routineTitle = "아침 산책",
+                    body = "무릎이 아파서 천천히 걸었다."
+                )
+            ),
             onOpenHit = onOpenHit
         )
     }

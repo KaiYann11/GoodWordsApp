@@ -64,6 +64,8 @@ object AppSearch {
         todos: List<TodoEntity> = emptyList(),
         books: List<BookEntity> = emptyList(),
         routines: List<RoutineEntity> = emptyList(),
+        /** 루틴에 적어 둔 메모. 루틴에서 실제로 글을 쓰는 자리는 여기뿐입니다. */
+        routineMemos: List<RoutineMemoEntity> = emptyList(),
         growthReports: List<GrowthReportEntity> = emptyList()
     ): SearchResults {
         val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -156,13 +158,15 @@ object AppSearch {
             addAll(
                 books.matching(
                     terms = terms,
-                    fields = { book -> listOf(book.title, book.author, book.note) }
+                    // 독후감이 책에서 가장 긴 글입니다. 여기서 빼면 정작 쓴 것을 못 찾습니다.
+                    fields = { book -> listOf(book.title, book.author, book.note, book.review) }
                 ) { book ->
                     SearchHit(
                         kind = SearchKind.BOOK,
                         id = book.id,
                         title = book.title,
-                        snippet = snippetOf(book.note, terms),
+                        // 메모와 독후감을 함께 훑어 걸린 자리를 보여 줍니다.
+                        snippet = snippetOf(listOf(book.note, book.review).joinToString(" ").trim(), terms),
                         meta = listOfNotNull(
                             book.author.takeIf { it.isNotBlank() },
                             if (book.isFinished) "읽음" else "읽는 중"
@@ -170,17 +174,31 @@ object AppSearch {
                     )
                 }
             )
+            // 루틴에 적어 둔 메모도 함께 봅니다. 루틴에서 글을 쓰는 자리는 메모뿐이라,
+            // 빼 두면 "그때 뭐라고 적었더라"를 찾을 방법이 없습니다.
+            // 메모를 따로 내놓지 않고 루틴에 얹는 이유: 제목과 메모가 같이 걸려도 한 줄이어야
+            // 결과가 같은 루틴으로 두 번 나오지 않습니다(글귀 메모와 같은 방식).
+            val memosByRoutine = routineMemos.groupBy { it.routineId }
             addAll(
                 routines.matching(
                     terms = terms,
-                    fields = { routine -> listOf(routine.title, routine.note, routine.category) }
+                    fields = { routine ->
+                        listOf(routine.title, routine.note, routine.category) +
+                            memosByRoutine[routine.id].orEmpty().map { it.body }
+                    }
                 ) { routine ->
+                    val memoBodies = memosByRoutine[routine.id].orEmpty()
+                        .sortedByDescending { it.createdAt }
+                        .map { it.body }
                     SearchHit(
                         kind = SearchKind.ROUTINE,
                         id = routine.id,
                         title = routine.title,
-                        snippet = snippetOf(routine.note, terms),
-                        meta = routine.category
+                        snippet = snippetOf((listOf(routine.note) + memoBodies).joinToString(" ").trim(), terms),
+                        meta = listOfNotNull(
+                            routine.category.takeIf { it.isNotBlank() },
+                            "메모 ${memoBodies.size}개".takeIf { memoBodies.isNotEmpty() }
+                        ).joinToString(" · ")
                     )
                 }
             )
