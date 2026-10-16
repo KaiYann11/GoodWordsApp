@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +67,8 @@ import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineMemoEntity
 import com.codex.appgoodwords.data.RoutineOrder
+import com.codex.appgoodwords.data.RoutineStatsCalculator
+import com.codex.appgoodwords.data.RoutineStatsReport
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -77,6 +81,9 @@ internal fun routineMoveTargetTag(step: Int): String = "routine_move_target_$ste
 
 /** 오늘 무엇을 볼지 고르는 거르개. 개수가 같이 적혀서 글자만으로는 짚기 어렵습니다. */
 internal fun routineFilterTag(name: String): String = "routine_filter_$name"
+
+/** 쌓인 기록으로 들어가는 줄. 카드마다 하나씩 있어 글자만으로는 짚기 어렵습니다. */
+internal fun routineStatsOpenTag(routineId: Long): String = "routine_stats_open_$routineId"
 
 /** 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다. */
 private const val HEADER_ITEM_COUNT = 3
@@ -126,6 +133,14 @@ fun RoutineScreen(
     /** 루틴을 그 자리(0부터)로 한 번에 옮깁니다. */
     onMoveRoutineTo: (RoutineEntity, Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 루틴마다 지금까지 쌓인 것([RoutineStatsCalculator]). 저장하지 않고 체크 기록에서 셉니다.
+     *
+     * 비어 있으면 카드에 기록 줄을 두지 않습니다 — 미리 보기나 시험처럼 기록이 없는 자리입니다.
+     */
+    stats: Map<Long, RoutineStatsReport> = emptyMap(),
+    /** 그 루틴의 요일별·연속 기록을 펼칩니다. */
+    onOpenStats: (RoutineEntity) -> Unit = {},
     /** 검색에서 고른 루틴. 그 자리로 굴려 주고 잠깐 강조합니다. */
     focusId: Long? = null
 ) {
@@ -331,6 +346,8 @@ fun RoutineScreen(
                         focused = row.routine.id == focusId,
                         focusKey = focusId,
                         todayCount = todayCounts[row.routine.id] ?: 0,
+                        stats = stats[row.routine.id],
+                        onOpenStats = { onOpenStats(row.routine) },
                         memoCount = memosByRoutine[row.routine.id]?.size ?: 0,
                         latestMemo = memosByRoutine[row.routine.id]?.maxByOrNull { it.createdAt },
                         onOpenMemos = { memoRoutineId = row.routine.id },
@@ -505,7 +522,9 @@ private fun RoutineCalendarGrid(
     val firstOffset = days.firstOrNull()?.date?.dayOfWeek?.value?.rem(7) ?: 0
     val cells = List(firstOffset) { null } + days
     val paddedCells = cells + List((7 - cells.size % 7) % 7) { null }
-    val weekLabels = listOf("일", "월", "화", "수", "목", "금", "토")
+    // 요일 이름과 차례는 한 곳에서 정합니다. 통계 화면의 막대와 달력 머리글이 어긋나면
+    // 같은 요일을 두 화면에서 다른 자리로 보게 됩니다.
+    val weekLabels = RoutineStatsCalculator.WEEK_ORDER.map(::weekdayLabel)
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -655,6 +674,9 @@ private fun RoutineCard(
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     todayCount: Int,
+    /** 지금까지 쌓인 것. 한 번도 밟지 않았거나 아직 셈하지 않았으면 null입니다. */
+    stats: RoutineStatsReport?,
+    onOpenStats: () -> Unit,
     memoCount: Int,
     latestMemo: RoutineMemoEntity?,
     onOpenMemos: () -> Unit,
@@ -771,6 +793,11 @@ private fun RoutineCard(
                 }
             }
 
+            // 쌓인 것이 있을 때만 둡니다. 0만 적힌 줄은 알려 주는 것이 없습니다.
+            if (stats != null && !stats.isEmpty) {
+                RoutineStatsRow(report = stats, routineId = routine.id, onOpen = onOpenStats)
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -819,6 +846,64 @@ private fun RoutineCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 쌓아 온 것을 카드 안에서 바로 보여 주는 줄.
+ *
+ * 며칠째 이어 오고 있는지가 보이지 않으면, 하루 거른 날 그만두기 쉽습니다. 줄을 그대로
+ * 눌러 요일별 기록으로 들어갑니다 — 버튼을 또 늘리면 카드가 버튼밭이 되고 정작 자주 쓰는
+ * "수행 +1"이 묻힙니다(책 카드의 진도 줄과 같은 방식).
+ *
+ * **한 번도 밟지 않은 루틴에는 이 줄을 두지 않습니다.** 0만 적힌 줄은 알려 주는 것이 없습니다.
+ */
+@Composable
+private fun RoutineStatsRow(
+    report: RoutineStatsReport,
+    routineId: Long,
+    onOpen: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.extraSmall)
+            .clickable(role = Role.Button, onClick = onOpen)
+            .testTag(routineStatsOpenTag(routineId))
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (report.currentStreakDays > 0) {
+            Text(
+                text = "${report.currentStreakDays}일 연속",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Text(
+            // 끊긴 날수를 "0일 연속"이라고 적지 않습니다. 세어 보여 주면 다그치는 말이 됩니다.
+            text = if (report.currentStreakDays > 0) {
+                "· 모두 ${report.totalChecks}회"
+            } else {
+                "실천한 날 ${report.doneDays}일 · 모두 ${report.totalChecks}회"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "기록 보기",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 

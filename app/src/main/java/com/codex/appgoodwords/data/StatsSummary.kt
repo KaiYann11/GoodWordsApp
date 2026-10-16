@@ -172,8 +172,9 @@ object StatsCalculator {
         val activeDates = confirmedByDate.keys + checksByDate.keys + diaryByDate.keys + todoDoneByDate.keys
 
         return StatsSummary(
-            currentStreakDays = currentStreak(activeDates, today),
-            bestStreakDays = bestStreak(activeDates),
+            // 세는 규칙은 [DayStreak] 한 곳에 있습니다([DailyLoopCalculator]와 같은 규칙).
+            currentStreakDays = DayStreak.current(activeDates, today),
+            bestStreakDays = DayStreak.best(activeDates),
             activeDays = activeDates.size,
             confirmedTotal = confirmedEvents.size,
             routineCheckTotal = routineChecks.size,
@@ -262,40 +263,6 @@ object StatsCalculator {
     )
 
     private fun parseDate(value: String): LocalDate? = runCatching { LocalDate.parse(value) }.getOrNull()
-
-    /**
-     * 오늘 아직 활동이 없어도 어제까지 이어졌다면 연속으로 봅니다.
-     * 하루가 통째로 비어야 끊긴 것으로 처리해, 아침에 앱을 열었을 때 streak이 0으로 보이지 않게 합니다.
-     */
-    private fun currentStreak(activeDates: Set<LocalDate>, today: LocalDate): Int {
-        if (activeDates.isEmpty()) return 0
-
-        var cursor = when {
-            today in activeDates -> today
-            today.minusDays(1) in activeDates -> today.minusDays(1)
-            else -> return 0
-        }
-
-        var streak = 0
-        while (cursor in activeDates) {
-            streak += 1
-            cursor = cursor.minusDays(1)
-        }
-        return streak
-    }
-
-    private fun bestStreak(activeDates: Set<LocalDate>): Int {
-        if (activeDates.isEmpty()) return 0
-
-        val sorted = activeDates.sorted()
-        var best = 1
-        var run = 1
-        for (index in 1 until sorted.size) {
-            run = if (sorted[index - 1].plusDays(1) == sorted[index]) run + 1 else 1
-            if (run > best) best = run
-        }
-        return best
-    }
 
     private fun recentDays(
         confirmedByDate: Map<LocalDate, Int>,

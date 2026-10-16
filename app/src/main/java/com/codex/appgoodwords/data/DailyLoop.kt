@@ -159,45 +159,11 @@ object DailyLoopCalculator {
         return DailyProgress(
             steps = chosen,
             doneSteps = doneSteps,
-            streakDays = currentStreak(fullDays, today),
-            bestStreakDays = bestStreak(fullDays)
+            // 세는 규칙은 [DayStreak] 한 곳에 있습니다. 여기서 따로 세면 같은 날을 두고
+            // 홈 카드와 통계가 다른 날수를 말하게 됩니다.
+            streakDays = DayStreak.current(fullDays, today),
+            bestStreakDays = DayStreak.best(fullDays)
         )
-    }
-
-    /**
-     * 오늘이 아직이어도 어제까지 이어졌으면 그 날수를 보여 줍니다.
-     *
-     * 아침에 앱을 열었을 때 0일로 보이면, 어제까지 쌓은 것이 사라진 것처럼 느껴집니다.
-     * 지킬 것이 있어야 오늘도 하게 됩니다. [StatsCalculator]의 연속 날수와 같은 규칙입니다.
-     */
-    private fun currentStreak(fullDays: Set<LocalDate>, today: LocalDate): Int {
-        if (fullDays.isEmpty()) return 0
-
-        var cursor = when {
-            today in fullDays -> today
-            today.minusDays(1) in fullDays -> today.minusDays(1)
-            else -> return 0
-        }
-
-        var streak = 0
-        while (cursor in fullDays) {
-            streak += 1
-            cursor = cursor.minusDays(1)
-        }
-        return streak
-    }
-
-    private fun bestStreak(fullDays: Set<LocalDate>): Int {
-        if (fullDays.isEmpty()) return 0
-
-        val sorted = fullDays.sorted()
-        var best = 1
-        var run = 1
-        for (index in 1 until sorted.size) {
-            run = if (sorted[index - 1].plusDays(1) == sorted[index]) run + 1 else 1
-            if (run > best) best = run
-        }
-        return best
     }
 
     private fun parseDate(value: String): LocalDate? = runCatching { LocalDate.parse(value) }.getOrNull()

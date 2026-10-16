@@ -75,6 +75,7 @@ import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
+import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.AppLock
@@ -103,6 +104,7 @@ import com.codex.appgoodwords.ui.screen.LibraryScreen
 import com.codex.appgoodwords.ui.screen.LibraryTab
 import com.codex.appgoodwords.ui.screen.LibraryTabsScreen
 import com.codex.appgoodwords.ui.screen.RoutineScreen
+import com.codex.appgoodwords.ui.screen.RoutineStatsScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
 import com.codex.appgoodwords.ui.screen.TodoScreen
@@ -129,6 +131,8 @@ private enum class AppTab(
     BOOK_REVIEW("독후감"),
     /** 날짜별 독서 진행. 책 카드의 진도 줄에서 엽니다. */
     BOOK_PROGRESS("독서 진행률"),
+    /** 루틴 하나의 연속 날수와 요일. 루틴 카드의 기록 줄에서 엽니다. */
+    ROUTINE_STATS("루틴 기록"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
@@ -160,7 +164,9 @@ private data class AppDestination(
     /** 독후감을 펼친 책. 책 목록에서 열립니다. */
     val reviewBookId: Long? = null,
     /** 날짜별 진행을 펼친 책. */
-    val progressBookId: Long? = null
+    val progressBookId: Long? = null,
+    /** 쌓인 기록을 펼친 루틴. */
+    val statsRoutineId: Long? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -182,6 +188,10 @@ fun AppGoodWordsApp(
     val routineChecks by viewModel.routineChecks.collectAsStateWithLifecycle()
     val routineTodayCounts by viewModel.routineTodayCounts.collectAsStateWithLifecycle()
     val routineMemos by viewModel.routineMemos.collectAsStateWithLifecycle()
+    // 루틴마다 쌓인 것(연속 날수·요일). 저장하지 않고 체크 기록에서 그때그때 셉니다.
+    val routineStats = remember(routines, routineChecks) {
+        RoutineStatsCalculator.buildAll(routines, routineChecks, LocalDate.now())
+    }
     val contentMemos by viewModel.contentMemos.collectAsStateWithLifecycle()
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
@@ -609,6 +619,7 @@ fun AppGoodWordsApp(
                                                 AppTab.HISTORY -> Icons.Outlined.History
                                                 AppTab.BOOK_REVIEW -> Icons.Outlined.EditNote
                                                 AppTab.BOOK_PROGRESS -> Icons.Outlined.AutoAwesome
+                                                AppTab.ROUTINE_STATS -> Icons.Outlined.CheckCircle
                                                 AppTab.GROWTH -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.SEARCH -> Icons.Outlined.Search
@@ -968,6 +979,8 @@ fun AppGoodWordsApp(
                                     focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
                                     routines = routines,
                                     todayCounts = routineTodayCounts,
+                                    stats = routineStats,
+                                    onOpenStats = { routine -> pushRoute(routineStatsRoute(routine.id)) },
                                     memos = routineMemos,
                                     onSaveRoutine = { draft ->
                                         coroutineScope.launch {
@@ -1155,6 +1168,22 @@ fun AppGoodWordsApp(
                                     report = remember(book, bookReadingLogs) {
                                         BookProgressCalculator.build(book, bookReadingLogs)
                                     },
+                                    today = LocalDate.now()
+                                )
+                            }
+                        }
+
+                        AppTab.ROUTINE_STATS -> {
+                            val routine = routines.firstOrNull { it.id == destination.statsRoutineId }
+                            if (routine == null) {
+                                // 다른 기기에서 지운 루틴일 수 있습니다. 빈 화면을 두느니 목록으로 돌립니다.
+                                LaunchedEffect(destination.statsRoutineId) { popRoute() }
+                            } else {
+                                RoutineStatsScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    routine = routine,
+                                    report = routineStats[routine.id]
+                                        ?: RoutineStatsCalculator.build(routine, routineChecks, LocalDate.now()),
                                     today = LocalDate.now()
                                 )
                             }
@@ -1643,6 +1672,9 @@ private fun reviewRoute(bookId: Long): String = "review:$bookId"
 /** 날짜별 진행. 책 카드의 진도 줄에서 엽니다. */
 private fun progressRoute(bookId: Long): String = "progress:$bookId"
 
+/** 루틴 하나의 연속 날수와 요일. 루틴 카드의 기록 줄에서 엽니다. */
+private fun routineStatsRoute(routineId: Long): String = "routine-stats:$routineId"
+
 private fun editRoute(returnTab: AppTab, itemId: Long): String = "edit:${returnTab.name}:$itemId"
 
 /** 검색 결과로 가는 길. 어느 탭인지는 종류가 정합니다. */
@@ -1686,6 +1718,10 @@ private fun parseRoute(route: String): AppDestination {
         "progress" -> AppDestination(
             tab = AppTab.BOOK_PROGRESS,
             progressBookId = parts.getOrNull(1)?.toLongOrNull()
+        )
+        "routine-stats" -> AppDestination(
+            tab = AppTab.ROUTINE_STATS,
+            statsRoutineId = parts.getOrNull(1)?.toLongOrNull()
         )
         "edit" -> AppDestination(
             tab = AppTab.ADD,

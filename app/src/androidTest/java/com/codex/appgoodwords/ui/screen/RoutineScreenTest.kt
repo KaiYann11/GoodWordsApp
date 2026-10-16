@@ -9,7 +9,12 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineStatsCalculator
+import com.codex.appgoodwords.data.RoutineStatsReport
+import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -24,6 +29,11 @@ import org.junit.Test
 class RoutineScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    private val zone = ZoneId.of("Asia/Seoul")
+
+    /** 2026-10-16은 금요일입니다. */
+    private val today = LocalDate.of(2026, 10, 16)
 
     private val routines = listOf(
         routine(id = 1, title = "기상 후 물 한 컵", orderIndex = 0),
@@ -149,8 +159,59 @@ class RoutineScreenTest {
         assertTrue(compose.onAllNodesWithText("다음 차례").fetchSemanticsNodes().isEmpty())
     }
 
+    @Test
+    fun theCardSaysHowManyDaysInARow() {
+        // 쌓아 온 것이 보이지 않으면 하루 거른 날 그만두기 쉽습니다.
+        showRoutines(
+            todayCounts = mapOf(1L to 1),
+            stats = statsFor("2026-10-14", "2026-10-15", "2026-10-16")
+        )
+
+        compose.onNodeWithText("3일 연속").assertIsDisplayed()
+        compose.onNodeWithText("· 모두 3회").assertIsDisplayed()
+    }
+
+    @Test
+    fun aRoutineNeverSteppedGetsNoRecordRow() {
+        // 0만 적힌 줄은 알려 주는 것이 없습니다.
+        showRoutines(stats = statsFor())
+
+        compose.onNodeWithTag(routineStatsOpenTag(1)).assertDoesNotExist()
+    }
+
+    @Test
+    fun theRecordRowOpensThatRoutinesHistory() {
+        var opened: RoutineEntity? = null
+        showRoutines(
+            stats = statsFor("2026-10-15", "2026-10-16"),
+            onOpenStats = { routine -> opened = routine }
+        )
+
+        compose.onNodeWithTag(routineStatsOpenTag(1)).performClick()
+
+        assertEquals(1L, opened?.id)
+    }
+
+    private fun statsFor(vararg dates: String): Map<Long, RoutineStatsReport> =
+        RoutineStatsCalculator.buildAll(
+            routines = routines,
+            checks = dates.map { date ->
+                RoutineCheckEntity(
+                    syncId = "check-$date",
+                    routineId = 1,
+                    routineSyncId = "routine-1",
+                    routineTitle = "기상 후 물 한 컵",
+                    checkedAt = LocalDate.parse(date).atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+                )
+            },
+            today = today,
+            zoneId = zone
+        )
+
     private fun showRoutines(
         todayCounts: Map<Long, Int> = emptyMap(),
+        stats: Map<Long, RoutineStatsReport> = emptyMap(),
+        onOpenStats: (RoutineEntity) -> Unit = {},
         onMoveRoutine: (RoutineEntity, Boolean) -> Unit = { _, _ -> },
         onMoveRoutineTo: (RoutineEntity, Int) -> Unit = { _, _ -> }
     ) {
@@ -158,6 +219,8 @@ class RoutineScreenTest {
             RoutineScreen(
                 routines = routines,
                 todayCounts = todayCounts,
+                stats = stats,
+                onOpenStats = onOpenStats,
                 memos = emptyList(),
                 onSaveRoutine = {},
                 onDeleteRoutine = {},

@@ -14,7 +14,7 @@
 .\gradlew.bat testDebugUnitTest        # JVM 유닛 테스트
 .\gradlew.bat assembleDebug            # 디버그 빌드
 .\gradlew.bat assembleRelease          # R8까지 통과하는지 확인
-node --test server/tests/server.test.mjs
+node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/tests/web.test.mjs
 ```
 
 **이 PC의 서버는 `%LOCALAPPDATA%\AppGoodWordsServer`에 따로 설치되어 있습니다.**
@@ -201,6 +201,22 @@ Room의 기본 `Converters`는 빈 문자열을 버리므로, 이 열에만 `Dia
 `position`만 1부터입니다. 줄 밖을 가리키면 맨 위/맨 아래로 당겨 붙입니다. 한쪽만 다르게 옮기면 두 기기가 병합할 때마다 서로의 차례를 고쳐
 끝나지 않습니다. **차례가 실제로 달라진 루틴만 저장합니다.** 안 바뀐 것까지 `updatedAt`을 올리면
 서버가 새 리비전을 붙여 증분 동기화가 매번 루틴 전부를 실어 나릅니다.
+
+**이어 온 날수를 세는 규칙은 `DayStreak` 한 곳에 있습니다.** 하루의 걸음(`DailyLoopCalculator`) ·
+돌아보기 통계(`StatsCalculator`) · 루틴 하나하나(`RoutineStatsCalculator`)가 같은 함수를 씁니다.
+화면마다 따로 세면 "3일 연속"이라 적힌 카드를 보며 "2일째"라는 숫자를 함께 보게 됩니다.
+**오늘이 아직 비어 있어도 어제까지 이어졌으면 그 날수를 그대로 보여 줍니다** — 아침에 0일로
+보이면 어제까지 쌓은 것이 사라진 것처럼 느껴집니다. 하루가 통째로 비어야 끊긴 것입니다.
+
+**루틴의 수행 횟수·연속 날수·요일은 체크 기록에서 그때그때 셉니다(`RoutineStatsCalculator`).**
+`RoutineCheckEntity`에 날짜가 처음부터 남아 있어서 따로 적어 둘 것이 없습니다. 저장해 두면
+기록을 고치거나 다른 기기와 합쳤을 때 숫자와 기록이 어긋납니다. 규칙 넷을 앱과 웹
+(`server/web/app.js`의 `routineStatsOf`)이 같이 지킵니다 — **횟수와 날수를 섞지 않습니다**
+(하루에 세 번 눌러도 하루이고, 요일도 날수로 셉니다), **으뜸 요일은 유일하고 두 날 이상일 때만
+말합니다**(한 번뿐인 요일을 으뜸이라 부르면 처음 밟은 날이 그대로 "내 요일"이 됩니다),
+**체크는 `routineSyncId`로 루틴을 찾습니다**(숫자 id로 묶으면 다른 기기의 남의 기록이 섞입니다.
+syncId가 비어 있는 옛 체크만 숫자 id로 찾습니다), **못 한 것을 세지 않습니다**(끊긴 날수를
+"0일 연속"이라 적거나 요일별 달성률을 매기면 돌아보는 자리가 성적표가 됩니다).
 
 **`SyncDeduplicator`(앱)와 서버 `deduplicate()`는 규칙이 같아야 합니다.** 판정 기준과 승자 선택
 (최신 `updatedAt`, 같으면 큰 `syncId`)이 어긋나면 두 기기가 병합할 때마다 서로를 고쳐 끝나지 않습니다.

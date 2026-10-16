@@ -1600,10 +1600,62 @@ function contentMemoCard(memo) {
   `;
 }
 
+/** 요일 이름. 일요일이 맨 앞입니다 — 앱 `RoutineStatsCalculator.WEEK_ORDER`와 차례가 같습니다. */
+const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** 지역 시각 기준 `yyyy-MM-dd`. toISOString은 UTC라 저녁에 하루 밀립니다. */
+function isoOfDate(date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function dayIso(timestamp) {
+  return isoOfDate(new Date(timestamp || 0));
+}
+
+function shiftIso(iso, delta) {
+  const date = new Date(`${iso}T00:00:00`);
+  date.setDate(date.getDate() + delta);
+  return isoOfDate(date);
+}
+
+/**
+ * 루틴 하나를 지금까지 어떻게 밟아 왔는지.
+ *
+ * **앱 `RoutineStatsCalculator`와 규칙이 같아야 합니다.** 셋입니다 —
+ * **날수로 셉니다**(하루에 세 번 눌러도 하루),
+ * **오늘이 아직 비어 있어도 어제까지 이어졌으면 이어 온 것으로 봅니다**(아침에 0일로 보이면
+ * 어제까지 쌓은 것이 사라진 것처럼 느껴집니다),
+ * **으뜸 요일은 유일하고 두 날 이상일 때만 말합니다**(한 번뿐인 요일을 으뜸이라 부르면 처음
+ * 밟은 날이 그대로 "내 요일"이 됩니다).
+ * 한쪽만 고치면 같은 기록을 두고 폰과 웹이 다른 날수를 말하게 됩니다.
+ */
+function routineStatsOf(checks, today) {
+  const days = new Set();
+  for (const check of checks) days.add(dayIso(check.checkedAt));
+
+  let currentStreakDays = 0;
+  let cursor = days.has(today) ? today : shiftIso(today, -1);
+  while (days.has(cursor)) {
+    currentStreakDays += 1;
+    cursor = shiftIso(cursor, -1);
+  }
+
+  const weekdayDays = new Array(7).fill(0);
+  for (const iso of days) weekdayDays[new Date(`${iso}T00:00:00`).getDay()] += 1;
+  const most = Math.max(...weekdayDays);
+  const leaders = weekdayDays.filter((count) => count === most).length;
+  const topWeekday = most >= 2 && leaders === 1 ? weekdayDays.indexOf(most) : null;
+
+  return { totalChecks: checks.length, doneDays: days.size, currentStreakDays, weekdayDays, topWeekday };
+}
+
 function routineCard(routine, checksByRoutine, memosByRoutine, index, total) {
   const checks = checksByRoutine.get(routine.id) || [];
   const memos = memosByRoutine.get(routine.id) || [];
   const todayCount = checks.filter((check) => isToday(check.checkedAt)).length;
+  const stats = routineStatsOf(checks, todayIso());
   return `
     <article class="item">
       <div class="itemHeader">
@@ -1614,6 +1666,9 @@ function routineCard(routine, checksByRoutine, memosByRoutine, index, total) {
             ${routine.sourceContentSyncId ? `<span class="chip">글귀에서 뽑음</span>` : ""}
             <span class="chip">오늘 ${todayCount}회</span>
             <span class="chip">전체 ${checks.length}회</span>
+            ${stats.currentStreakDays > 0 ? `<span class="chip">${stats.currentStreakDays}일 연속</span>` : ""}
+            ${stats.doneDays > 0 ? `<span class="chip">실천한 날 ${stats.doneDays}일</span>` : ""}
+            ${stats.topWeekday === null ? "" : `<span class="chip">${weekdayLabels[stats.topWeekday]}요일에 많이</span>`}
           </div>
         </div>
         <div class="actions">
