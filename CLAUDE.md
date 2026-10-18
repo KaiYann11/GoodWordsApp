@@ -14,7 +14,7 @@
 .\gradlew.bat testDebugUnitTest        # JVM 유닛 테스트
 .\gradlew.bat assembleDebug            # 디버그 빌드
 .\gradlew.bat assembleRelease          # R8까지 통과하는지 확인
-node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/tests/web.test.mjs
+node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/tests/web.test.mjs server/tests/publish.test.mjs
 ```
 
 **이 PC의 서버는 `%LOCALAPPDATA%\AppGoodWordsServer`에 따로 설치되어 있습니다.**
@@ -24,6 +24,15 @@ DB·첨부·접속 키는 그 폴더에 있고, 시작프로그램 바로가기�
 휴대폰용 APK를 갱신할 때는 `versionCode`를 올리고 같은 디버그 서명으로 빌드한 뒤
 `server/publish_update.ps1 -WebRoot "$env:LOCALAPPDATA\AppGoodWordsServer\app\web"`로 게시합니다.
 `/update/`에서 받는 설치 파일은 `latest.json`과 해시가 같아야 합니다.
+
+**서버는 Windows와 macOS 양쪽에서 돌아야 합니다.** 서버 본체·웹·시험은 Node 표준 라이브러리만
+쓰므로 그대로 돌고, 운영체제마다 다른 것은 띄우는 방법과 파일 두는 자리뿐입니다
+(`run_server.cmd` · `run_server.sh` · `launchd/`). **새 도구는 Node로 씁니다** — 게시 규칙은
+`server/publish_update.mjs` 한 곳에 있고 `publish_update.ps1`은 그것을 부르기만 합니다.
+PowerShell에 한 벌 더 적어 두면 한쪽만 고쳐졌을 때 운영체제에 따라 다른 `latest.json`이 나가고,
+그 사실은 앱이 업데이트를 못 찾는 꼴로만 드러납니다. macOS에서 `launchd`로 띄우면 PATH가
+`/usr/bin:/bin:/usr/sbin:/sbin`뿐이라 Homebrew·nvm으로 깐 `node`와 CLI가 보이지 않습니다 —
+plist의 `PATH`, `run_server.sh`의 찾기, 서버의 `extraCliDirs`가 그래서 있습니다.
 
 휴대폰의 서버 연결은 같은 Tailscale의 HTTPS 주소를 사용합니다. 설치된 Node는 127.0.0.1에만
 바인드하고 Tailscale Serve가 HTTPS를 제공합니다. 앱 1.1.1부터 HTTP 동기화·첨부·AI 프록시 연결을
@@ -230,8 +239,9 @@ syncId가 비어 있는 옛 체크만 숫자 id로 찾습니다), **못 한 것�
 
 **글귀에 다는 메모(`ContentMemoEntity`)는 실천으로 세지 않습니다.** 루틴 메모는 저장할 때 체크를
 함께 남기지만(`saveRoutineMemo`), 글귀 메모는 남기지 않습니다. 여기 적는 것은 실천이 아니라
-생각이라, 체크를 남기면 `routineChecks`를 "실천했다"로 세는 다섯 곳(`DailyLoop` · `StatsSummary` ·
-`FeedbackWriter` · `MoodPractice` · `GrowthPrompt`)이 한 일보다 부풀어 보입니다.
+생각이라, 체크를 남기면 `routineChecks`를 "실천했다"로 세는 일곱 곳(`DailyLoop` · `StatsSummary` ·
+`FeedbackWriter` · `MoodPractice` · `GrowthPrompt` · `DailyCoachPrompt` · `RoutineNudge`)이
+한 일보다 부풀어 보입니다.
 
 **기기 간 식별자는 `syncId`뿐입니다.** Room의 숫자 id는 기기마다 따로 증가해서 A기기 id=5와 B기기 id=5가
 서로 다른 레코드입니다. 자식은 부모를 `contentItemSyncId`(이벤트·글귀 메모) 또는
@@ -336,6 +346,45 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 뒤집힙니다. 지난 조언은 `isEmpty`에 세지 않습니다. 이 기간에 한 일이 없는데 조언만 들고
 다시 물으면 같은 말이 돌아옵니다.
 
+**오늘의 한마디는 오늘만 봅니다(`DailyCoachPrompt`).** 돌아보기는 지난 이레·한 달을 정리해
+**남겨 두는 글**이고, 한마디는 하루가 흐르는 동안 곁에서 건네는 말입니다. 더 멀리 보게 하면
+돌아보기가 하나 더 생기고, 같은 기록을 두고 두 자리가 다른 말을 합니다. 무엇을 했는지는
+`DayScoreCalculator.digest`에서 그대로 가져옵니다 — 여기서 따로 세면 그날 카드와 어긋납니다.
+지켜야 할 것 넷입니다. **같은 기록으로 두 번 묻지 않습니다**(`DailyCoachDigest.fingerprint`) —
+기록이 그대로인데 다시 물으면 거의 같은 말이 돌아오고 값만 한 번 더 듭니다. 지문에 **시계를
+넣지 마세요.** 매분 달라져 이 규칙이 통째로 무너집니다. **틈과 상한을 둡니다** — 루틴을 연달아
+다섯 개 체크하면 지문도 다섯 번 바뀌는데, 그때마다 물으면 사용자가 한 일이 그대로 요금이
+됩니다. 실패도 한 번으로 셉니다. **몇 번까지·얼마 만에 물을지는 사용자가 정합니다**
+(`AiFeedbackSettings.askLimit` · `gapMinutes`). 값이 드는 정도는 사람마다 다르게 느낍니다 —
+코드에 숫자를 박아 두지 말고 그 둘을 넘겨 쓰세요(`DailyCoachState.needsAsk`). 바닥과 천장은
+둡니다(`MIN_GAP_MINUTES` · `MAX_ASK_LIMIT`) — 0분이면 한 일이 그대로 요금이 되고, 천장이 없으면
+설정 한 번으로 하루 요금이 끝없이 커집니다. 횟수 0은 **"저절로는 묻지 않음"**이지 "못 묻게 함"이
+아닙니다 — 직접 누르는 길(`force`)은 열어 둡니다. **배경에서 돌리지 않습니다** — 앱이 꺼져
+있을 때 보낸 물음은 받아 볼 사람이 없고, 사용자는 자기도 모르게 쓴 몫만 보게 됩니다. 홈이
+열려 있을 때만 들여다봅니다. **오늘 한 것이 없으면 묻지 않습니다** — 빈 기록으로 물으면
+누구에게나 같은 말이 돌아오고, 그 말은 앱이 공짜로 합니다.
+
+**가벼운 쪽은 AI를 부르지 않습니다(`RoutineNudgeCalculator`).** 아직 안 밟은 루틴 한 줄은
+기록에서 그때그때 셉니다 — 그래서 연결이 없어도, 하루 물을 횟수를 다 썼어도 뜹니다. 이 카드가
+값을 치러야만 쓸모 있는 자리가 되지 않게 하는 것이 이 줄의 몫입니다. 규칙 셋입니다.
+**남은 개수를 세지 않고 다음 하나만 말합니다**(`DailyProgress.message`와 같은 규칙) —
+"3개 남았습니다"는 할 일 목록처럼 읽혀 오히려 손이 무거워집니다. **이어 오던 것을 먼저
+짚습니다**(`STREAK_MIN_DAYS` 이상일 때만) — 새로 시작하는 것보다 지키는 쪽이 힘이 셉니다.
+**루틴이 하나도 없으면 줄을 두지 않습니다** — 만들라는 권유는 루틴 탭이 이미 합니다.
+**오늘 안 밟은 루틴을 추리는 자리는 `restOfToday` 하나입니다** — 화면의 한 줄과 AI에게 보내는
+목록이 다른 루틴을 가리키면 안 됩니다. 거기서 **syncId가 있는 체크는 숫자 id를 보지 않습니다**.
+둘 다 보면 다른 기기 체크의 숫자 id가 이쪽의 엉뚱한 루틴과 겹쳐, 밟지도 않은 것이 빠집니다.
+
+**한마디는 기기에만 둡니다(`SettingsStore`의 `ai_coach_state`).** 자정이면 버리는 글이라
+레코드로 만들지 않았습니다 — 하루짜리에 삭제 표식·병합·중복 합치기가 따라붙고, 기기마다 묻는
+때가 달라 합칠 기준도 없습니다. **남는 것은 사용자가 집어 간 것뿐입니다** — 글귀는 보관함으로,
+루틴은 루틴으로, 해 볼 일은 오늘 할 일로(`DailyCoachCoordinator.keep*`). 담은 것은 다시 담지
+않습니다(`quoteKept`·`routineKept`·`actionKept`). 카드의 버튼은 스치듯 누르는 자리라 두 번
+눌리면 같은 것이 두 벌 생깁니다. **일기가 어디까지 나가는지는 `GrowthPrompt.diaryLine` 한
+곳이 정합니다** — 코치도 같은 함수를 씁니다. 두 곳에 적어 두면 설정은 꺼 두었는데 다른 길로
+본문이 나갑니다. 켜고 끄는 것은 사용자가 정하고(`AiFeedbackSettings.coachEnabled`, 기본 꺼짐),
+끈 사람의 홈에는 권유 카드도 두지 않습니다.
+
 **AI 공급자를 늘리면 앱 `AiProvider`와 서버 `aiProviders`를 함께 늘립니다.** 어디에 물어볼지는
 기기가 정하고(`provider`), 서버는 그에 맞는 열쇠만 골라 씁니다. 서버 쪽을 빠뜨리면 사용자가 고른
 곳이 아닌 데로 기록이 나갑니다. 열쇠는 공급자마다 따로 둡니다(`openAiKey`·`anthropicKey`).
@@ -365,7 +414,7 @@ AI 열쇠는 기기(`SettingsStore`)나 서버(`OPENAI_API_KEY`·`ANTHROPIC_API_
 같이 걸릴 때 같은 것이 두 줄로 나오고, 눌러도 갈 화면이 없습니다.
 
 **앱 업데이트는 `/update/latest.json`을 읽고 받아 **해시를 맞춰 본 뒤에만** 설치 화면으로 넘깁니다.**
-게시 스크립트(`server/publish_update.ps1`)가 쓰는 꼴과 앱 `AppUpdateJson`이 읽는 꼴이 같아야 합니다 —
+게시 스크립트(`server/publish_update.mjs`)가 쓰는 꼴과 앱 `AppUpdateJson`이 읽는 꼴이 같아야 합니다 —
 한쪽만 바꾸면 업데이트가 영영 안 보입니다. 지켜야 할 것 넷입니다.
 **서버가 알려 준 파일 이름을 그대로 믿지 않습니다**(`app-good-words-….apk` 꼴만 받습니다) —
 이름을 주소에 붙여 받으므로 `../`가 섞이면 엉뚱한 파일을 받아 설치 화면까지 올라갑니다.

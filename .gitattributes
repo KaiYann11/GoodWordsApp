@@ -1,0 +1,16 @@
+# 줄 끝 규칙.
+#
+# 이 PC는 `core.autocrlf=true`라 받을 때 CRLF로 바뀝니다. 윈도우에서 쓰는 데는 문제가
+# 없지만, **맥·리눅스에서 그대로 실행되는 파일에 CRLF가 섞이면 실행 자체가 안 됩니다** —
+# `/usr/bin/env sh^M: no such file or directory` 한 줄만 남고 서버가 뜨지 않습니다.
+# 그래서 실행되는 것들만 LF로 못 박습니다. 지금 저장소에 들어 있는 것이 이미 전부 LF라
+# 이 규칙으로 바뀌는 파일은 없고, 앞으로 CRLF가 섞여 들어오는 것만 막습니다.
+*.sh    text eol=lf
+*.mjs   text eol=lf
+gradlew text eol=lf
+
+# 윈도우에서만 도는 것들입니다. PowerShell 5.1은 한글이 든 .ps1을 BOM 없이 읽으면
+# 따옴표가 어긋나 파싱조차 못 하므로, 내용은 건드리지 않습니다(BOM 유지).
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

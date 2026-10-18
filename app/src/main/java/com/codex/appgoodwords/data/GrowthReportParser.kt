@@ -29,6 +29,10 @@ object GrowthReportParser {
     ): GrowthReportEntity? {
         val json = extractObject(rawText) ?: return null
         val quote = json.optJSONObject("suggestedQuote")
+        // 글귀만 문자열로 보내오는 모델도 있습니다. **덩어리로 왔으면 문자열 자리를 보지
+        // 않습니다** — `optString`은 덩어리를 글로 바꿔 돌려주어서, 빈 글귀를 받은 날
+        // 추천 글귀 자리에 `{"author":"","text":""}`가 그대로 적힙니다.
+        val quoteText = quote?.optString("text") ?: json.optString("suggestedQuote")
 
         val report = GrowthReportEntity(
             updatedAt = now,
@@ -38,8 +42,7 @@ object GrowthReportParser {
             model = model,
             strengths = json.optJSONArray("strengths").toLines(),
             improvements = json.optJSONArray("improvements").toLines(),
-            // 글귀만 문자열로 보내오는 모델도 있습니다.
-            suggestedQuote = quote?.optString("text").orEmpty().ifBlank { json.optString("suggestedQuote") }.trim(),
+            suggestedQuote = quoteText.trim(),
             suggestedQuoteAuthor = quote?.optString("author").orEmpty().trim(),
             suggestedRoutines = json.optJSONArray("suggestedRoutines").toLines(),
             guide = json.optString("guide").trim(),

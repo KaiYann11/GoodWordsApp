@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.DayScore
@@ -54,6 +55,7 @@ import com.codex.appgoodwords.data.MoodPracticeRow
 import com.codex.appgoodwords.data.OnThisDayMemory
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineNudge
 import com.codex.appgoodwords.data.StatsSummary
 import java.time.LocalDate
 import java.time.YearMonth
@@ -105,6 +107,23 @@ fun HomeScreen(
     onCaptureIdea: (String) -> Unit = {},
     /** 왼쪽으로 밀었을 때. 담는 칸을 띄웁니다. */
     onSwipeToCapture: () -> Unit = {},
+    /**
+     * 오늘의 한마디. null이면 카드를 두지 않습니다 — 설정에서 켜지 않은 상태입니다.
+     *
+     * 끈 사람의 홈에 "켜 보세요" 카드를 매일 띄우지 않습니다. 값이 드는 기능이라
+     * 권유가 아니라 고르는 자리(설정)에 둡니다.
+     */
+    coach: DailyCoachState? = null,
+    /** 오늘 한 것이 있는지. 없으면 한마디 대신 그 사실을 적습니다. */
+    coachHasRecordToday: Boolean = true,
+    coachLoading: Boolean = false,
+    /** 아직 안 밟은 루틴 한 줄. AI 없이 기기에서 센 것이라 연결이 없어도 뜹니다. */
+    coachNudge: RoutineNudge? = null,
+    onOpenRoutines: () -> Unit = {},
+    onRefreshCoach: () -> Unit = {},
+    onKeepCoachQuote: () -> Unit = {},
+    onKeepCoachRoutine: () -> Unit = {},
+    onKeepCoachAction: () -> Unit = {},
     /** 오늘 점수와 최근 흐름. null이면 카드를 두지 않습니다. */
     todayScore: DayScore? = null,
     scoreTrend: ScoreTrend? = null,
@@ -168,6 +187,24 @@ fun HomeScreen(
         // 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
         item {
             TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
+        }
+
+        // 오늘 걸은 것과 오늘 어땠는지 바로 아래입니다. 코치가 보는 것이 그 둘이라,
+        // 무엇을 보고 하는 말인지가 읽는 순서에서 드러납니다.
+        coach?.let { state ->
+            item {
+                DailyCoachCard(
+                    state = state,
+                    loading = coachLoading,
+                    hasRecordToday = coachHasRecordToday,
+                    nudge = coachNudge,
+                    onOpenRoutines = onOpenRoutines,
+                    onRefresh = onRefreshCoach,
+                    onKeepQuote = onKeepCoachQuote,
+                    onKeepRoutine = onKeepCoachRoutine,
+                    onKeepAction = onKeepCoachAction
+                )
+            }
         }
 
         // 번뜩인 것은 언제 올지 모릅니다. 담으러 들어가는 사이에 날아가므로,

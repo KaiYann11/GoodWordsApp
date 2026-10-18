@@ -5,7 +5,7 @@ import org.json.JSONObject
 /**
  * 서버에 올라와 있는 설치 파일.
  *
- * 게시 스크립트(`server/publish_update.ps1`)가 쓰는 `/update/latest.json`과 같은 모양입니다.
+ * 게시 스크립트(`server/publish_update.mjs`)가 쓰는 `/update/latest.json`과 같은 모양입니다.
  * 한쪽만 바꾸면 앱이 업데이트를 영영 못 찾습니다.
  */
 data class AppUpdateInfo(

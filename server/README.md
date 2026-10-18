@@ -18,6 +18,8 @@ http://127.0.0.1:8765
 탭은 홈 · 보관함 · 루틴 · 하지 않을 일 · 할 일 · 일기 · 독서 · 돌아보기 · 이력 · 서버입니다. 앱에서 하는 일은 웹에서도 됩니다.
 
 Windows에서 간단히 실행하려면 `server\run_server.cmd`를 열면 됩니다.
+macOS·리눅스에서는 `server/run_server.sh`입니다(아래 [macOS에서 실행](#macos에서-실행)).
+서버 본체·웹 화면·게시 스크립트·시험은 모두 Node 표준 라이브러리만 쓰므로 양쪽에서 같이 돕니다.
 
 ## 이 PC에 설치된 서버
 
@@ -51,7 +53,16 @@ LAN에 TCP 8765 포트를 열 필요가 없습니다. 설정 방법은 아래 HT
 .\server\publish_update.ps1 -WebRoot "$env:LOCALAPPDATA\AppGoodWordsServer\app\web"
 ```
 
-저장소에서 직접 서버를 실행 중이면 `-WebRoot`를 생략합니다. 게시 스크립트는 APK를 버전·해시가
+맥에서는 같은 일을 Node로 합니다. **게시 규칙은 `publish_update.mjs` 한 곳에 있고**,
+위의 `publish_update.ps1`은 이 파일을 부르기만 합니다 — 두 벌로 적어 두면 한쪽만 고쳐졌을 때
+운영체제에 따라 다른 `latest.json`이 나갑니다.
+
+```sh
+./gradlew assembleDebug
+node server/publish_update.mjs --web-root ~/Library/Application\ Support/AppGoodWordsServer/web
+```
+
+저장소에서 직접 서버를 실행 중이면 `-WebRoot`/`--web-root`를 생략합니다. 게시 스크립트는 APK를 버전·해시가
 포함된 이름으로 복사한 뒤 `latest.json`을 교체하므로 서버를 재시작할 필요가 없습니다.
 페이지는 매번 최신 목록을 가져옵니다. 이전 파일은 이미 다운로드 중인 사용자를 위해 보존합니다.
 
@@ -59,19 +70,37 @@ LAN에 TCP 8765 포트를 열 필요가 없습니다. 설정 방법은 아래 HT
 릴리스를 게시하면 기존 앱에 업데이트할 수 없습니다. [Android 앱 서명 안내](https://developer.android.com/studio/publish/app-signing)
 설치는 Android의 사용자 확인을 거칩니다. [웹사이트를 통한 배포 안내](https://developer.android.com/distribute/marketing-tools/alternative-distribution)
 
-## 맥미니에서 실행
+## macOS에서 실행
 
-맥미니에서도 Node는 루프백에서 실행하고 휴대폰은 HTTPS 프록시를 통해 연결합니다.
+**서버는 Windows와 macOS 어느 쪽에서도 같은 일을 합니다.** 서버 본체는 Node 표준 라이브러리만
+쓰고, 운영체제마다 다른 것은 띄우는 방법과 파일을 두는 자리뿐입니다. 맥에서도 Node는 루프백에
+두고 휴대폰은 HTTPS 프록시(Tailscale Serve)로 연결합니다.
+
+Node 18 이상이 필요합니다(`node:` 로 시작하는 표준 모듈과 `fetch`를 씁니다).
 
 ```sh
+brew install node          # 이미 있으면 건너뜁니다
 cd /path/to/AppGoodWords/server
 chmod +x ./run_server.sh
 APP_GOOD_WORDS_API_KEY="change-me" ./run_server.sh
 ```
 
-맥미니와 휴대폰에 같은 Tailscale 계정을 연결한 뒤 아래 HTTPS 연결 절을 적용합니다.
+**기록은 저장소 밖에 둡니다.** 체크아웃 안에 두면 `git clean` 한 번에 사라집니다.
+맥에서 쓰는 자리는 `~/Library/Application Support/AppGoodWordsServer`입니다
+(Windows 설치본의 `%LOCALAPPDATA%\AppGoodWordsServer\data`에 해당합니다).
+첨부 파일은 DB 파일 옆 `attachments/`에 쌓입니다.
 
-맥미니 부팅 시 자동 실행하려면 `launchd/com.appgoodwords.server.plist.example`의 경로와 API 키를 수정한 뒤 아래처럼 등록합니다.
+```sh
+mkdir -p ~/Library/Application\ Support/AppGoodWordsServer
+APP_GOOD_WORDS_DB=~/Library/Application\ Support/AppGoodWordsServer/app-good-words.db.json \
+APP_GOOD_WORDS_API_KEY="$(cat ~/Library/Application\ Support/AppGoodWordsServer/api-key.txt)" \
+  ./run_server.sh
+```
+
+맥과 휴대폰에 같은 Tailscale 계정을 연결한 뒤 아래 HTTPS 연결 절을 적용합니다.
+
+로그인할 때 저절로 띄우려면 `launchd/com.appgoodwords.server.plist.example`의 경로·API 키·DB
+자리를 고쳐 등록합니다.
 
 ```sh
 cp launchd/com.appgoodwords.server.plist.example ~/Library/LaunchAgents/com.appgoodwords.server.plist
@@ -85,13 +114,34 @@ launchctl enable gui/$(id -u)/com.appgoodwords.server
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.appgoodwords.server.plist
 ```
 
+**launchd는 PATH를 거의 비워서 넘깁니다**(`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew나 nvm으로
+깐 `node`·`claude`·`codex`가 그 안에 없어, 그냥 걸면 로그에 `node: command not found` 한 줄만
+남습니다. plist 예시에 `PATH`를 넣어 두었고, `run_server.sh`도 흔히 깔리는 자리를 한 번 더
+찾아봅니다. 그래도 못 찾으면 짚어 줍니다.
+
+- `APP_GOOD_WORDS_NODE` — node 실행 파일 경로
+- `APP_GOOD_WORDS_CLAUDE_CLI` · `APP_GOOD_WORDS_CODEX_CLI` — CLI 공급자를 쓸 때(아래 AI 돌아보기)
+
+로그는 plist에 적은 `/tmp/appgoodwords-server.{out,err}.log`에 쌓입니다.
+`node --test server/tests/*.test.mjs`로 돌리는 시험도 맥에서 그대로 돕니다.
+
 ## HTTPS 연결
 
-PC·맥미니와 휴대폰을 같은 Tailscale에 연결합니다. 서버를 루프백에 실행한 뒤 Serve를 설정합니다.
+PC·맥과 휴대폰을 같은 Tailscale에 연결합니다. 서버를 루프백에 실행한 뒤 Serve를 설정합니다.
 
 ```powershell
 .\run_server.ps1 -BindHost 127.0.0.1 -Port 8765 -Seed
 tailscale serve --bg --https=443 http://127.0.0.1:8765
+```
+
+맥에서도 같은 명령입니다. App Store 판 Tailscale에는 `tailscale` 명령이 PATH에 없어
+앱 안의 것을 직접 부릅니다.
+
+```sh
+./run_server.sh
+tailscale serve --bg --https=443 http://127.0.0.1:8765
+# App Store 판이면:
+/Applications/Tailscale.app/Contents/MacOS/Tailscale serve --bg --https=443 http://127.0.0.1:8765
 ```
 
 API 키는 실행 전에 `APP_GOOD_WORDS_API_KEY`로 지정합니다. Serve가 계정의 HTTPS 활성화를

@@ -111,4 +111,70 @@ class AiFeedbackSettingsTest {
             assertTrue(provider.name, provider.models.isNotEmpty())
         }
     }
+
+    @Test
+    fun canAskFollowsTheSameRouteTheClientTakes() {
+        // 화면이 "받을 수 있다"고 해 놓고 부를 때마다 실패하거나, 부를 수 있는데 조용히
+        // 아무것도 안 하면 사용자는 무엇이 어긋났는지 알 수 없습니다.
+        val none = AiFeedbackSettings()
+        assertFalse(none.canAsk(hasServer = false))
+        assertTrue("서버가 열쇠를 들고 있을 수 있습니다.", none.canAsk(hasServer = true))
+
+        val withKey = AiFeedbackSettings(openAiKey = "sk-openai")
+        assertTrue(withKey.canAsk(hasServer = false))
+
+        // CLI는 이 기기에 없습니다. 서버가 없으면 되돌아갈 길이 없습니다.
+        val cli = AiFeedbackSettings(openAiKey = "sk-openai").withProvider(AiProvider.CLAUDE_CLI)
+        assertFalse(cli.canAsk(hasServer = false))
+        assertTrue(cli.canAsk(hasServer = true))
+    }
+
+    @Test
+    fun howOftenToAskIsUpToTheUser() {
+        val settings = AiFeedbackSettings(coachAskLimit = 1, coachGapMinutes = 30)
+
+        assertEquals(1, settings.askLimit)
+        assertEquals(30L, settings.gapMinutes)
+        assertFalse(settings.asksOnlyWhenAsked)
+    }
+
+    @Test
+    fun theGapHasAFloorAndTheCountHasACeiling() {
+        // 0분이면 오늘 한 것이 바뀔 때마다 묻게 되어, 루틴을 연달아 밟은 날 그 횟수가
+        // 그대로 요금이 됩니다. 천장이 없으면 설정 한 번으로 하루 요금이 끝없이 커집니다.
+        assertEquals(AiFeedbackSettings.MIN_GAP_MINUTES.toLong(), AiFeedbackSettings(coachGapMinutes = 0).gapMinutes)
+        assertEquals(AiFeedbackSettings.MAX_ASK_LIMIT, AiFeedbackSettings(coachAskLimit = 9999).askLimit)
+        assertEquals(0, AiFeedbackSettings(coachAskLimit = -3).askLimit)
+    }
+
+    @Test
+    fun askingNoneStillLeavesTheButton() {
+        // "안 함"은 저절로 묻지 않는다는 뜻입니다. 직접 누르는 것까지 막지 않습니다.
+        assertTrue(AiFeedbackSettings(coachAskLimit = 0).asksOnlyWhenAsked)
+    }
+
+    @Test
+    fun theFreeLineIsOnByDefault() {
+        // 아직 안 밟은 루틴을 알려 주는 쪽은 AI를 부르지 않아 값이 들지 않습니다.
+        assertTrue(AiFeedbackSettings().coachNudgeEnabled)
+    }
+
+    @Test
+    fun theChoicesOnScreenAreWithinWhatIsAllowed() {
+        AiFeedbackSettings.ASK_LIMIT_CHOICES.forEach { limit ->
+            assertEquals(limit, AiFeedbackSettings(coachAskLimit = limit).askLimit)
+        }
+        AiFeedbackSettings.GAP_MINUTE_CHOICES.forEach { minutes ->
+            assertEquals(minutes.toLong(), AiFeedbackSettings(coachGapMinutes = minutes).gapMinutes)
+        }
+    }
+
+    @Test
+    fun theDailyWordIsOffUntilItIsTurnedOn() {
+        // 하루에 여러 번 값이 드는 길이라 기본으로 켜 두지 않습니다.
+        assertFalse(AiFeedbackSettings().coachEnabled)
+        // 돌아보기 주기와 따로 켭니다.
+        assertFalse(AiFeedbackSettings(schedule = ReportPeriod.WEEKLY.name).coachEnabled)
+        assertTrue(AiFeedbackSettings(coachEnabled = true).coachEnabled)
+    }
 }

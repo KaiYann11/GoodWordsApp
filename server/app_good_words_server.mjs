@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createReadStream, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -553,12 +553,16 @@ async function askCli(plan, system, user, model) {
  *
  * `spawn`은 Windows에서 `claude.cmd` 같은 확장자를 알아서 붙여 주지 않아 직접 찾습니다.
  * Windows에서는 확장자 없는 파일(Git Bash용 스크립트)은 건너뜁니다 — 실행할 수 없습니다.
+ *
+ * macOS에서 launchd로 띄우면 PATH가 `/usr/bin:/bin:/usr/sbin:/sbin`뿐이라, Homebrew나
+ * npm으로 깐 CLI가 PATH에 없습니다. 흔히 깔리는 자리를 뒤에 붙여 한 번 더 봅니다 —
+ * 그래도 못 찾으면 `APP_GOOD_WORDS_CLAUDE_CLI`·`APP_GOOD_WORDS_CODEX_CLI`로 짚어 줍니다.
  */
 function resolveCli(plan) {
   const override = text(process.env[plan.envName]);
   if (override) return isFile(override) ? override : null;
   const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".com"] : [""];
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
+  for (const dir of [...(process.env.PATH || "").split(delimiter), ...extraCliDirs]) {
     if (!dir) continue;
     for (const extension of extensions) {
       const candidate = join(dir, plan.command + extension);
@@ -567,6 +571,12 @@ function resolveCli(plan) {
   }
   return null;
 }
+
+/** PATH가 비어 있다시피 한 자리(launchd)에서 한 번 더 보는 곳. Windows에는 해당 없습니다. */
+const extraCliDirs =
+  process.platform === "win32"
+    ? []
+    : ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin"), join(homedir(), ".bun", "bin")];
 
 function isFile(path) {
   try {

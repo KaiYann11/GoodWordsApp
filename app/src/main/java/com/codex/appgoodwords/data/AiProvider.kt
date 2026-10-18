@@ -4,6 +4,14 @@ package com.codex.appgoodwords.data
 private const val CLI_DEFAULT = ""
 
 /**
+ * AI가 권한 것을 담을 때 붙는 갈래.
+ *
+ * 돌아보기의 추천 글귀·추천 루틴과 오늘의 한마디가 **같은 이름을 씁니다.** 두 곳에 따로
+ * 적어 두면 한쪽만 고쳐졌을 때 보관함에서 "AI 추천"이 두 갈래로 갈라집니다.
+ */
+const val AI_CATEGORY = "AI 추천"
+
+/**
  * 돌아보기를 써 줄 AI.
  *
  * 부르는 길이 둘입니다. 열쇠로 API를 부르는 길과, 서버에 로그인해 둔 CLI(Claude Code·Codex)를

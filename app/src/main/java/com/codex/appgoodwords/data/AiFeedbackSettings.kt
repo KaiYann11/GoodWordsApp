@@ -41,7 +41,31 @@ data class AiFeedbackSettings(
      */
     val nudgeEnabled: Boolean = true,
     /** 마지막으로 알린 시각. 뜸해진 뒤 매일 알리면 잔소리가 되므로 이만큼 쉽니다. */
-    val lastNudgedAt: Long = 0L
+    val lastNudgedAt: Long = 0L,
+    /**
+     * 오늘 하루를 보고 한마디를 받을지([DailyCoachCoordinator]).
+     *
+     * **기본은 꺼짐입니다.** 하루에 여러 번 물을 수 있는 길이라, 켜는 것은 사용자가 정해야
+     * 합니다. 돌아보기 주기([schedule])와 따로 둡니다 — 한 달에 한 번 돌아보면서도
+     * 오늘은 곁에 두고 싶을 수 있고, 그 반대도 마찬가지입니다.
+     */
+    val coachEnabled: Boolean = false,
+    /**
+     * 하루에 **저절로** 물을 횟수. 0이면 저절로는 묻지 않습니다.
+     *
+     * 사용자가 직접 "다시 받기"를 누르는 것은 여기 세지 않습니다 — 자기가 눌러 자기 몫을
+     * 쓰는 것이라 앱이 말릴 일이 아닙니다. 0으로 두면 **가벼운 알림만** 받는 셈이 됩니다.
+     */
+    val coachAskLimit: Int = DEFAULT_ASK_LIMIT,
+    /** 저절로 다시 묻기까지 비워 두는 시간(분). 너무 짧으면 한 일이 그대로 요금이 됩니다. */
+    val coachGapMinutes: Int = DEFAULT_GAP_MINUTES,
+    /**
+     * 아직 안 밟은 루틴을 한 줄로 알려 줄지([RoutineNudge]).
+     *
+     * **기본은 켜짐입니다.** AI를 부르지 않고 기기에서 세는 것이라 값이 들지 않고,
+     * 연결이 없어도 뜹니다. 끄면 오늘의 한마디 카드에는 AI가 써 준 것만 남습니다.
+     */
+    val coachNudgeEnabled: Boolean = true
 ) {
     val activeProvider: AiProvider
         get() = AiProvider.of(provider)
@@ -95,6 +119,32 @@ data class AiFeedbackSettings(
     val canCallDirectly: Boolean
         get() = !requiresServer && activeKey.isNotBlank()
 
+    /**
+     * 지금 설정으로 AI에 닿을 수 있는지.
+     *
+     * [AiFeedbackClient.ask]가 길을 고르는 규칙과 같아야 합니다. 어긋나면 "받을 수 있다"고
+     * 해 놓고 부를 때마다 실패하거나, 부를 수 있는데도 조용히 아무것도 하지 않습니다.
+     */
+    fun canAsk(hasServer: Boolean): Boolean =
+        if (requiresServer) hasServer else hasServer || canCallDirectly
+
+    /** 저장된 값이 어떻든 셈에 쓸 수 있는 횟수. 옛 설정이나 손으로 고친 값이 들어와도 섭니다. */
+    val askLimit: Int
+        get() = coachAskLimit.coerceIn(0, MAX_ASK_LIMIT)
+
+    /**
+     * 저절로 다시 묻기까지 비워 둘 시간.
+     *
+     * **바닥을 둡니다.** 0분이면 오늘 한 것이 바뀔 때마다 묻게 되어, 루틴을 연달아 밟은 날
+     * 그 횟수가 그대로 요금이 됩니다.
+     */
+    val gapMinutes: Long
+        get() = coachGapMinutes.coerceAtLeast(MIN_GAP_MINUTES).toLong()
+
+    /** 저절로 묻는 길을 아예 닫아 두었는지. 눌러서 받는 길은 그대로 있습니다. */
+    val asksOnlyWhenAsked: Boolean
+        get() = askLimit == 0
+
     /** 오늘 만들 차례인지. [lastRunAt]이 오늘 안이면 다시 만들지 않습니다. */
     fun isDue(now: Long, today: LocalDate, zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
         val period = scheduledPeriod ?: return false
@@ -116,5 +166,25 @@ data class AiFeedbackSettings(
 
     companion object {
         const val DEFAULT_HOUR = 21
+
+        /**
+         * 하루에 저절로 묻는 횟수의 기본값.
+         *
+         * 아침·낮·오후·저녁·밤이면 하루를 따라가기에 넉넉합니다.
+         */
+        const val DEFAULT_ASK_LIMIT = 5
+
+        /** 더 크게 고를 수 없게 하는 천장. 없으면 설정 한 번으로 하루 요금이 끝없이 커집니다. */
+        const val MAX_ASK_LIMIT = 20
+
+        const val DEFAULT_GAP_MINUTES = 90
+
+        /** 아무리 짧게 잡아도 이만큼은 비웁니다(알림 간격 `ReminderSettings`와 같은 바닥). */
+        const val MIN_GAP_MINUTES = 15
+
+        /** 설정 화면에서 고를 수 있는 것들. 0은 "저절로는 묻지 않음"입니다. */
+        val ASK_LIMIT_CHOICES = listOf(0, 1, 3, 5, 10)
+
+        val GAP_MINUTE_CHOICES = listOf(30, 60, 90, 180)
     }
 }

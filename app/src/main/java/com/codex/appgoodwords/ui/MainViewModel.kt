@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.codex.appgoodwords.data.AI_CATEGORY
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
@@ -34,10 +35,14 @@ import com.codex.appgoodwords.data.OnThisDay
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
+import com.codex.appgoodwords.data.RoutineNudgeCalculator
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
+import com.codex.appgoodwords.data.DailyCoachPrompt
+import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
 import com.codex.appgoodwords.data.ScoreTrend
@@ -210,8 +215,13 @@ class MainViewModel(
         ScoreTrend(points = emptyList(), thisWeekAverage = 0, lastWeekAverage = 0)
     )
 
-    /** 오늘 점수. 홈 카드가 씁니다. 흐름의 마지막 점과 같은 규칙으로 셈합니다. */
-    val todayScore = combine(
+    /**
+     * 오늘 무엇을 했는지. 점수와 이름까지 한 묶음입니다.
+     *
+     * 홈 카드의 점수도, 오늘의 코치가 보는 하루도 여기서 나옵니다. 자리마다 따로 셈하면
+     * 카드에 적힌 것과 코치가 보고 말하는 것이 어긋납니다.
+     */
+    val todayDigest = combine(
         combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
             DayInputs(events, checks, todoList, diaryList, logs)
         },
@@ -227,20 +237,84 @@ class MainViewModel(
             moodLogs = logs,
             steps = steps,
             readingLogs = inputs.readingLogs
-        ).score
+        )
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        DayScore(
-            date = LocalDate.now(),
-            steps = DailyStep.DEFAULTS,
-            doneSteps = emptySet(),
-            routineChecks = 0,
-            todosDone = 0,
-            diaries = 0,
-            quotesRead = 0
+        DayDigest(
+            score = DayScore(
+                date = LocalDate.now(),
+                steps = DailyStep.DEFAULTS,
+                doneSteps = emptySet(),
+                routineChecks = 0,
+                todosDone = 0,
+                diaries = 0,
+                quotesRead = 0
+            ),
+            routineTitles = emptyList(),
+            todoTitles = emptyList(),
+            diaryTitles = emptyList(),
+            quoteTitles = emptyList()
         )
     )
+
+    /** 오늘 점수. 홈 카드가 씁니다. 흐름의 마지막 점과 같은 규칙으로 셈합니다. */
+    val todayScore = todayDigest
+        .map { it.score }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), todayDigest.value.score)
+
+    /** 오늘 받아 둔 한마디. 날이 바뀌면 빈 상태입니다. */
+    val dailyCoach = container.settingsStore.dailyCoachStateFlow
+        .map { it.forDate(LocalDate.now()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DailyCoachState())
+
+    /**
+     * 지금 오늘 기록의 지문. 이것이 바뀌면 홈이 코치에게 다시 물어볼 때인지 들여다봅니다.
+     *
+     * 꺼 두었으면 빈 값입니다 — 켜지 않은 사람의 화면에서 이 값이 바뀔 이유가 없습니다.
+     * 실제로 물을지는 [DailyCoachState.needsAsk]가 정합니다. 여기서는 "들여다볼 때"만 압니다.
+     */
+    val coachFingerprint = combine(
+        todayDigest,
+        dailyLoop,
+        diaries,
+        aiFeedbackSettings
+    ) { digest, progress, diaryList, ai ->
+        if (!ai.coachEnabled) {
+            ""
+        } else {
+            DailyCoachPrompt.fingerprint(
+                today = LocalDate.now(),
+                dayDigest = digest,
+                progress = progress,
+                diaries = diaryList,
+                includeDiaryBody = ai.includeDiaryBody
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    /**
+     * 아직 안 밟은 루틴 한 줄.
+     *
+     * **AI를 부르지 않습니다.** 이미 있는 기록에서 세는 것이라 값이 들지 않고, 연결이 없어도
+     * 뜹니다. 꺼 두었으면 null입니다.
+     */
+    val routineNudge = combine(
+        routines,
+        routineChecks,
+        aiFeedbackSettings
+    ) { routineList, checks, ai ->
+        if (!ai.coachNudgeEnabled) {
+            null
+        } else {
+            RoutineNudgeCalculator.build(routineList, checks, LocalDate.now())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _coachLoading = MutableStateFlow(false)
+
+    /** 코치에게 물어보는 중인지. 홈 카드가 기다리는 표시를 띄웁니다. */
+    val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
 
     /** 펼쳐 보고 있는 하루. null이면 닫힌 상태입니다. */
     private val _openedDay = MutableStateFlow<LocalDate?>(null)
@@ -919,6 +993,46 @@ class MainViewModel(
         container.repository.deleteGrowthReports(reportIds)
     }
 
+    /**
+     * 오늘의 한마디를 받아 옵니다.
+     *
+     * 홈이 열릴 때마다 불러도 됩니다. 실제로 물을 때인지는 [DailyCoachCoordinator]가 가립니다 —
+     * 오늘 한 것이 바뀌었고, 틈이 벌어졌고, 하루 상한에 닿지 않았을 때만 나갑니다.
+     *
+     * @param force 사용자가 "다시 받기"를 눌렀을 때. 그때는 같은 기록이어도 묻습니다.
+     */
+    fun refreshDailyCoach(force: Boolean = false) {
+        viewModelScope.launch {
+            // 화면이 다시 그려지거나 손가락이 두 번 닿아도 한 번만 나갑니다.
+            if (_coachLoading.value) return@launch
+            _coachLoading.value = true
+            try {
+                container.dailyCoachCoordinator.refresh(force = force)
+            } finally {
+                _coachLoading.value = false
+            }
+        }
+    }
+
+    /** 권해 받은 글귀를 보관함에 담습니다. 담은 것은 다시 담지 않습니다. */
+    suspend fun keepCoachQuote(): Result<Unit> = runCatching {
+        container.dailyCoachCoordinator.keepQuote()
+    }
+
+    suspend fun keepCoachRoutine(): Result<Unit> = runCatching {
+        container.dailyCoachCoordinator.keepRoutine()
+    }
+
+    /** 해 볼 한 가지를 오늘 할 일로 담습니다. */
+    suspend fun keepCoachAction(): Result<Unit> = runCatching {
+        container.dailyCoachCoordinator.keepAction()
+    }
+
+    /** 코치에게 무엇이 나가는지 보여 줍니다. 실제로 보내는 글과 같은 함수로 만듭니다. */
+    suspend fun previewDailyCoachPrompt(): Result<String> = runCatching {
+        container.dailyCoachCoordinator.preview()
+    }
+
     fun updateAiFeedbackSettings(updated: AiFeedbackSettings) {
         viewModelScope.launch {
             container.settingsStore.updateAiFeedbackSettings(updated)
@@ -1139,9 +1253,6 @@ class MainViewModel(
          * 짧게 잡으면 사진을 고르러 갤러리에 다녀올 때마다 잠기고, 길게 잡으면 잠가 둔 뜻이 없습니다.
          */
         const val LOCK_AFTER_MS = 60 * 1000L
-
-        /** AI가 권해서 담은 것에 붙는 카테고리. 나중에 골라 보기 쉽게 표시해 둡니다. */
-        const val AI_CATEGORY = "AI 추천"
     }
 }
 

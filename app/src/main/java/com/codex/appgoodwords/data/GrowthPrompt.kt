@@ -215,8 +215,13 @@ object GrowthPrompt {
      *
      * 본문을 싣지 않을 때도 글자 수는 남깁니다. 짧게 쓴 날과 길게 쓴 날의 차이는
      * 그 자체로 하나의 신호인데, 본문 없이도 전할 수 있습니다.
+     * **제목도 본문으로 봅니다** — 한 줄 제목에 그날의 전부가 담기기도 합니다.
+     *
+     * 오늘의 코치([DailyCoachPrompt])도 이 함수를 씁니다. 일기가 어디까지 나가는지를
+     * 정하는 자리는 하나여야 합니다. 두 곳에 적어 두면 한쪽만 고쳐졌을 때, 설정은 꺼 두었는데
+     * 다른 길로 본문이 나갑니다.
      */
-    private fun diaryLine(diary: DiaryEntity, includeBody: Boolean): String {
+    fun diaryLine(diary: DiaryEntity, includeBody: Boolean): String {
         val tags = listOfNotNull(
             diary.weather.takeIf { it.isNotBlank() },
             diary.mood.takeIf { it.isNotBlank() },

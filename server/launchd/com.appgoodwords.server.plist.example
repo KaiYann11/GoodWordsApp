@@ -21,6 +21,31 @@
     <string>8765</string>
     <key>APP_GOOD_WORDS_API_KEY</key>
     <string>change-me</string>
+
+    <!--
+      기록은 저장소 밖에 둡니다. 체크아웃 안에 두면 `git clean` 한 번에 사라지고,
+      저장소를 옮길 때마다 따라다녀야 합니다. 첨부 파일은 이 파일 옆 attachments/에 쌓입니다.
+    -->
+    <key>APP_GOOD_WORDS_DB</key>
+    <string>/Users/YOUR_USER/Library/Application Support/AppGoodWordsServer/app-good-words.db.json</string>
+
+    <!--
+      launchd는 PATH를 거의 비워서 넘깁니다(/usr/bin:/bin:/usr/sbin:/sbin).
+      Homebrew나 npm으로 깐 node·claude·codex는 그 안에 없어서, 여기에 적어 주어야
+      찾습니다. Intel 맥이면 /opt/homebrew/bin 대신 /usr/local/bin입니다.
+    -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+    <!--
+      AI 돌아보기와 오늘의 한마디를 서버에 로그인해 둔 CLI로 돌릴 때만 필요합니다.
+      PATH로 찾지 못하면 이렇게 짚어 줍니다. 열쇠로 부를 때는 OPENAI_API_KEY·
+      ANTHROPIC_API_KEY를 대신 넣습니다.
+      <key>APP_GOOD_WORDS_CLAUDE_CLI</key>
+      <string>/opt/homebrew/bin/claude</string>
+      <key>APP_GOOD_WORDS_CODEX_CLI</key>
+      <string>/opt/homebrew/bin/codex</string>
+    -->
   </dict>
 
   <key>RunAtLoad</key>

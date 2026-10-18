@@ -203,6 +203,10 @@ fun AppGoodWordsApp(
     val attachmentShots by viewModel.attachmentShots.collectAsStateWithLifecycle()
     val growthReports by viewModel.growthReports.collectAsStateWithLifecycle()
     val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
+    val dailyCoach by viewModel.dailyCoach.collectAsStateWithLifecycle()
+    val coachFingerprint by viewModel.coachFingerprint.collectAsStateWithLifecycle()
+    val coachLoading by viewModel.coachLoading.collectAsStateWithLifecycle()
+    val routineNudge by viewModel.routineNudge.collectAsStateWithLifecycle()
     val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
     val moodLogs by viewModel.moodLogs.collectAsStateWithLifecycle()
     val captureIdeaRequest by viewModel.captureIdeaRequest.collectAsStateWithLifecycle()
@@ -467,6 +471,19 @@ fun AppGoodWordsApp(
         if (captureIdeaRequest) {
             capturingIdea = true
             viewModel.consumeCaptureIdeaRequest()
+        }
+    }
+
+    /**
+     * 홈을 보고 있는 동안, 오늘 한 것이 바뀌면 코치에게 다시 물을 때인지 들여다봅니다.
+     *
+     * 배경에서 돌리지 않습니다. 앱이 꺼져 있는 동안 값이 드는 요청을 보내 봐야 받아 볼
+     * 사람이 없고, 사용자는 자기도 모르는 사이에 쓴 몫만 보게 됩니다. 실제로 물을지는
+     * [MainViewModel.refreshDailyCoach]가 가립니다 — 대부분은 들여다보고 지나갑니다.
+     */
+    LaunchedEffect(currentTab, coachFingerprint) {
+        if (currentTab == AppTab.HOME && coachFingerprint.isNotBlank()) {
+            viewModel.refreshDailyCoach()
         }
     }
 
@@ -751,6 +768,43 @@ fun AppGoodWordsApp(
                             },
                             latestReport = growthReports.firstOrNull(),
                             onOpenGrowth = { pushRoute(tabRoute(AppTab.GROWTH)) },
+                            // 켜 둔 사람에게만 카드를 둡니다. 끈 사람의 홈에는 자리를 내지 않습니다.
+                            coach = dailyCoach.takeIf { aiFeedbackSettings.coachEnabled },
+                            // 지문이 비어 있다는 것이 곧 "오늘 아직 아무것도 없다"는 뜻입니다.
+                            // 점수의 셈(`todayScore.isEmpty`)과는 다릅니다 — 기분은 점수에
+                            // 세지 않지만, 오늘 어땠는지는 코치가 말을 건넬 거리입니다.
+                            coachHasRecordToday = coachFingerprint.isNotBlank(),
+                            coachLoading = coachLoading,
+                            coachNudge = routineNudge,
+                            onOpenRoutines = { selectTab(AppTab.ROUTINE) },
+                            onRefreshCoach = { viewModel.refreshDailyCoach(force = true) },
+                            onKeepCoachQuote = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachQuote()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "보관함에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
+                            onKeepCoachRoutine = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachRoutine()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "루틴에 추가했습니다."
+                                        else result.exceptionOrNull()?.message ?: "추가하지 못했습니다."
+                                    )
+                                }
+                            },
+                            onKeepCoachAction = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachAction()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "오늘 할 일에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
                             // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
                             todayScore = todayScore,
                             scoreTrend = scoreTrend,
@@ -1451,6 +1505,8 @@ fun AppGoodWordsApp(
                             },
                             aiFeedbackSettings = aiFeedbackSettings,
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
+                            // 켜기 전에 무엇이 나가는지 눈으로 볼 수 있어야 합니다.
+                            onPreviewCoachPrompt = { viewModel.previewDailyCoachPrompt() },
                             dailySteps = dailySteps,
                             onDailyStepsChanged = { updated -> viewModel.setDailySteps(updated) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,

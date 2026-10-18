@@ -125,6 +125,16 @@ class AppContainer(
         )
     }
 
+    /** 오늘 하루를 보고 건네는 한마디. 돌아보기와 같은 AI 설정을 그대로 씁니다. */
+    val dailyCoachCoordinator: DailyCoachCoordinator by lazy {
+        DailyCoachCoordinator(
+            database = database,
+            settingsStore = settingsStore,
+            repository = repository,
+            client = aiFeedbackClient
+        )
+    }
+
     val syncCoordinator: SyncCoordinator by lazy {
         SyncCoordinator(
             settingsStore = settingsStore,

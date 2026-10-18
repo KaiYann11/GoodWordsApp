@@ -19,10 +19,14 @@
 
 ### 1. 추천 글귀 대조 거르개 · 작음
 
-AI가 준 `suggestedQuote`를 저장 직전에 보관함과 대조해 이미 있는 것이면 걸러 냅니다.
+AI가 준 글귀를 저장 직전에 보관함과 대조해 이미 있는 것이면 걸러 냅니다.
 
 지금은 물음에 "이미 담아 둔 것은 권하지 말라"고 **부탁만 하고 확인은 안 합니다**
 (`GrowthReportParser`가 받은 값을 그대로 저장). 모델이 규칙을 안 지키면 그대로 통과합니다.
+**이제 권하는 자리가 둘입니다** — 돌아보기(`GrowthReportEntity.suggestedQuote`)와
+오늘의 한마디(`DailyCoachTip.quote`). 한마디는 하루에 여러 번 올 수 있어 같은 글귀가
+더 빨리 쌓입니다. 거르는 자리는 **담을 때 한 곳**(`AppRepository.saveContent` 앞)에 두는 것이
+낫습니다. 두 길에 따로 붙이면 다음에 권하는 자리가 생길 때 또 빠뜨립니다.
 
 - 비교는 `SyncDeduplicator.normalize`(띄어쓰기·대소문자 무시)를 그대로 쓰면 됩니다
 - 걸렀을 때 그 자리를 **비울지**, **한 번 더 물을지**가 선택지입니다.
@@ -52,10 +56,11 @@ AI가 준 `suggestedQuote`를 저장 직전에 보관함과 대조해 이미 있
 루틴은 늘 "할 것"입니다. 삶 개선은 더하기만큼 빼기가 큰데(야식·자기 전 폰) 표현할 방법이
 없습니다.
 
-**처음 봤을 때보다 비쌉니다.** `routineChecks`를 "실천했다"로 세는 곳이 다섯입니다 —
-`DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt`.
-안 할 것은 체크의 뜻이 뒤집히므로(`오늘은 안 했다` 또는 `오늘 어겼다`) 다섯 곳을 다
-손봐야 합니다. 하나만 빠뜨리면 야식 먹은 날이 실천 1회로 잡힙니다.
+**처음 봤을 때보다 비쌉니다.** `routineChecks`를 "실천했다"로 세는 곳이 일곱입니다 —
+`DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt` ·
+`DailyCoachPrompt` · `RoutineNudge`. 안 할 것은 체크의 뜻이 뒤집히므로
+(`오늘은 안 했다` 또는 `오늘 어겼다`) 일곱 곳을 다 손봐야 합니다. 하나만 빠뜨리면
+야식 먹은 날이 실천 1회로 잡히고, 홈 카드가 "다음 차례는 야식 참기예요"라고 권합니다.
 
 ### 5. 주간 리듬 · 중간
 
@@ -115,6 +120,22 @@ AI 돌아보기가 이미 주간 주기를 지원하니, **사람이 직접 5분
 
 다시 꺼낼 때 같은 자리에서 헤매지 않도록 남깁니다.
 
+- **오늘의 한마디를 배경에서 돌리기** — 일부러 안 했습니다. 앱이 꺼져 있는 동안 값이 드는
+  요청을 보내 봐야 받아 볼 사람이 없고, 사용자는 자기도 모르게 쓴 몫만 보게 됩니다.
+  홈이 열려 있을 때만 들여다봅니다(`AppGoodWordsApp`의 `LaunchedEffect`). 알림으로 띄우는
+  것도 같은 이유로 미뤘습니다 — 알림은 `GrowthNudgeWorker`처럼 **아무것도 만들지 않는 것**만
+  보냅니다. 정말 필요해지면 "아침에 한 번"처럼 사용자가 시각을 고르게 하는 쪽이 먼저입니다
+- **한마디를 웹에서도 보기** — 기기에만 둡니다(`ai_coach_state`). 자정이면 버리는 글이라
+  레코드로 만들지 않았고, 레코드가 아니면 웹이 읽을 자리가 없습니다. 웹에서도 받고 싶어지면
+  "여섯 군데" 규칙이 전부 걸립니다. 그 전에 **집어 간 것은 이미 동기화됩니다** —
+  글귀·루틴·할 일로 담은 것은 웹에서도 보입니다
+- **맥에서 서버를 실제로 돌려 보기** — 맥이 없어 못 했습니다. 윈도우 전용이던 것은 걷어
+  냈습니다(게시가 `publish_update.mjs`로 옮겨졌고, `run_server.sh`가 node를 찾고, launchd
+  plist에 PATH가 들어갔습니다). 남은 확인은 **맥에서 한 번 띄워 보는 것**입니다 —
+  `node --test server/tests/*.test.mjs` · `./run_server.sh` · `node publish_update.mjs` 셋이면
+  충분합니다. Tailscale Serve는 App Store 판에 `tailscale` 명령이 PATH에 없어
+  `/Applications/Tailscale.app/Contents/MacOS/Tailscale`을 직접 부릅니다(`server/README.md`)
+
 - **AI 웹 검색 추천** — Anthropic에는 서버 측 `web_search`가 있어 새 글귀·영상을 실제로
   찾아올 수 있습니다. OpenAI를 부르는 방식(chat completions)에는 없어 **공급자마다 결과가
   달라집니다.** 영상을 담으려면 `GrowthReportEntity`에 자리가 없어 마이그레이션도 붙습니다.
@@ -158,6 +179,11 @@ AI 돌아보기가 이미 주간 주기를 지원하니, **사람이 직접 5분
 - **연속 날수는 저장하지 않습니다.** 매번 기록에서 다시 셉니다. 그래서 걸음을 바꾸면 지난
   날수도 곧바로 새 기준이 됩니다. 세는 자리는 `DayStreak` 하나입니다 — 하루의 걸음·돌아보기
   통계·루틴이 모두 그것을 씁니다
-- **`schemaVersion`과 Room 버전은 함께 움직입니다.** 지금 둘 다 22입니다
+- **AI에게 묻는 자리가 셋입니다.** 돌아보기(`GrowthFeedbackCoordinator`) · 개념 설명
+  (`ConceptExplanation`) · 오늘의 한마디(`DailyCoachCoordinator`). 셋 다 설정 한 벌
+  (`AiFeedbackSettings`)을 쓰고 `AiFeedbackClient`가 길을 고릅니다 — 서버가 있으면 서버,
+  없으면 이 기기의 열쇠. 넷째를 더할 때도 설정을 새로 만들지 마세요
+- **`schemaVersion`과 Room 버전은 함께 움직입니다.** 지금 둘 다 22입니다.
+  오늘의 한마디는 **형식을 건드리지 않았습니다** — 기기에만 남는 글이라 서버도 웹도 그대로입니다
 - 폰은 SM-S921N(`R3CX70R5G3M`), 에뮬레이터는 `AppGoodWords_API_35`입니다.
   에뮬레이터가 자주 죽습니다 — 계측은 종류별로 나눠 돌리세요

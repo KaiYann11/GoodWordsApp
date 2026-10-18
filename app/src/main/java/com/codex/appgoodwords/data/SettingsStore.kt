@@ -62,6 +62,20 @@ class SettingsStore(
         val aiLastError = stringPreferencesKey("ai_last_error")
         val aiNudgeEnabled = booleanPreferencesKey("ai_nudge_enabled")
         val aiLastNudgedAt = longPreferencesKey("ai_last_nudged_at")
+        /** 오늘 하루를 보고 한마디를 받을지. 값이 드는 길이라 기본은 꺼짐입니다. */
+        val aiCoachEnabled = booleanPreferencesKey("ai_coach_enabled")
+        /** 하루에 저절로 물을 횟수와 그 사이 틈. 값이 드는 정도는 사람마다 다르게 느낍니다. */
+        val aiCoachAskLimit = intPreferencesKey("ai_coach_ask_limit")
+        val aiCoachGapMinutes = intPreferencesKey("ai_coach_gap_minutes")
+        /** 아직 안 밟은 루틴을 한 줄로 알려 줄지. AI를 부르지 않아 값이 들지 않습니다. */
+        val aiCoachNudgeEnabled = booleanPreferencesKey("ai_coach_nudge_enabled")
+        /**
+         * 오늘 받은 한마디와, 오늘 몇 번 물었는지([DailyCoachState]).
+         *
+         * 글 한 덩어리로 넣습니다. 자정이면 버리는 것이라 레코드로 만들지 않았고,
+         * 칸마다 열쇠를 내면 하루짜리 글 때문에 설정이 예닐곱 개 늘어납니다.
+         */
+        val aiCoachState = stringPreferencesKey("ai_coach_state")
         /**
          * 하루의 축으로 삼을 걸음들. 이름을 쉼표로 이어 둡니다.
          *
@@ -134,13 +148,39 @@ class SettingsStore(
             lastError = preferences[Keys.aiLastError].orEmpty(),
             // 알림은 기본으로 켭니다. 오래 뜸해졌다는 것은 알려 주는 편이 낫고, 값도 들지 않습니다.
             nudgeEnabled = preferences[Keys.aiNudgeEnabled] ?: true,
-            lastNudgedAt = preferences[Keys.aiLastNudgedAt] ?: 0L
+            lastNudgedAt = preferences[Keys.aiLastNudgedAt] ?: 0L,
+            // 값이 드는 요청을 저절로 보내는 길이라 켜는 것은 사용자가 정합니다.
+            coachEnabled = preferences[Keys.aiCoachEnabled] ?: false,
+            coachAskLimit = preferences[Keys.aiCoachAskLimit] ?: AiFeedbackSettings.DEFAULT_ASK_LIMIT,
+            coachGapMinutes = preferences[Keys.aiCoachGapMinutes] ?: AiFeedbackSettings.DEFAULT_GAP_MINUTES,
+            // 값이 들지 않는 쪽이라 기본으로 켭니다.
+            coachNudgeEnabled = preferences[Keys.aiCoachNudgeEnabled] ?: true
         )
+    }
+
+    /**
+     * 오늘 받은 한마디.
+     *
+     * 이 기기에만 남습니다. 동기화 스냅샷과 백업 파일에는 담기지 않습니다 —
+     * 자정이면 버릴 글이라 기기끼리 맞출 것이 없습니다([DailyCoachState]).
+     */
+    val dailyCoachStateFlow: Flow<DailyCoachState> = context.dataStore.data.map { preferences ->
+        DailyCoachJson.decode(preferences[Keys.aiCoachState].orEmpty())
+    }
+
+    suspend fun getDailyCoachState(): DailyCoachState = dailyCoachStateFlow.first()
+
+    suspend fun setDailyCoachState(state: DailyCoachState) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.aiCoachState] = DailyCoachJson.encode(state)
+        }
     }
 
     val dailyStepsFlow: Flow<List<DailyStep>> = context.dataStore.data.map { preferences ->
         DailyStep.parse(preferences[Keys.dailySteps].orEmpty())
     }
+
+    suspend fun getDailySteps(): List<DailyStep> = dailyStepsFlow.first()
 
     /**
      * 하루의 축을 바꿉니다.
@@ -196,6 +236,10 @@ class SettingsStore(
             preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
             preferences[Keys.aiIncludeDiaryBody] = settings.includeDiaryBody
             preferences[Keys.aiNudgeEnabled] = settings.nudgeEnabled
+            preferences[Keys.aiCoachEnabled] = settings.coachEnabled
+            preferences[Keys.aiCoachAskLimit] = settings.askLimit
+            preferences[Keys.aiCoachGapMinutes] = settings.gapMinutes.toInt()
+            preferences[Keys.aiCoachNudgeEnabled] = settings.coachNudgeEnabled
         }
     }
 

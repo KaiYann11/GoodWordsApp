@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
@@ -36,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +62,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 /** 설정 화면에는 스위치가 여럿이라 테스트에서 자동 동기화 스위치만 집으려면 표식이 필요하다. */
 internal const val autoSyncSwitchTag = "auto_sync_switch"
@@ -71,6 +75,15 @@ internal const val fileMergeButtonTag = "file_merge_button"
 
 /** AI 열쇠 칸과 주기 칩. 설정에는 칸과 칩이 여럿이라 표식으로 짚습니다. */
 internal const val aiApiKeyFieldTag = "ai_api_key_field"
+
+/** 오늘의 한마디 스위치와, 무엇이 나가는지 보는 자리. */
+internal const val aiCoachSwitchTag = "ai_coach_switch"
+internal const val aiCoachPreviewTag = "ai_coach_preview"
+internal const val aiCoachNudgeSwitchTag = "ai_coach_nudge_switch"
+
+/** 하루 횟수와 다시 묻기까지의 틈. 칩이 여럿이라 값으로 짚습니다. */
+internal fun aiCoachLimitTag(limit: Int): String = "ai_coach_limit_$limit"
+internal fun aiCoachGapTag(minutes: Int): String = "ai_coach_gap_$minutes"
 
 internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank { "off" }
 
@@ -124,6 +137,13 @@ fun SettingsScreen(
     onDiaryLockChanged: (Boolean) -> Unit = {},
     aiFeedbackSettings: AiFeedbackSettings = AiFeedbackSettings(),
     onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
+    /**
+     * 오늘의 한마디로 무엇이 나가는지 보여 줍니다.
+     *
+     * 저절로 하루에 여러 번 나가는 길이라, 켜기 전에 눈으로 확인할 수 있어야 합니다.
+     * 실제로 보내는 글과 **같은 함수**로 만듭니다([DailyCoachPrompt.chatPrompt]).
+     */
+    onPreviewCoachPrompt: (suspend () -> Result<String>)? = null,
     /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
     dailySteps: List<DailyStep> = DailyStep.DEFAULTS,
     onDailyStepsChanged: (List<DailyStep>) -> Unit = {},
@@ -734,7 +754,8 @@ fun SettingsScreen(
         item {
             AiFeedbackSection(
                 settings = aiFeedbackSettings,
-                onChanged = onAiFeedbackSettingsChanged
+                onChanged = onAiFeedbackSettingsChanged,
+                onPreviewCoachPrompt = onPreviewCoachPrompt
             )
         }
 
@@ -951,11 +972,14 @@ private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {
 @Composable
 private fun AiFeedbackSection(
     settings: AiFeedbackSettings,
-    onChanged: (AiFeedbackSettings) -> Unit
+    onChanged: (AiFeedbackSettings) -> Unit,
+    onPreviewCoachPrompt: (suspend () -> Result<String>)? = null
 ) {
     val context = LocalContext.current
     val provider = settings.activeProvider
     var apiKeyText by rememberSaveable { mutableStateOf(settings.activeKey) }
+    val coroutineScope = rememberCoroutineScope()
+    var coachPreview by remember { mutableStateOf<String?>(null) }
 
     // 공급자를 바꾸면 칸에 남아 있던 것이 다른 곳의 열쇠입니다. 그대로 저장하면 서로 뒤바뀝니다.
     LaunchedEffect(settings.activeKey, provider) {
@@ -1087,6 +1111,102 @@ private fun AiFeedbackSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            // 돌아보기와 따로 켭니다. 한 달에 한 번 돌아보면서도 오늘은 곁에 두고 싶을 수
+            // 있고, 그 반대도 마찬가지입니다.
+            SettingSwitchRow(
+                title = "오늘의 한마디 받기",
+                checked = settings.coachEnabled,
+                onCheckedChange = { onChanged(settings.copy(coachEnabled = it)) },
+                modifier = Modifier.testTag(aiCoachSwitchTag)
+            )
+            Text(
+                text = if (settings.coachEnabled) {
+                    "홈 맨 위에서, 오늘 한 것을 보고 한마디를 건넵니다. " +
+                        "오늘 한 것이 달라졌을 때만 물어봅니다."
+                } else {
+                    "오늘 한 것을 보고 한마디·글귀·해 볼 일을 받습니다. " +
+                        "물을 때마다 값이 들어서 켜는 것은 직접 정합니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (settings.coachEnabled) {
+                // 값이 드는 정도는 사람마다 다르게 느낍니다. 앱이 정해 주지 않고 고르게 합니다.
+                Text("하루에 저절로 묻는 횟수", style = MaterialTheme.typography.titleSmall)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(AiFeedbackSettings.ASK_LIMIT_CHOICES) { limit ->
+                        FilterChip(
+                            selected = settings.askLimit == limit,
+                            onClick = { onChanged(settings.copy(coachAskLimit = limit)) },
+                            label = { Text(if (limit == 0) "안 함" else "${limit}번") },
+                            modifier = Modifier.testTag(aiCoachLimitTag(limit))
+                        )
+                    }
+                }
+
+                if (settings.asksOnlyWhenAsked) {
+                    Text(
+                        text = "저절로는 묻지 않습니다. 카드의 '받아 보기'를 누를 때만 물어봅니다. " +
+                            "아래 루틴 알림은 AI를 부르지 않아 그대로 뜹니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text("다시 묻기까지", style = MaterialTheme.typography.titleSmall)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(AiFeedbackSettings.GAP_MINUTE_CHOICES) { minutes ->
+                            FilterChip(
+                                selected = settings.gapMinutes.toInt() == minutes,
+                                onClick = { onChanged(settings.copy(coachGapMinutes = minutes)) },
+                                label = { Text(formatInterval(minutes)) },
+                                modifier = Modifier.testTag(aiCoachGapTag(minutes))
+                            )
+                        }
+                    }
+                    Text(
+                        text = "오늘 한 것이 달라졌을 때, ${formatInterval(settings.gapMinutes.toInt())}에 " +
+                            "한 번까지 하루 ${settings.askLimit}번 물어봅니다. " +
+                            "직접 누르는 것은 여기 세지 않습니다. 실패한 것도 한 번으로 셉니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // 무거운 쪽(AI)과 따로 켭니다. 이쪽은 값이 들지 않습니다.
+                SettingSwitchRow(
+                    title = "아직 안 밟은 루틴 알려 주기",
+                    checked = settings.coachNudgeEnabled,
+                    onCheckedChange = { onChanged(settings.copy(coachNudgeEnabled = it)) },
+                    modifier = Modifier.testTag(aiCoachNudgeSwitchTag)
+                )
+                Text(
+                    text = if (settings.coachNudgeEnabled) {
+                        "이어 오던 루틴이 오늘 아직이면 그것부터 짚어 줍니다. " +
+                            "AI를 부르지 않고 기기에서 세기 때문에 값이 들지 않고, 연결이 없어도 뜹니다. " +
+                            "남은 개수를 세지 않고 다음 하나만 말합니다."
+                    } else {
+                        "루틴 줄을 두지 않습니다. 카드에는 AI가 써 준 것만 남습니다."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (onPreviewCoachPrompt != null) {
+                TextButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            coachPreview = onPreviewCoachPrompt()
+                                .getOrElse { failure -> failure.message ?: "미리 보기를 만들지 못했습니다." }
+                        }
+                    },
+                    modifier = Modifier.testTag(aiCoachPreviewTag)
+                ) {
+                    Text("무엇이 나가는지 보기")
+                }
+            }
+
             SettingSwitchRow(
                 title = "오래 안 하면 알리기",
                 checked = settings.nudgeEnabled,
@@ -1118,6 +1238,21 @@ private fun AiFeedbackSection(
                 )
             }
         }
+    }
+
+    coachPreview?.let { text ->
+        AlertDialog(
+            onDismissRequest = { coachPreview = null },
+            title = { Text("오늘의 한마디로 나가는 글") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(text = text, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { coachPreview = null }) { Text("닫기") }
+            }
+        )
     }
 }
 
