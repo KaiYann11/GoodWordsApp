@@ -97,11 +97,38 @@ class AiFeedbackSettingsTest {
     }
 
     @Test
-    fun onlyCliProvidersOfferTheCliDefaultModel() {
+    fun onlyServerSideProvidersOfferTheBlankDefaultModel() {
         // API 공급자에 빈 모델을 보내면 "모델이 없다"는 400만 돌아옵니다.
         AiProvider.entries.forEach { provider ->
-            assertEquals(provider.name, provider.serverCli, provider.models.contains(AiProvider.CLI_DEFAULT_MODEL))
+            assertEquals(provider.name, provider.serverOnly, provider.models.contains(AiProvider.CLI_DEFAULT_MODEL))
         }
+    }
+
+    @Test
+    fun ollamaIsAskedThroughTheServerWithoutAKey() {
+        // Ollama는 서버 PC에서 돕니다. 이 기기에 열쇠가 있다고 직접 부르면 엉뚱한 곳(API)으로 나갑니다.
+        val settings = AiFeedbackSettings(openAiKey = "sk-openai").withProvider(AiProvider.OLLAMA)
+
+        assertEquals(AiProvider.OLLAMA, AiProvider.of("ollama"))
+        assertTrue(settings.requiresServer)
+        assertFalse(settings.canCallDirectly)
+        assertFalse(settings.canAsk(hasServer = false))
+        assertTrue(settings.canAsk(hasServer = true))
+        assertEquals("", settings.activeKey)
+        assertEquals("sk-openai", settings.withKey("whatever").openAiKey)
+    }
+
+    @Test
+    fun ollamaLeavesTheModelToTheServer() {
+        // 서버 PC에 무엇을 받아 두었는지 이 기기는 모릅니다. 다른 공급자의 모델을 들고 가면 없는 모델이 됩니다.
+        val settings = AiFeedbackSettings(model = "gpt-4o").withProvider(AiProvider.OLLAMA)
+
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.effectiveModel)
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.copy(model = "gpt-4o").effectiveModel)
+        assertEquals("Ollama", settings.reportModel)
+        // CLI가 아니니 "CLI 기본"이라 적지 않습니다.
+        assertEquals("서버 기본", AiProvider.OLLAMA.modelLabel(AiProvider.CLI_DEFAULT_MODEL))
+        assertEquals("CLI 기본", AiProvider.CODEX_CLI.modelLabel(AiProvider.CLI_DEFAULT_MODEL))
     }
 
     @Test

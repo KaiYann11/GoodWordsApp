@@ -133,12 +133,17 @@ AI 돌아보기가 이미 주간 주기를 지원하니, **사람이 직접 5분
   레코드로 만들지 않았고, 레코드가 아니면 웹이 읽을 자리가 없습니다. 웹에서도 받고 싶어지면
   "여섯 군데" 규칙이 전부 걸립니다. 그 전에 **집어 간 것은 이미 동기화됩니다** —
   글귀·루틴·할 일로 담은 것은 웹에서도 보입니다
-- **맥에서 서버를 실제로 돌려 보기** — 맥이 없어 못 했습니다. 윈도우 전용이던 것은 걷어
-  냈습니다(게시가 `publish_update.mjs`로 옮겨졌고, `run_server.sh`가 node를 찾고, launchd
-  plist에 PATH가 들어갔습니다). 남은 확인은 **맥에서 한 번 띄워 보는 것**입니다 —
-  `node --test server/tests/*.test.mjs` · `./run_server.sh` · `node publish_update.mjs` 셋이면
-  충분합니다. Tailscale Serve는 App Store 판에 `tailscale` 명령이 PATH에 없어
-  `/Applications/Tailscale.app/Contents/MacOS/Tailscale`을 직접 부릅니다(`server/README.md`)
+- **맥에서 게시 스크립트 돌려 보기** — 서버는 맥미니(M4, macOS 26)에서 띄워 보았습니다.
+  `node --test` 네 묶음이 다 통과했고, launchd plist로 로그인 때 뜨며 claude·codex CLI를 찾았고,
+  Tailscale Serve로 휴대폰 주소가 열렸습니다(독립 설치판 Tailscale 앱은 `/usr/local/bin/tailscale`
+  셔틀을 깔아 두어 PATH에서 바로 부릅니다. App Store 판과 다릅니다).
+  남은 것은 `node publish_update.mjs`입니다 — 맥에는 JDK·Android SDK가 없어 APK를 빌드하지
+  못했고, 디버그 서명 열쇠도 윈도우 PC에만 있어 맥에서 빌드하면 덮어 설치되지 않습니다
+- **Ollama 모델을 앱에서 고르기** — 지금은 "서버 기본" 하나뿐이고 서버가 고릅니다
+  (`APP_GOOD_WORDS_OLLAMA_MODEL`, 없으면 가장 최근에 받은 모델). 앱은 서버 PC에 무엇을 받아
+  두었는지 몰라, 이름을 적어 두면 없는 모델을 고르게 됩니다. 고르게 하려면 서버가 Ollama
+  `/api/tags`를 비춰 주는 자리와, 설정 화면이 고정 목록(`AiProvider.models`) 대신 그것을
+  받아 그리는 길이 함께 필요합니다
 
 - **AI 웹 검색 추천** — Anthropic에는 서버 측 `web_search`가 있어 새 글귀·영상을 실제로
   찾아올 수 있습니다. OpenAI를 부르는 방식(chat completions)에는 없어 **공급자마다 결과가

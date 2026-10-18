@@ -168,6 +168,14 @@ server.listen(config.port, config.host, async () => {
     const executable = resolveCli(plan);
     if (executable) console.log(`AI growth feedback is enabled (${plan.label}: ${executable}).`);
   }
+  // 로그인 직후에는 Ollama가 이 서버보다 늦게 뜰 수 있어, 못 찾아도 적지 않습니다. 요청마다 다시 찾습니다.
+  ollamaModels().then(
+    (models) => {
+      const model = ollamaDefaultModel || models[0];
+      if (model) console.log(`AI growth feedback is enabled (Ollama: ${ollamaUrl}, ${model}).`);
+    },
+    () => {},
+  );
 });
 
 async function route(request, response) {
@@ -452,9 +460,9 @@ async function routeContentMember(method, parts, request, response) {
  * 어디에 물어볼지도 기기가 정합니다(`provider`). 서버는 그에 맞는 열쇠를 골라 쓸 뿐입니다.
  * 옛 앱은 이 값을 보내지 않으므로, 없으면 OpenAI로 읽습니다.
  *
- * 길이 둘입니다. 열쇠로 HTTP API를 부르는 길(`askHttp`)과, 이 서버에 로그인해 둔
- * Claude Code·Codex CLI를 그대로 돌리는 길(`askCli`)입니다. CLI 길은 열쇠가 없어도 되고
- * 구독을 그대로 씁니다. 어느 길이든 돌려주는 모양은 같습니다 — `{ text }`.
+ * 길이 셋입니다. 열쇠로 HTTP API를 부르는 길(`askHttp`), 이 서버에 로그인해 둔
+ * Claude Code·Codex CLI를 그대로 돌리는 길(`askCli`), 이 PC에서 도는 Ollama에 묻는 길
+ * (`askOllama`)입니다. 뒤의 둘은 열쇠가 없어도 됩니다. 어느 길이든 돌려주는 모양은 같습니다 — `{ text }`.
  */
 async function askAi(payload) {
   const system = text(payload?.system);
@@ -466,8 +474,8 @@ async function askAi(payload) {
   if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider}`);
 
   const model = text(payload?.model);
-  const answer = plan.cli ? await askCli(plan, system, user, model) : await askHttp(plan, system, user, model);
-  return { text: answer };
+  const ask = plan.cli ? askCli : plan.local ? askOllama : askHttp;
+  return { text: await ask(plan, system, user, model) };
 }
 
 async function askHttp(plan, system, user, model) {
@@ -511,6 +519,94 @@ async function askHttp(plan, system, user, model) {
     throw new HttpError(502, "AI 응답을 읽지 못했습니다.");
   }
   return plan.read(parsed);
+}
+
+/**
+ * 이 PC에서 도는 Ollama에 묻습니다.
+ *
+ * 열쇠도 구독도 없고, 기록이 이 PC 밖으로 나가지 않습니다. 주소는 서버를 띄울 때의
+ * `APP_GOOD_WORDS_OLLAMA_URL`에서만 읽습니다 — 기기가 보낸 주소로 부르면, 서버가 남이 시키는
+ * 아무 곳에나 요청을 대신 보내 주는 꼴이 됩니다.
+ *
+ * 앱은 이 PC에 어떤 모델을 받아 두었는지 모릅니다. 모델을 비워 보내면 서버가 고릅니다(`ollamaModel`).
+ */
+async function askOllama(plan, system, user, model) {
+  const chosen = model || (await ollamaModel());
+  let response;
+  let raw;
+  try {
+    response = await fetch(`${ollamaUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(plan.body(system, user, chosen)),
+      signal: AbortSignal.timeout(aiTimeoutMs),
+    });
+    // 스트리밍을 끄면 다 쓴 뒤에야 본문이 옵니다. 기다리는 시간도 여기까지 셉니다.
+    raw = await response.text();
+  } catch (error) {
+    if (error?.name === "TimeoutError") {
+      throw new HttpError(
+        504,
+        `Ollama(${chosen})가 ${Math.round(aiTimeoutMs / 1000)}초 안에 답하지 않았습니다. 더 작은 모델을 받아 쓰거나 APP_GOOD_WORDS_AI_TIMEOUT_MS를 늘려 주세요.`,
+      );
+    }
+    throw ollamaUnreachable();
+  }
+
+  // Ollama는 사유를 `{"error":"..."}`에 글 한 줄로 싣습니다. OpenAI·Claude처럼 객체가 아닙니다.
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new HttpError(502, `Ollama 응답을 읽지 못했습니다(${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new HttpError(502, `Ollama 요청이 실패했습니다(${response.status})${parsed?.error ? `: ${text(parsed.error)}` : ""}`);
+  }
+  const answer = plan.read(parsed);
+  if (!answer) throw new HttpError(502, `Ollama(${chosen})가 빈 답을 돌려주었습니다.`);
+  return answer;
+}
+
+/**
+ * 기기가 모델을 고르지 않았을 때 쓸 모델.
+ *
+ * `APP_GOOD_WORDS_OLLAMA_MODEL`로 정해 두었으면 그것이고, 아니면 받아 둔 모델 가운데 가장 최근에
+ * 받은 것입니다. 요청마다 다시 묻습니다 — 새 모델을 받아도 서버를 다시 띄울 필요가 없습니다.
+ */
+async function ollamaModel() {
+  if (ollamaDefaultModel) return ollamaDefaultModel;
+  const [latest] = await ollamaModels();
+  if (!latest) throw new HttpError(503, "Ollama에 받아 둔 모델이 없습니다. 서버 PC에서 `ollama pull <모델>`로 받아 주세요.");
+  return latest;
+}
+
+/**
+ * 글을 쓸 수 있는 모델 이름을 최근에 받은 것부터 늘어놓습니다.
+ *
+ * 임베딩 모델은 대화를 못 해서 고르면 오류만 돌아옵니다. 할 수 있는 일(`capabilities`)을 적어
+ * 주지 않는 옛 Ollama에서는 거르지 않습니다.
+ */
+async function ollamaModels() {
+  let parsed;
+  try {
+    const response = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(10_000) });
+    parsed = await response.json();
+  } catch {
+    throw ollamaUnreachable();
+  }
+  return (Array.isArray(parsed?.models) ? parsed.models : [])
+    .filter((model) => !Array.isArray(model?.capabilities) || model.capabilities.includes("completion"))
+    .sort((a, b) => (Date.parse(b?.modified_at) || 0) - (Date.parse(a?.modified_at) || 0))
+    .map((model) => text(model?.name))
+    .filter(Boolean);
+}
+
+function ollamaUnreachable() {
+  return new HttpError(
+    503,
+    `Ollama(${ollamaUrl})에 연결하지 못했습니다. 서버 PC에서 Ollama가 떠 있는지 확인하고, 다른 주소에 띄웠으면 APP_GOOD_WORDS_OLLAMA_URL로 짚어 주세요.`,
+  );
 }
 
 /**
@@ -655,6 +751,9 @@ function tailLines(output, count = 3) {
 const aiTimeoutMs = Number(process.env.APP_GOOD_WORDS_AI_TIMEOUT_MS) || 180_000;
 /** CLI에 인자로 나가는 유일한 사용자 값입니다. 셸이 다르게 읽을 글자는 들이지 않습니다. */
 const aiModelPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$|^$/;
+/** Ollama가 기본으로 듣는 자리. 끝의 `/`는 떼어 둡니다 — 뒤에 `/api/...`를 붙입니다. */
+const ollamaUrl = (text(process.env.APP_GOOD_WORDS_OLLAMA_URL) || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const ollamaDefaultModel = text(process.env.APP_GOOD_WORDS_OLLAMA_MODEL);
 
 /**
  * 공급자마다 다른 것만 모아 둡니다.
@@ -663,7 +762,7 @@ const aiModelPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$|^$/;
  * 열쇠는 환경 변수에서만 읽습니다. 명령줄은 ps로 남에게 보이고 셸 기록에도 남습니다.
  *
  * `cli`가 있는 공급자는 열쇠 대신 이 서버에 깔린 CLI를 돌립니다(`askCli`). 모델을 비워 보내면
- * CLI의 기본 모델을 씁니다.
+ * CLI의 기본 모델을 씁니다. `local`은 이 PC의 Ollama입니다(`askOllama`).
  */
 const aiProviders = {
   openai: {
@@ -787,6 +886,22 @@ const aiProviders = {
       }
       return answer.trim();
     },
+  },
+  ollama: {
+    label: "Ollama",
+    local: true,
+    body: (system, user, model) => ({
+      model,
+      messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user }],
+      // 앱이 받는 답은 모두 JSON입니다. OpenAI의 `response_format`과 같은 자리입니다.
+      format: "json",
+      stream: false,
+      // 생각 모드를 끕니다. PC 한 대로 돌리면 생각하는 데만 몇 분을 써서 시간 안에 답이 오지 않습니다
+      // (27B 모델·한 주 돌아보기로 재어 보니 끄면 75초, 켜면 10분이 지나도 끝나지 않았습니다).
+      think: false,
+    }),
+    // 생각한 내용은 `message.thinking`에 따로 옵니다. 답 글은 `content`뿐입니다.
+    read: (parsed) => text(parsed?.message?.content),
   },
 };
 

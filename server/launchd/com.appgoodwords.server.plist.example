@@ -46,6 +46,13 @@
       <key>APP_GOOD_WORDS_CODEX_CLI</key>
       <string>/opt/homebrew/bin/codex</string>
     -->
+
+    <!--
+      Ollama는 기본 자리(http://127.0.0.1:11434)에 있으면 적지 않아도 됩니다. 앱은 모델을 비워
+      보내고, 서버는 받아 둔 것 중 가장 최근 모델을 씁니다. 정해 두려면 이렇게 적습니다.
+      <key>APP_GOOD_WORDS_OLLAMA_MODEL</key>
+      <string>qwen3.6:27b</string>
+    -->
   </dict>
 
   <key>RunAtLoad</key>

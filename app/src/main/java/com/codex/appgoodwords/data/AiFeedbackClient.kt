@@ -17,8 +17,8 @@ import org.json.JSONObject
  *
  * 열쇠로 부르는 곳은 OpenAI와 Claude 둘입니다([AiProvider]). 둘 다 공식 SDK를 쓰지 않고 HTTP로
  * 직접 부릅니다. 이 앱이 부르는 것은 한 종류의 요청뿐이라, SDK를 더하면 앱만 무거워집니다.
- * 서버에 로그인해 둔 CLI(Claude Code·Codex)로 답하는 공급자([AiProvider.serverCli])는 열쇠 없이
- * 서버만 거칩니다. 이 기기에는 CLI가 없어 서버가 꺼져 있으면 되돌아갈 길이 없습니다.
+ * 서버에 로그인해 둔 CLI(Claude Code·Codex)나 서버 PC의 Ollama가 답하는 공급자([AiProvider.serverOnly])는
+ * 열쇠 없이 서버만 거칩니다. 이 기기에는 둘 다 없어 서버가 꺼져 있으면 되돌아갈 길이 없습니다.
  *
  * 어느 쪽이든 나가는 글은 [GrowthPrompt]가 만든 것 하나뿐입니다.
  */
@@ -69,7 +69,7 @@ class AiFeedbackClient {
     ): String = when (provider) {
         AiProvider.OPENAI -> askOpenAi(system, user, model, apiKey)
         AiProvider.ANTHROPIC -> askAnthropic(system, user, model, apiKey)
-        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI ->
+        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI, AiProvider.OLLAMA ->
             error("${provider.label}는 이 기기에서 직접 부를 수 없습니다. 서버 주소를 지정해 주세요.")
     }
 
