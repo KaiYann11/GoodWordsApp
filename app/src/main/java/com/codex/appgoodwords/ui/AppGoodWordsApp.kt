@@ -829,6 +829,8 @@ fun AppGoodWordsApp(
                         AppTab.LIBRARY -> LibraryTabsScreen(
                             modifier = Modifier.padding(innerPadding),
                             inboxCount = allItems.count { it.type == ContentType.INBOX },
+                            memoCount = allItems.count { it.type == ContentType.MEMO },
+                            conceptCount = allItems.count { it.type == ContentType.CONCEPT },
                             inboxContent = {
                                 TextCollectionScreen(
                                     items = allItems.filter { it.type == ContentType.INBOX },
