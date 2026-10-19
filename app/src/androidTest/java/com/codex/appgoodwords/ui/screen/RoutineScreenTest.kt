@@ -1,15 +1,20 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import com.codex.appgoodwords.data.RoutineCategories
 import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.RoutineStatsReport
@@ -208,10 +213,105 @@ class RoutineScreenTest {
             zoneId = zone
         )
 
+    @Test
+    fun withoutAnyCategoryThereIsNoCategoryRow() {
+        // "갈래 없음" 하나만 있는 줄은 고를 것이 없습니다.
+        showRoutines()
+
+        compose.onNodeWithTag(routineCategoryTag(null)).assertDoesNotExist()
+    }
+
+    @Test
+    fun pickingACategoryKeepsTheDayNumbers() {
+        // 갈래로 걸러도 차례는 하루 전체의 것입니다. 다시 세면 옮기기가 엉뚱한 자리를 가리킵니다.
+        showRoutines(routines = filedRoutines)
+
+        compose.onNodeWithTag(routineCategoryTag("공부")).performClick()
+
+        compose.onNodeWithText("책 한 쪽").assertIsDisplayed()
+        compose.onNodeWithText("스트레칭").assertDoesNotExist()
+        compose.onNodeWithContentDescription("3 번째. 차례 옮기기").assertIsDisplayed()
+    }
+
+    @Test
+    fun theUnfiledHaveTheirOwnPill() {
+        showRoutines(routines = filedRoutines)
+
+        compose.onNodeWithTag(routineCategoryTag(RoutineCategories.NONE)).performClick()
+
+        compose.onNodeWithText("스트레칭").assertIsDisplayed()
+        compose.onNodeWithText("책 한 쪽").assertDoesNotExist()
+    }
+
+    @Test
+    fun theCountsSayWhatTappingWillShow() {
+        // "습관 1"을 눌렀는데 아무것도 없으면 나머지가 어디 갔는지 찾게 됩니다.
+        showRoutines(routines = filedRoutines, todayCounts = mapOf(1L to 1))
+
+        compose.onNodeWithText("습관 1").assertIsDisplayed()
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).performClick()
+        compose.onNodeWithText("습관 0").assertIsDisplayed()
+
+        compose.onNodeWithTag(routineCategoryTag("습관")).performClick()
+        // 오늘 거르개의 숫자도 고른 갈래 안에서 셉니다.
+        compose.onNodeWithText("한 것 1").assertIsDisplayed()
+        compose.onNodeWithText("오늘 '습관' 루틴을 모두 밟았습니다.").assertIsDisplayed()
+    }
+
+    @Test
+    fun aSearchedRoutineHiddenByTheCategoryBringsEverythingBack() {
+        // 검색에서 고른 루틴이 갈래에 걸려 안 보이면, 찾아 놓고도 빈 화면을 보게 됩니다.
+        val focus = mutableStateOf<Long?>(null)
+        compose.setContent {
+            RoutineScreen(
+                routines = filedRoutines,
+                todayCounts = emptyMap(),
+                memos = emptyList(),
+                onSaveRoutine = {},
+                onDeleteRoutine = {},
+                onSaveMemo = { _, _ -> },
+                onDeleteMemo = {},
+                onCheckRoutine = {},
+                onMoveRoutine = { _, _ -> },
+                onMoveRoutineTo = { _, _ -> },
+                focusId = focus.value
+            )
+        }
+        compose.onNodeWithTag(routineCategoryTag("공부")).performClick()
+        compose.onNodeWithText("스트레칭").assertDoesNotExist()
+
+        compose.runOnIdle { focus.value = 2L }
+
+        compose.onNodeWithText("스트레칭").assertIsDisplayed()
+        compose.onNodeWithTag(routineCategoryTag(null)).assertIsSelected()
+    }
+
+    @Test
+    fun theEditorOffersTheCategoriesAlreadyInUse() {
+        // 서른 개에 갈래를 붙일 때 같은 말을 매번 치면 느리고, 한 글자만 달라도 알약이 둘로 갈라집니다.
+        val saved = mutableListOf<RoutineDraft>()
+        showRoutines(routines = filedRoutines, onSaveRoutine = { saved += it })
+
+        compose.onNodeWithText("루틴 추가").performClick()
+        compose.onNodeWithText("루틴 이름").performTextInput("영어 단어")
+        compose.onNodeWithTag(routineCategorySuggestionTag("공부")).performClick()
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals(listOf("공부"), saved.map { it.category })
+    }
+
+    private val filedRoutines = listOf(
+        routine(id = 1, title = "기상 후 물 한 컵", orderIndex = 0, category = "습관"),
+        routine(id = 2, title = "스트레칭", orderIndex = 1),
+        routine(id = 3, title = "책 한 쪽", orderIndex = 2, category = "공부")
+    )
+
     private fun showRoutines(
+        routines: List<RoutineEntity> = this.routines,
         todayCounts: Map<Long, Int> = emptyMap(),
         stats: Map<Long, RoutineStatsReport> = emptyMap(),
         onOpenStats: (RoutineEntity) -> Unit = {},
+        onSaveRoutine: (RoutineDraft) -> Unit = {},
         onMoveRoutine: (RoutineEntity, Boolean) -> Unit = { _, _ -> },
         onMoveRoutineTo: (RoutineEntity, Int) -> Unit = { _, _ -> }
     ) {
@@ -222,7 +322,7 @@ class RoutineScreenTest {
                 stats = stats,
                 onOpenStats = onOpenStats,
                 memos = emptyList(),
-                onSaveRoutine = {},
+                onSaveRoutine = onSaveRoutine,
                 onDeleteRoutine = {},
                 onSaveMemo = { _, _ -> },
                 onDeleteMemo = {},
@@ -233,11 +333,12 @@ class RoutineScreenTest {
         }
     }
 
-    private fun routine(id: Long, title: String, orderIndex: Int) = RoutineEntity(
+    private fun routine(id: Long, title: String, orderIndex: Int, category: String = "") = RoutineEntity(
         id = id,
         syncId = "routine-$id",
         updatedAt = 1_000L,
         title = title,
+        category = category,
         orderIndex = orderIndex,
         createdAt = id * 100L
     )

@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.RoutineCategories
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
@@ -82,10 +84,25 @@ internal fun routineMoveTargetTag(step: Int): String = "routine_move_target_$ste
 /** 오늘 무엇을 볼지 고르는 거르개. 개수가 같이 적혀서 글자만으로는 짚기 어렵습니다. */
 internal fun routineFilterTag(name: String): String = "routine_filter_$name"
 
+/** 갈래 알약. null은 전체, 빈 문자열은 갈래 없음입니다. 갈래 이름이 무엇이든 서로 겹치지 않게 앞을 나눕니다. */
+internal fun routineCategoryTag(category: String?): String = when (category) {
+    null -> "routine_category_all"
+    RoutineCategories.NONE -> "routine_category_none"
+    else -> "routine_category_name_$category"
+}
+
+/** 고치기 창에서 이미 쓰는 갈래를 눌러 채우는 알약. */
+internal fun routineCategorySuggestionTag(category: String): String = "routine_category_suggestion_$category"
+
 /** 쌓인 기록으로 들어가는 줄. 카드마다 하나씩 있어 글자만으로는 짚기 어렵습니다. */
 internal fun routineStatsOpenTag(routineId: Long): String = "routine_stats_open_$routineId"
 
-/** 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다. */
+/**
+ * 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다.
+ *
+ * 거르개는 오늘 줄과 갈래 줄 둘이지만 한 자리에 둡니다. 갈래 줄은 갈래가 있을 때만 생겨서,
+ * 따로 두면 이 수가 그때그때 달라져 검색에서 고른 루틴으로 굴려 줄 자리가 어긋납니다.
+ */
 private const val HEADER_ITEM_COUNT = 3
 
 /**
@@ -163,7 +180,11 @@ fun RoutineScreen(
 
     var selectedFilter by rememberSaveable { mutableStateOf(RoutineFilter.ALL.name) }
     val currentFilter = RoutineFilter.valueOf(selectedFilter)
-    val rows = remember(sortedRoutines, todayCounts, currentFilter) {
+    val categories = remember(sortedRoutines) { RoutineCategories.ordered(sortedRoutines) }
+    // null이면 전체입니다. 고른 갈래가 사라지면(이름을 바꾸거나 그 루틴을 지움) 전체로 봅니다.
+    var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    val currentCategory = selectedCategory?.takeIf { it in categories }
+    val rows = remember(sortedRoutines, todayCounts, currentFilter, currentCategory) {
         sortedRoutines
             .mapIndexed { index, routine ->
                 RoutineRow(
@@ -173,19 +194,24 @@ fun RoutineScreen(
                     canMoveDown = index < sortedRoutines.lastIndex
                 )
             }
-            .filter { row -> currentFilter.matches(todayCounts[row.routine.id] ?: 0) }
+            .filter { row ->
+                currentFilter.matches(todayCounts[row.routine.id] ?: 0) &&
+                    RoutineCategories.matches(row.routine, currentCategory)
+            }
     }
 
     // 검색에서 고른 루틴이 지금 거르개에 걸려 안 보이면, 찾아 놓고도 빈 화면을 보게 됩니다.
-    LaunchedEffect(focusId, currentFilter, sortedRoutines) {
+    LaunchedEffect(focusId, currentFilter, currentCategory, sortedRoutines) {
         if (focusId != null && sortedRoutines.any { it.id == focusId } && rows.none { it.routine.id == focusId }) {
             selectedFilter = RoutineFilter.ALL.name
+            selectedCategory = null
         }
     }
 
     if (editingRoutineId != null) {
         RoutineEditorDialog(
             initialDraft = editingRoutine?.let(RoutineDraft::fromRoutine) ?: RoutineDraft(),
+            knownCategories = RoutineCategories.names(sortedRoutines),
             onDismiss = { editingRoutineId = null },
             onSave = { draft ->
                 onSaveRoutine(draft)
@@ -294,25 +320,57 @@ fun RoutineScreen(
                 )
             }
 
+            // 두 줄은 함께 걸립니다. 알약의 숫자는 눌렀을 때 보일 줄 수입니다 — 다른 줄에서 고른 것까지 셉니다.
+            // 그러지 않으면 "공부 11"을 눌렀는데 셋만 보여, 나머지가 어디 갔는지 찾게 됩니다.
             item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(RoutineFilter.entries) { filter ->
-                        CountFilterPill(
-                            title = filter.label,
-                            count = when (filter) {
-                                RoutineFilter.ALL -> sortedRoutines.size
-                                RoutineFilter.UNDONE -> sortedRoutines.size - doneCount
-                                RoutineFilter.DONE -> doneCount
-                            },
-                            selected = currentFilter == filter,
-                            onClick = { selectedFilter = filter.name },
-                            modifier = Modifier.testTag(routineFilterTag(filter.name))
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(RoutineFilter.entries) { filter ->
+                            CountFilterPill(
+                                title = filter.label,
+                                count = sortedRoutines.count { routine ->
+                                    RoutineCategories.matches(routine, currentCategory) &&
+                                        filter.matches(todayCounts[routine.id] ?: 0)
+                                },
+                                selected = currentFilter == filter,
+                                onClick = { selectedFilter = filter.name },
+                                modifier = Modifier.testTag(routineFilterTag(filter.name))
+                            )
+                        }
+                    }
+                    if (categories.isNotEmpty()) {
+                        val inToday = sortedRoutines.filter { currentFilter.matches(todayCounts[it.id] ?: 0) }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            item {
+                                CountFilterPill(
+                                    title = "전체",
+                                    count = inToday.size,
+                                    selected = currentCategory == null,
+                                    onClick = { selectedCategory = null },
+                                    modifier = Modifier.testTag(routineCategoryTag(null))
+                                )
+                            }
+                            items(categories) { category ->
+                                CountFilterPill(
+                                    title = RoutineCategories.label(category),
+                                    count = inToday.count { RoutineCategories.matches(it, category) },
+                                    selected = currentCategory == category,
+                                    onClick = { selectedCategory = category },
+                                    modifier = Modifier.testTag(routineCategoryTag(category))
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             if (rows.isEmpty()) {
+                // 갈래까지 골라 비었으면 어느 갈래 이야기인지 함께 적습니다.
+                val scope = when (currentCategory) {
+                    null -> ""
+                    RoutineCategories.NONE -> "갈래 없는 "
+                    else -> "'$currentCategory' "
+                }
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -321,9 +379,9 @@ fun RoutineScreen(
                         ) {
                             Text(
                                 text = if (currentFilter == RoutineFilter.UNDONE) {
-                                    "오늘 루틴을 모두 밟았습니다."
+                                    "오늘 ${scope}루틴을 모두 밟았습니다."
                                 } else {
-                                    "아직 밟은 루틴이 없습니다."
+                                    "아직 밟은 ${scope}루틴이 없습니다."
                                 },
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -1181,9 +1239,16 @@ private fun RoutineMemoRow(
     }
 }
 
+/**
+ * 루틴을 만들고 고치는 창.
+ *
+ * [knownCategories]는 이미 쓰는 갈래입니다. 서른 개 넘는 루틴에 갈래를 붙일 때 매번 같은 말을 손으로 치면
+ * 느리고, 한 글자만 달라도(`공부`/`공부하기`) 알약이 둘로 갈라집니다. 눌러서 채우게 둡니다.
+ */
 @Composable
 private fun RoutineEditorDialog(
     initialDraft: RoutineDraft,
+    knownCategories: List<String>,
     onDismiss: () -> Unit,
     onSave: (RoutineDraft) -> Unit
 ) {
@@ -1220,8 +1285,21 @@ private fun RoutineEditorDialog(
                     onValueChange = { category = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("카테고리") },
+                    supportingText = { Text("루틴 탭에서 이 갈래끼리 묶어 볼 수 있습니다.") },
                     singleLine = true
                 )
+                if (knownCategories.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(knownCategories) { known ->
+                            FilterChip(
+                                selected = category.trim() == known,
+                                onClick = { category = known },
+                                label = { Text(known) },
+                                modifier = Modifier.testTag(routineCategorySuggestionTag(known))
+                            )
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
