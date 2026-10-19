@@ -3,10 +3,13 @@ package com.codex.appgoodwords.work
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ServerSyncSettings
 import java.time.Duration
@@ -156,6 +159,53 @@ class ReminderScheduler(
         )
     }
 
+    /**
+     * 오늘의 한마디를 앱을 닫아 두어도 주기마다 받는 예약([DailyCoachWorker]).
+     *
+     * 앱을 켤 때와 AI 설정을 바꿀 때 다시 겁니다. 이미 걸려 있던 것은 지우고 새로 겁니다 — 주기를 바꿨는데
+     * 옛 주기의 예약이 그대로 남아 있으면 바꾼 값이 다음 한 번을 지나야 먹힙니다.
+     */
+    fun syncDailyCoach(
+        settings: AiFeedbackSettings,
+        state: DailyCoachState,
+        now: Long = System.currentTimeMillis()
+    ) {
+        if (!settings.coachRunsInBackground) {
+            WorkManager.getInstance(context).cancelUniqueWork(dailyCoachWorkName)
+            return
+        }
+        enqueueDailyCoach(
+            delayMillis = DailyCoachSchedule.delayMillis(settings.gapMinutes, state.lastAskedAt, now),
+            policy = ExistingWorkPolicy.REPLACE
+        )
+    }
+
+    /**
+     * 일꾼이 한 번 돈 뒤 다음 차례를 겁니다.
+     *
+     * **뒤에 잇습니다**(`APPEND_OR_REPLACE`). 돌고 있는 일꾼이 같은 이름으로 바꿔 걸면 자기 자신을 지웁니다.
+     */
+    fun scheduleNextDailyCoach(settings: AiFeedbackSettings) {
+        if (!settings.coachRunsInBackground) return
+        enqueueDailyCoach(
+            delayMillis = settings.gapMinutes * 60_000L,
+            policy = ExistingWorkPolicy.APPEND_OR_REPLACE
+        )
+    }
+
+    private fun enqueueDailyCoach(delayMillis: Long, policy: ExistingWorkPolicy) {
+        val request = OneTimeWorkRequestBuilder<DailyCoachWorker>()
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            // 인터넷이 끊긴 채로 깨우면 횟수만 쓰고 실패합니다.
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(dailyCoachWorkName, policy, request)
+    }
+
     // 계산은 ReminderSchedule에 있습니다. 시각을 인자로 받아야 테스트할 수 있어서입니다.
     private fun calculateRepeatingDelay(settings: ReminderSettings): Duration =
         ReminderSchedule.nextReminderDelay(settings, LocalDateTime.now())
@@ -171,5 +221,6 @@ class ReminderScheduler(
         const val autoSyncWorkName = "good_words_auto_sync"
         const val growthFeedbackWorkName = "good_words_growth_feedback"
         const val growthNudgeWorkName = "good_words_growth_nudge"
+        const val dailyCoachWorkName = "good_words_daily_coach"
     }
 }

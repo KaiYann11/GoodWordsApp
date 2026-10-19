@@ -575,6 +575,7 @@ class MainViewModel(
             val aiSettings = container.settingsStore.getAiFeedbackSettings()
             container.reminderScheduler.syncGrowthFeedback(aiSettings)
             container.reminderScheduler.syncGrowthNudge(aiSettings)
+            container.reminderScheduler.syncDailyCoach(aiSettings, container.dailyCoachCoordinator.state())
             _lockState.value = if (container.settingsStore.appLockEnabledFlow.first()) {
                 AppLockState.LOCKED
             } else {
@@ -997,7 +998,8 @@ class MainViewModel(
      * 오늘의 한마디를 받아 옵니다.
      *
      * 홈이 열릴 때마다 불러도 됩니다. 실제로 물을 때인지는 [DailyCoachCoordinator]가 가립니다 —
-     * 오늘 한 것이 바뀌었고, 틈이 벌어졌고, 하루 상한에 닿지 않았을 때만 나갑니다.
+     * 오늘 한 것이 있고, 주기가 돌아왔고, 하루 상한에 닿지 않았을 때만 나갑니다. 앱을 닫아 둔 동안에는
+     * 같은 규칙으로 배경 일꾼이 묻습니다([com.codex.appgoodwords.work.DailyCoachWorker]).
      *
      * @param force 사용자가 "다시 받기"를 눌렀을 때. 그때는 같은 기록이어도 묻습니다.
      */
@@ -1012,6 +1014,11 @@ class MainViewModel(
                 _coachLoading.value = false
             }
         }
+    }
+
+    /** 새로 온 한마디를 보았다고 적습니다. 카드의 반짝임과 홈 탭의 점을 거둡니다. */
+    fun markDailyCoachSeen() {
+        viewModelScope.launch { container.dailyCoachCoordinator.markSeen() }
     }
 
     /** 권해 받은 글귀를 보관함에 담습니다. 담은 것은 다시 담지 않습니다. */
@@ -1038,6 +1045,7 @@ class MainViewModel(
             container.settingsStore.updateAiFeedbackSettings(updated)
             container.reminderScheduler.syncGrowthFeedback(updated)
             container.reminderScheduler.syncGrowthNudge(updated)
+            container.reminderScheduler.syncDailyCoach(updated, container.dailyCoachCoordinator.state())
         }
     }
 

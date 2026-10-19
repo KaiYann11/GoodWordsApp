@@ -175,6 +175,27 @@ class AiFeedbackSettingsTest {
     }
 
     @Test
+    fun theGapRunsFromTenMinutesToADay() {
+        // 사용자가 정한 범위입니다. 하루보다 길면 자정에 비우는 한마디가 영영 오지 않습니다.
+        assertEquals(10L, AiFeedbackSettings(coachGapMinutes = 3).gapMinutes)
+        assertEquals(10L, AiFeedbackSettings(coachGapMinutes = 10).gapMinutes)
+        assertEquals(1440L, AiFeedbackSettings(coachGapMinutes = 5000).gapMinutes)
+        assertEquals(10, AiFeedbackSettings.GAP_MINUTE_CHOICES.first())
+        assertEquals(1440, AiFeedbackSettings.GAP_MINUTE_CHOICES.last())
+    }
+
+    @Test
+    fun theBackgroundPathRunsOnlyWhenItCanAsk() {
+        // 앱을 닫아도 도는 길은 값이 드는 일이라 켜 둔 사람에게만, 저절로 묻게 해 둔 때에만 돕니다.
+        val on = AiFeedbackSettings(coachEnabled = true)
+        assertTrue(on.coachRunsInBackground)
+        assertFalse(on.copy(coachBackground = false).coachRunsInBackground)
+        assertFalse(on.copy(coachEnabled = false).coachRunsInBackground)
+        // 하루 횟수를 "안 함"으로 두면 저절로 묻지 않으니 깨울 일도 없습니다.
+        assertFalse(on.copy(coachAskLimit = 0).coachRunsInBackground)
+    }
+
+    @Test
     fun askingNoneStillLeavesTheButton() {
         // "안 함"은 저절로 묻지 않는다는 뜻입니다. 직접 누르는 것까지 막지 않습니다.
         assertTrue(AiFeedbackSettings(coachAskLimit = 0).asksOnlyWhenAsked)

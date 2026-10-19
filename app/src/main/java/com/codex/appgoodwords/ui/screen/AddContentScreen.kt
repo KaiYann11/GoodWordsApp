@@ -79,6 +79,15 @@ fun AddContentScreen(
     var isIdea by rememberSaveable(formVersion) { mutableStateOf(initialDraft?.type == ContentType.IDEA) }
     val collectionType = initialDraft?.type?.takeIf { it.isPersonalRecord }
 
+    /**
+     * 메모는 제목과 본문만 받습니다.
+     *
+     * 글귀를 담는 칸(저자·링크·첨부·카테고리·태그·즐겨찾기)을 메모에도 다 늘어놓으면 적을 것보다 지나칠
+     * 칸이 많아, 떠오른 것을 바로 적는 자리가 되지 못합니다. **숨긴 칸의 값은 그대로 저장합니다** — 임시저장소에서
+     * 링크와 태그를 달고 메모로 옮겨 온 글을 고칠 때 그것이 지워지면 안 됩니다.
+     */
+    val isMemo = collectionType == ContentType.MEMO
+
     val selectedTags = remember(tagsText) { parseTags(tagsText) }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -108,7 +117,8 @@ fun AddContentScreen(
 
         val text = sharedText.orEmpty().trim()
         if (text.isNotBlank()) {
-            if (text.startsWith("http://") || text.startsWith("https://")) {
+            // 메모에는 링크 칸이 보이지 않습니다. 주소도 본문에 둬야 적은 사람 눈에 보입니다.
+            if (!isMemo && (text.startsWith("http://") || text.startsWith("https://"))) {
                 sourceUrl = text
             } else if (body.isBlank()) {
                 body = text
@@ -144,7 +154,12 @@ fun AddContentScreen(
                 onValueChange = { title = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("제목") },
-                supportingText = { Text("비워두면 본문이나 첨부 파일 이름으로 자동 생성됩니다.") }
+                supportingText = {
+                    Text(
+                        if (isMemo) "비워 두면 본문 첫머리가 제목이 됩니다."
+                        else "비워두면 본문이나 첨부 파일 이름으로 자동 생성됩니다."
+                    )
+                }
             )
         }
 
@@ -153,12 +168,12 @@ fun AddContentScreen(
                 value = body,
                 onValueChange = { body = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("본문 / 메모") },
-                minLines = 4
+                label = { Text(if (isMemo) "본문" else "본문 / 메모") },
+                minLines = if (isMemo) 8 else 4
             )
         }
 
-        item {
+        if (!isMemo) item {
             OutlinedTextField(
                 value = author,
                 onValueChange = { author = it },
@@ -167,7 +182,7 @@ fun AddContentScreen(
             )
         }
 
-        item {
+        if (!isMemo) item {
             OutlinedTextField(
                 value = sourceUrl,
                 onValueChange = { sourceUrl = it },
@@ -177,7 +192,7 @@ fun AddContentScreen(
             )
         }
 
-        item {
+        if (!isMemo) item {
             TextButton(
                 onClick = {
                     onFetchMetadata(sourceUrl) { metadata ->
@@ -198,7 +213,7 @@ fun AddContentScreen(
             }
         }
 
-        item {
+        if (!isMemo) item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "첨부",
@@ -224,7 +239,7 @@ fun AddContentScreen(
             }
         }
 
-        if (imageUris.isNotEmpty()) {
+        if (!isMemo && imageUris.isNotEmpty()) {
             item {
                 AttachmentChips(
                     title = "선택된 사진",
@@ -234,7 +249,7 @@ fun AddContentScreen(
             }
         }
 
-        if (videoUris.isNotEmpty()) {
+        if (!isMemo && videoUris.isNotEmpty()) {
             item {
                 AttachmentChips(
                     title = "선택된 영상",
@@ -244,7 +259,7 @@ fun AddContentScreen(
             }
         }
 
-        item {
+        if (!isMemo) item {
             OutlinedTextField(
                 value = category,
                 onValueChange = { category = it },
@@ -256,7 +271,7 @@ fun AddContentScreen(
             )
         }
 
-        if (suggestedCategories.isNotEmpty()) {
+        if (!isMemo && suggestedCategories.isNotEmpty()) {
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(suggestedCategories) { suggestedCategory ->
@@ -270,7 +285,7 @@ fun AddContentScreen(
             }
         }
 
-        item {
+        if (!isMemo) item {
             OutlinedTextField(
                 value = tagsText,
                 onValueChange = { tagsText = it },
@@ -280,7 +295,7 @@ fun AddContentScreen(
             )
         }
 
-        if (existingTags.isNotEmpty()) {
+        if (!isMemo && existingTags.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -322,7 +337,7 @@ fun AddContentScreen(
             }
         }
 
-        item {
+        if (!isMemo) item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween

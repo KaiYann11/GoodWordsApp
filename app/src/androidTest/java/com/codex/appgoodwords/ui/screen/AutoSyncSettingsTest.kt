@@ -163,7 +163,9 @@ class AutoSyncSettingsTest {
             onUploadToServer = {},
             onDownloadFromServer = {},
             onRestoreBackup = {},
-            onDeleteCategory = {}
+            onDeleteCategory = {},
+            // 설정은 갈래 목록에서 시작합니다. 자동 동기화는 서버·동기화 갈래 안에 있습니다.
+            section = SettingsSection.SYNC
         )
     }
 }

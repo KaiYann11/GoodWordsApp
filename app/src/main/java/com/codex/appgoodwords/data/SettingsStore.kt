@@ -69,6 +69,8 @@ class SettingsStore(
         val aiCoachGapMinutes = intPreferencesKey("ai_coach_gap_minutes")
         /** 아직 안 밟은 루틴을 한 줄로 알려 줄지. AI를 부르지 않아 값이 들지 않습니다. */
         val aiCoachNudgeEnabled = booleanPreferencesKey("ai_coach_nudge_enabled")
+        /** 앱을 닫아 두어도 주기마다 받아 알릴지. */
+        val aiCoachBackground = booleanPreferencesKey("ai_coach_background")
         /**
          * 오늘 받은 한마디와, 오늘 몇 번 물었는지([DailyCoachState]).
          *
@@ -154,7 +156,9 @@ class SettingsStore(
             coachAskLimit = preferences[Keys.aiCoachAskLimit] ?: AiFeedbackSettings.DEFAULT_ASK_LIMIT,
             coachGapMinutes = preferences[Keys.aiCoachGapMinutes] ?: AiFeedbackSettings.DEFAULT_GAP_MINUTES,
             // 값이 들지 않는 쪽이라 기본으로 켭니다.
-            coachNudgeEnabled = preferences[Keys.aiCoachNudgeEnabled] ?: true
+            coachNudgeEnabled = preferences[Keys.aiCoachNudgeEnabled] ?: true,
+            // 한마디 자체가 기본 꺼짐이라, 켠 사람에게만 해당합니다.
+            coachBackground = preferences[Keys.aiCoachBackground] ?: true
         )
     }
 
@@ -240,6 +244,7 @@ class SettingsStore(
             preferences[Keys.aiCoachAskLimit] = settings.askLimit
             preferences[Keys.aiCoachGapMinutes] = settings.gapMinutes.toInt()
             preferences[Keys.aiCoachNudgeEnabled] = settings.coachNudgeEnabled
+            preferences[Keys.aiCoachBackground] = settings.coachBackground
         }
     }
 

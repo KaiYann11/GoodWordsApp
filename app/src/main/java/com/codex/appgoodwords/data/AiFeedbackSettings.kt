@@ -57,7 +57,12 @@ data class AiFeedbackSettings(
      * 쓰는 것이라 앱이 말릴 일이 아닙니다. 0으로 두면 **가벼운 알림만** 받는 셈이 됩니다.
      */
     val coachAskLimit: Int = DEFAULT_ASK_LIMIT,
-    /** 저절로 다시 묻기까지 비워 두는 시간(분). 너무 짧으면 한 일이 그대로 요금이 됩니다. */
+    /**
+     * 저절로 다시 묻는 주기(분). 10분부터 하루까지 고릅니다([gapMinutes]).
+     *
+     * **주기가 돌아오면 오늘 기록이 그대로여도 다시 묻습니다** — 사용자가 정한 것입니다(2026-10-19).
+     * 그래서 이 주기와 하루 횟수([coachAskLimit])가 값이 드는 정도를 정합니다.
+     */
     val coachGapMinutes: Int = DEFAULT_GAP_MINUTES,
     /**
      * 아직 안 밟은 루틴을 한 줄로 알려 줄지([RoutineNudge]).
@@ -65,7 +70,14 @@ data class AiFeedbackSettings(
      * **기본은 켜짐입니다.** AI를 부르지 않고 기기에서 세는 것이라 값이 들지 않고,
      * 연결이 없어도 뜹니다. 끄면 오늘의 한마디 카드에는 AI가 써 준 것만 남습니다.
      */
-    val coachNudgeEnabled: Boolean = true
+    val coachNudgeEnabled: Boolean = true,
+    /**
+     * 앱을 닫아 두어도 주기마다 받아 알림으로 알릴지([com.codex.appgoodwords.work.DailyCoachWorker]).
+     *
+     * 오늘의 한마디를 켠 사람이 앱을 열지 않으면 한마디가 쌓이지도, 눈에 띄지도 않았습니다. 사용자가 정해
+     * 켜 두었습니다(2026-10-19). **설정에 스위치로 보입니다** — 값이 드는 일이 몰래 돌면 안 됩니다.
+     */
+    val coachBackground: Boolean = true
 ) {
     val activeProvider: AiProvider
         get() = AiProvider.of(provider)
@@ -133,13 +145,20 @@ data class AiFeedbackSettings(
         get() = coachAskLimit.coerceIn(0, MAX_ASK_LIMIT)
 
     /**
-     * 저절로 다시 묻기까지 비워 둘 시간.
+     * 저절로 다시 묻는 주기.
      *
-     * **바닥을 둡니다.** 0분이면 오늘 한 것이 바뀔 때마다 묻게 되어, 루틴을 연달아 밟은 날
-     * 그 횟수가 그대로 요금이 됩니다.
+     * **바닥과 천장을 둡니다.** 바닥이 없으면 주기마다 묻는 길이 그대로 요금이 되고, 하루보다 길면
+     * 날마다 비우는 한마디가 영영 오지 않습니다.
      */
     val gapMinutes: Long
-        get() = coachGapMinutes.coerceAtLeast(MIN_GAP_MINUTES).toLong()
+        get() = coachGapMinutes.coerceIn(MIN_GAP_MINUTES, MAX_GAP_MINUTES).toLong()
+
+    /**
+     * 앱을 닫아 두어도 도는지. 한마디를 켜야 하고, 배경 스위치도 켜져 있어야 합니다.
+     * 하루 횟수를 "안 함"으로 두었으면 저절로 묻지 않으므로 깨울 일도 없습니다.
+     */
+    val coachRunsInBackground: Boolean
+        get() = coachEnabled && coachBackground && askLimit > 0
 
     /** 저절로 묻는 길을 아예 닫아 두었는지. 눌러서 받는 길은 그대로 있습니다. */
     val asksOnlyWhenAsked: Boolean
@@ -179,12 +198,15 @@ data class AiFeedbackSettings(
 
         const val DEFAULT_GAP_MINUTES = 90
 
-        /** 아무리 짧게 잡아도 이만큼은 비웁니다(알림 간격 `ReminderSettings`와 같은 바닥). */
-        const val MIN_GAP_MINUTES = 15
+        /** 아무리 짧게 잡아도 이만큼은 비웁니다. 사용자가 정한 바닥입니다(10분). */
+        const val MIN_GAP_MINUTES = 10
+
+        /** 아무리 길게 잡아도 하루에 한 번은 묻습니다. 한마디는 자정이면 비우는 것이라 그보다 길면 의미가 없습니다. */
+        const val MAX_GAP_MINUTES = 1440
 
         /** 설정 화면에서 고를 수 있는 것들. 0은 "저절로는 묻지 않음"입니다. */
         val ASK_LIMIT_CHOICES = listOf(0, 1, 3, 5, 10)
 
-        val GAP_MINUTE_CHOICES = listOf(30, 60, 90, 180)
+        val GAP_MINUTE_CHOICES = listOf(10, 30, 60, 90, 180, 360, 720, 1440)
     }
 }

@@ -113,7 +113,9 @@ class DailyStepsSettingsTest {
             onRestoreBackup = {},
             onDeleteCategory = {},
             dailySteps = steps,
-            onDailyStepsChanged = onChanged
+            onDailyStepsChanged = onChanged,
+            // 설정은 갈래 목록에서 시작합니다. 오늘의 걸음 갈래를 바로 엽니다.
+            section = SettingsSection.STEPS
         )
     }
 }
