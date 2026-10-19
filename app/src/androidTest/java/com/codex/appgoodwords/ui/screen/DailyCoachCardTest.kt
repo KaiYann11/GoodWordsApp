@@ -210,4 +210,27 @@ class DailyCoachCardTest {
 
         compose.onNodeWithTag(dailyCoachRefreshTag).assertDoesNotExist()
     }
+
+    @Test
+    fun aNewWordStandsOutAndIsMarkedSeenAfterItIsShown() {
+        // 평범한 카드 하나로는 왔는지조차 몰랐습니다. 새 것은 눈에 띄게, 다 보여 준 뒤에는 거둡니다.
+        var seen = 0
+        compose.setContent {
+            DailyCoachCard(state = state().withTip(tip(), "abc"), onSeen = { seen += 1 })
+        }
+
+        compose.onNodeWithTag(dailyCoachNewBadgeTag).assertIsDisplayed()
+        // 글자가 다 써지고 잠시 보여 준 뒤에 본 것으로 적습니다.
+        compose.mainClock.advanceTimeBy(6_000)
+        compose.waitForIdle()
+        compose.onNodeWithText("물 한 컵으로 하루를 여셨네요.").assertIsDisplayed()
+        assertTrue("본 것으로 적지 않았습니다", seen == 1)
+    }
+
+    @Test
+    fun aWordAlreadySeenDoesNotFlash() {
+        compose.setContent { DailyCoachCard(state = state(tip = tip())) }
+
+        compose.onNodeWithTag(dailyCoachNewBadgeTag).assertDoesNotExist()
+    }
 }

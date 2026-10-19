@@ -124,6 +124,8 @@ fun HomeScreen(
     onKeepCoachQuote: () -> Unit = {},
     onKeepCoachRoutine: () -> Unit = {},
     onKeepCoachAction: () -> Unit = {},
+    /** 새로 온 한마디를 다 보여 주었습니다. */
+    onCoachSeen: () -> Unit = {},
     /** 오늘 점수와 최근 흐름. null이면 카드를 두지 않습니다. */
     todayScore: DayScore? = null,
     scoreTrend: ScoreTrend? = null,
@@ -202,7 +204,8 @@ fun HomeScreen(
                     onRefresh = onRefreshCoach,
                     onKeepQuote = onKeepCoachQuote,
                     onKeepRoutine = onKeepCoachRoutine,
-                    onKeepAction = onKeepCoachAction
+                    onKeepAction = onKeepCoachAction,
+                    onSeen = onCoachSeen
                 )
             }
         }

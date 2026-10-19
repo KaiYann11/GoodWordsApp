@@ -14,6 +14,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.codex.appgoodwords.MainActivity
 import com.codex.appgoodwords.R
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.DailyCoachTip
 import com.codex.appgoodwords.data.DailySummary
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
@@ -26,6 +27,7 @@ object AppNotifications {
     const val summaryChannelId = "daily_good_words_summary_sound"
     const val summarySilentChannelId = "daily_good_words_summary_silent"
     const val todoChannelId = "good_words_todo_alarm"
+    const val coachChannelId = "good_words_daily_coach"
     const val actionMarkRead = "com.codex.appgoodwords.action.MARK_READ"
     const val actionCheckRoutine = "com.codex.appgoodwords.action.CHECK_ROUTINE"
     const val extraContentId = "extra_content_id"
@@ -90,11 +92,76 @@ object AppNotifications {
             lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
         }
 
+        // 오늘의 한마디는 앱을 열지 않아도 눈에 띄어야 합니다(사용자가 정함). 화면 위에 잠깐 떠오르게 높게 둡니다.
+        // 채널을 따로 두어, 이것만 끄거나 조용히 하고 싶으면 휴대폰 설정에서 따로 고를 수 있게 합니다.
+        val coachChannel = NotificationChannel(
+            coachChannelId,
+            "${context.getString(R.string.app_name)} 오늘의 한마디",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "오늘 한 것을 보고 AI가 건네는 한마디"
+            lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+        }
+
         manager.createNotificationChannel(contentChannel)
         manager.createNotificationChannel(contentSilentChannel)
         manager.createNotificationChannel(summaryChannel)
         manager.createNotificationChannel(summarySilentChannel)
         manager.createNotificationChannel(todoChannel)
+        manager.createNotificationChannel(coachChannel)
+    }
+
+    /**
+     * 새 한마디가 왔다고 알립니다. 앱을 닫아 둔 동안 배경 일꾼([DailyCoachWorker])이 받은 것입니다.
+     *
+     * 한마디 글을 펼쳐 보여 줍니다 — 열지 않고도 읽고 마는 말이라서입니다. 다만 잠금 화면에는
+     * "잠금화면 알림 내용 공개"를 따릅니다(글귀 알림과 같은 스위치). 꺼 두었으면 잠금 화면에는
+     * 왔다는 사실만 보입니다.
+     */
+    fun showDailyCoachNotification(
+        context: Context,
+        tip: DailyCoachTip,
+        soundEnabled: Boolean,
+        lockScreenVisible: Boolean
+    ) {
+        if (!hasNotificationPermission(context)) return
+
+        val openAppIntent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            9_007,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val body = buildString {
+            append(tip.message)
+            if (tip.quote.isNotBlank()) append("\n\n“").append(tip.quote).append("”")
+            if (tip.action.isNotBlank()) append("\n\n해 볼 만한 한 가지: ").append(tip.action)
+        }
+        val publicVersion = NotificationCompat.Builder(context, coachChannelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("오늘의 한마디")
+            .setContentText("새 한마디가 도착했습니다")
+            .build()
+
+        val notification = NotificationCompat.Builder(context, coachChannelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("오늘의 한마디")
+            .setContentText(tip.message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setSilent(!soundEnabled)
+            .setVisibility(
+                if (lockScreenVisible) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE
+            )
+            .setPublicVersion(publicVersion)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(9_008, notification)
     }
 
     fun showTodoNotification(

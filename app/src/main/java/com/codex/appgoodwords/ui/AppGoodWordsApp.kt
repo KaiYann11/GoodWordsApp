@@ -24,6 +24,8 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,8 +36,10 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -107,9 +111,11 @@ import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.RoutineStatsScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
+import com.codex.appgoodwords.ui.screen.SettingsSection
 import com.codex.appgoodwords.ui.screen.TodoScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
 import com.codex.appgoodwords.work.AppNotifications
+import com.codex.appgoodwords.work.DailyCoachSchedule
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.delay
@@ -212,6 +218,14 @@ fun AppGoodWordsApp(
     val captureIdeaRequest by viewModel.captureIdeaRequest.collectAsStateWithLifecycle()
     // 위젯의 적기로 들어왔거나 홈에서 왼쪽으로 밀었을 때 뜹니다.
     var capturingIdea by remember { mutableStateOf(false) }
+
+    /**
+     * 설정에서 보고 있는 갈래. null이면 갈래 목록입니다.
+     *
+     * 설정 화면이 아니라 여기서 들고 있습니다. 위쪽 막대의 제목이 갈래 이름이 되고, 막대의 ←가 설정을 닫기 전에
+     * 갈래 목록으로 먼저 돌아가야 해서입니다.
+     */
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     val syncBackups by viewModel.syncBackups.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val syncBackupDirectory by viewModel.syncBackupDirectory.collectAsStateWithLifecycle()
@@ -475,16 +489,39 @@ fun AppGoodWordsApp(
     }
 
     /**
-     * 홈을 보고 있는 동안, 오늘 한 것이 바뀌면 코치에게 다시 물을 때인지 들여다봅니다.
+     * 홈을 보고 있는 동안, 코치에게 다시 물을 때인지 들여다봅니다 — 오늘 한 것이 바뀔 때와,
+     * 홈을 열어 둔 채로 주기가 돌아올 때.
      *
-     * 배경에서 돌리지 않습니다. 앱이 꺼져 있는 동안 값이 드는 요청을 보내 봐야 받아 볼
-     * 사람이 없고, 사용자는 자기도 모르는 사이에 쓴 몫만 보게 됩니다. 실제로 물을지는
+     * 앱을 닫아 둔 동안에는 배경 일꾼이 같은 규칙으로 묻습니다(`DailyCoachWorker`). 실제로 물을지는
      * [MainViewModel.refreshDailyCoach]가 가립니다 — 대부분은 들여다보고 지나갑니다.
      */
-    LaunchedEffect(currentTab, coachFingerprint) {
-        if (currentTab == AppTab.HOME && coachFingerprint.isNotBlank()) {
-            viewModel.refreshDailyCoach()
-        }
+    LaunchedEffect(currentTab, coachFingerprint, dailyCoach.lastAskedAt, aiFeedbackSettings.gapMinutes) {
+        if (currentTab != AppTab.HOME || coachFingerprint.isBlank()) return@LaunchedEffect
+        viewModel.refreshDailyCoach()
+        delay(
+            DailyCoachSchedule.delayMillis(
+                gapMinutes = aiFeedbackSettings.gapMinutes,
+                lastAskedAt = dailyCoach.lastAskedAt,
+                now = System.currentTimeMillis()
+            )
+        )
+        viewModel.refreshDailyCoach()
+    }
+
+    /**
+     * 다른 탭에 있는 동안 새 한마디가 오면 아래에 알리고 데려갈 길을 줍니다.
+     *
+     * 홈에 있으면 카드가 알리므로 띄우지 않습니다. 앱을 막 열었을 때 이미 와 있던 것도 홈이 먼저 보여 줍니다.
+     */
+    val newCoachTipAt = dailyCoach.tip?.createdAt?.takeIf { dailyCoach.hasNewTip && aiFeedbackSettings.coachEnabled }
+    LaunchedEffect(newCoachTipAt) {
+        if (newCoachTipAt == null || currentTab == AppTab.HOME) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "새 한마디가 도착했습니다",
+            actionLabel = "보기",
+            duration = SnackbarDuration.Long
+        )
+        if (result == SnackbarResult.ActionPerformed) selectTab(AppTab.HOME)
     }
 
     LaunchedEffect(openItemRequest, allItems, currentTab) {
@@ -566,7 +603,9 @@ fun AppGoodWordsApp(
                                 destination.editingItemId != null -> "항목 수정"
                                 destination.newItemType == ContentType.CONCEPT -> "개념 적기"
                                 destination.newItemType == ContentType.MEMO -> "메모 적기"
-                                else -> currentTab.title
+                                // 설정의 갈래 안에서는 그 갈래 이름이 제목입니다.
+                                else -> settingsSection?.takeIf { currentTab == AppTab.SETTINGS }?.title
+                                    ?: currentTab.title
                             },
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
@@ -576,7 +615,16 @@ fun AppGoodWordsApp(
                     },
                     navigationIcon = {
                         if (canNavigateBack) {
-                            IconButton(onClick = ::popRoute) {
+                            IconButton(
+                                onClick = {
+                                    // 설정의 갈래 안이면 설정을 닫지 않고 갈래 목록으로 먼저 돌아갑니다.
+                                    if (currentTab == AppTab.SETTINGS && settingsSection != null) {
+                                        settingsSection = null
+                                    } else {
+                                        popRoute()
+                                    }
+                                }
+                            ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "뒤로 가기"
@@ -596,7 +644,13 @@ fun AppGoodWordsApp(
                         }
                         // 설정은 하단 바에서 빠졌으므로 어느 화면에서나 여기로 들어갑니다.
                         if (selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SETTINGS) {
-                            IconButton(onClick = { pushRoute(tabRoute(AppTab.SETTINGS)) }) {
+                            IconButton(
+                                onClick = {
+                                    // 설정은 늘 갈래 목록에서 엽니다. 지난번에 보던 갈래로 바로 떨어지면 어디인지 헷갈립니다.
+                                    settingsSection = null
+                                    pushRoute(tabRoute(AppTab.SETTINGS))
+                                }
+                            ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Settings,
                                     contentDescription = "설정"
@@ -621,10 +675,14 @@ fun AppGoodWordsApp(
                         listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.ROUTINE, AppTab.TODO, AppTab.DIARY)
                             .forEach { tab ->
                                 val selected = currentTab == tab
+                                // 새 한마디가 와 있는데 다른 탭에 있으면 홈에 점을 답니다(메신저 앱의 읽지 않은 표시처럼).
+                                val coachDot = tab == AppTab.HOME && !selected &&
+                                    aiFeedbackSettings.coachEnabled && dailyCoach.hasNewTip
                                 NavigationBarItem(
                                     selected = selected,
                                     onClick = { selectTab(tab) },
                                     icon = {
+                                        BadgedBox(badge = { if (coachDot) Badge() }) {
                                         Icon(
                                             imageVector = when (tab) {
                                                 AppTab.HOME -> Icons.Outlined.Home
@@ -644,6 +702,7 @@ fun AppGoodWordsApp(
                                             },
                                             contentDescription = null
                                         )
+                                        }
                                     },
                                     label = { Text(tab.title, maxLines = 1) },
                                     colors = NavigationBarItemDefaults.colors(
@@ -805,6 +864,7 @@ fun AppGoodWordsApp(
                                     )
                                 }
                             },
+                            onCoachSeen = { viewModel.markDailyCoachSeen() },
                             // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
                             todayScore = todayScore,
                             scoreTrend = scoreTrend,
@@ -1383,7 +1443,11 @@ fun AppGoodWordsApp(
                                     )
                                 }
                             },
-                            onOpenSettings = { pushRoute(tabRoute(AppTab.SETTINGS)) }
+                            // 돌아보기에서 여는 설정은 AI 갈래입니다. 목록을 거쳐 다시 찾게 하지 않습니다.
+                            onOpenSettings = {
+                                settingsSection = SettingsSection.AI
+                                pushRoute(tabRoute(AppTab.SETTINGS))
+                            }
                         )
 
                         AppTab.GALLERY -> AttachmentGalleryScreen(
@@ -1472,6 +1536,8 @@ fun AppGoodWordsApp(
                             onUnlock = { unlockDiary() }
                         ) else SettingsScreen(
                             modifier = Modifier.padding(innerPadding),
+                            section = settingsSection,
+                            onSectionChange = { settingsSection = it },
                             settings = settings,
                             currentVersionName = BuildConfig.VERSION_NAME,
                             currentVersionCode = BuildConfig.VERSION_CODE,

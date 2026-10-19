@@ -21,6 +21,15 @@ class AppGoodWordsApplication : Application() {
      */
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * 앱 화면이 지금 사람 앞에 떠 있는지. [MainActivity]가 앞으로 나오고 물러날 때 적습니다.
+     *
+     * 배경 일꾼이 알림을 띄울지 정할 때 봅니다([com.codex.appgoodwords.work.DailyCoachWorker]) —
+     * 보고 있는 화면 위에 알림까지 겹치면 같은 말을 두 번 듣습니다.
+     */
+    @Volatile
+    var mainScreenVisible: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         AppNotifications.createNotificationChannels(this)

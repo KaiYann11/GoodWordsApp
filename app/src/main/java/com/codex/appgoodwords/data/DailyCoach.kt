@@ -48,8 +48,9 @@ data class DailyCoachState(
     /**
      * 그 한마디를 받을 때 본 오늘 기록의 지문([DailyCoachDigest.fingerprint]).
      *
-     * 같은 지문으로 두 번 묻지 않습니다. 기록이 그대로인데 다시 물으면 거의 같은 말이
-     * 돌아오고, 값만 한 번 더 듭니다.
+     * 예전에는 같은 지문으로 두 번 묻지 않았습니다. 지금은 **주기가 돌아오면 기록이 그대로여도
+     * 묻습니다**(사용자가 정함, 2026-10-19) — 그래서 다시 묻는 데는 쓰지 않고, 무엇을 보고 쓴
+     * 한마디인지 남겨 두는 데만 씁니다.
      */
     val fingerprint: String = "",
     /** 오늘 몇 번 물었는지. **실패도 셉니다** — 안 되는 설정으로 하루 종일 두드리지 않습니다. */
@@ -60,8 +61,21 @@ data class DailyCoachState(
     /** 집어 간 것. 두 번 눌러 같은 루틴이 두 개 생기지 않게 합니다. */
     val quoteKept: Boolean = false,
     val routineKept: Boolean = false,
-    val actionKept: Boolean = false
+    val actionKept: Boolean = false,
+    /**
+     * 받은 한마디를 화면에서 보았는지.
+     *
+     * 새로 온 한마디는 카드가 눈에 띄게 알리고(테두리·"새 한마디"·글자가 써지듯 나타남), 홈 탭에 점을 답니다.
+     * 본 뒤에는 거둡니다 — 늘 반짝이면 무엇이 새 것인지 알 수 없습니다.
+     */
+    val tipSeen: Boolean = true
 ) {
+    /** 받아 놓고 아직 보지 않은 한마디가 있는지. */
+    val hasNewTip: Boolean
+        get() = tip != null && !tipSeen
+
+    fun markSeen(): DailyCoachState = copy(tipSeen = true)
+
     /**
      * 오늘의 것만 남깁니다.
      *
@@ -78,9 +92,9 @@ data class DailyCoachState(
     /**
      * 저절로 다시 물을 때인지.
      *
-     * 무엇을 했는지 바뀌었을 때만, 그것도 [gapMinutes]분에 한 번까지만 묻습니다.
-     * 루틴을 연달아 다섯 개 체크하면 지문이 다섯 번 바뀌는데, 그때마다 물으면
-     * 사용자가 한 일이 그대로 요금이 됩니다.
+     * **[gapMinutes]마다, 오늘 기록이 그대로여도 묻습니다**(사용자가 정함, 2026-10-19). 예전에는 기록이
+     * 바뀌었을 때만 물었는데, 그러면 앱을 열지 않는 날에는 한마디가 오지 않았습니다.
+     * 그 대신 하루 횟수([limit])가 값이 드는 정도를 묶습니다.
      *
      * **몇 번까지, 얼마 만에 물을지는 사용자가 정합니다**([AiFeedbackSettings.askLimit] ·
      * [AiFeedbackSettings.gapMinutes]). 여기 적어 두지 않는 이유는, 값이 드는 정도를
@@ -99,8 +113,6 @@ data class DailyCoachState(
         // "오늘을 시작해 보세요"가 돌아옵니다. 그 말은 앱이 공짜로 할 수 있습니다.
         if (fingerprint.isBlank()) return false
         if (askCount >= limit) return false
-        // 실패했을 때는 지문을 적어 두지 않으므로, 같은 기록이라도 틈을 두고 한 번 더 갑니다.
-        if (fingerprint == this.fingerprint) return false
         return now - lastAskedAt >= gapMinutes * 60_000L
     }
 
@@ -116,7 +128,8 @@ data class DailyCoachState(
         lastError = "",
         quoteKept = false,
         routineKept = false,
-        actionKept = false
+        actionKept = false,
+        tipSeen = false
     )
 
     /** 지문은 적지 않습니다. 같은 기록으로 한 번 더 가 볼 수 있어야 합니다. */
@@ -142,6 +155,7 @@ object DailyCoachJson {
             .put("quoteKept", state.quoteKept)
             .put("routineKept", state.routineKept)
             .put("actionKept", state.actionKept)
+            .put("tipSeen", state.tipSeen)
         state.tip?.let { tip ->
             json.put(
                 "tip",
@@ -181,7 +195,10 @@ object DailyCoachJson {
             lastError = json.optString("lastError"),
             quoteKept = json.optBoolean("quoteKept"),
             routineKept = json.optBoolean("routineKept"),
-            actionKept = json.optBoolean("actionKept")
+            actionKept = json.optBoolean("actionKept"),
+            // 이 칸이 생기기 전에 받은 한마디는 이미 본 것으로 읽습니다. 업데이트하자마자 옛 한마디가
+            // 새 것처럼 반짝이면 무엇이 새로 왔는지 헷갈립니다.
+            tipSeen = json.optBoolean("tipSeen", true)
         )
     }
 }

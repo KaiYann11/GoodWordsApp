@@ -1,11 +1,22 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -15,16 +26,37 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.RoutineNudge
+import com.codex.appgoodwords.ui.theme.Amber
+import com.codex.appgoodwords.ui.theme.Indigo
+import com.codex.appgoodwords.ui.theme.Mint
+import com.codex.appgoodwords.ui.theme.Motion
+import com.codex.appgoodwords.ui.theme.Violet
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 
 internal const val dailyCoachCardTag = "home_daily_coach"
 internal const val dailyCoachRefreshTag = "home_daily_coach_refresh"
@@ -35,6 +67,15 @@ internal const val dailyCoachActionTag = "home_daily_coach_action"
 /** AI를 부르지 않고 기기에서 센 한 줄. */
 internal const val dailyCoachNudgeTag = "home_daily_coach_nudge"
 internal const val dailyCoachNudgeOpenTag = "home_daily_coach_nudge_open"
+
+/** 아직 보지 않은 한마디라는 표시. */
+internal const val dailyCoachNewBadgeTag = "home_daily_coach_new"
+
+/** 새 한마디가 다 써진 뒤 본 것으로 적기까지 보여 두는 시간. 다 읽기 전에 반짝임이 꺼지면 무엇이 새 것이었는지 놓칩니다. */
+private const val SEEN_AFTER_MS = 2_500L
+
+/** 글자가 써지듯 나타나는 데 드는 시간. 길면 기다리게 되고, 짧으면 효과로 보이지 않습니다. */
+private const val REVEAL_MS = 1_400L
 
 /**
  * 오늘의 한마디.
@@ -49,6 +90,12 @@ internal const val dailyCoachNudgeOpenTag = "home_daily_coach_nudge_open"
  * 권해 받은 것은 집어 가야 남습니다 — 글귀는 보관함으로, 루틴은 루틴으로, 해 볼 일은
  * 오늘 할 일로. **한 번 담으면 버튼이 사라집니다.** 스치듯 누르는 자리라 두 번 눌리면
  * 같은 것이 두 벌 생깁니다.
+ *
+ * **새로 온 한마디는 눈에 띄게 알립니다**(사용자가 정함, 2026-10-19). 평범한 카드 하나로는 왔는지조차
+ * 몰랐습니다. 상용 앱들이 "아직 안 본 것"을 알리는 방식을 빌렸습니다 — 둘레를 도는 빛(스토리 테두리처럼),
+ * 색 그림자, 깜빡이는 "새 한마디" 점, 용수철로 얹히는 등장, 글자가 써지듯 나타나는 본문(채팅 앱의 답처럼).
+ * 다 보여 준 뒤 본 것으로 적고([onSeen]) 거둡니다 — 늘 반짝이면 무엇이 새 것인지 알 수 없습니다.
+ * 진동은 넣지 않습니다. 진동은 사용자가 한 동작에만 답합니다(`Feedback.kt`).
  */
 @Composable
 fun DailyCoachCard(
@@ -68,15 +115,80 @@ fun DailyCoachCard(
     onRefresh: () -> Unit = {},
     onKeepQuote: () -> Unit = {},
     onKeepRoutine: () -> Unit = {},
-    onKeepAction: () -> Unit = {}
+    onKeepAction: () -> Unit = {},
+    /** 새로 온 한마디를 다 보여 주었습니다. 반짝임과 홈 탭의 점을 거둡니다. */
+    onSeen: () -> Unit = {}
 ) {
     val tip = state.tip
+    val isNew = state.hasNewTip
+    val shape = RoundedCornerShape(20.dp)
+
+    // 반짝임은 새 것일 때 차오르고 본 뒤에 사그라듭니다. 툭 꺼지면 눈이 뭔가 사라졌다고만 느낍니다.
+    val highlight by animateFloatAsState(
+        targetValue = if (isNew) 1f else 0f,
+        animationSpec = Motion.value(),
+        label = "coachHighlight"
+    )
+    val glow = rememberInfiniteTransition(label = "coachGlow")
+    val sweep by glow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 2_400, easing = LinearEasing)),
+        label = "coachGlowSweep"
+    )
+    val pulse by glow.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 800), RepeatMode.Reverse),
+        label = "coachPulse"
+    )
+
+    // 새 한마디가 오면 살짝 작아졌다가 용수철로 얹힙니다.
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(tip?.createdAt, isNew) {
+        if (isNew) {
+            pop.snapTo(0.94f)
+            pop.animateTo(1f, Motion.enter())
+        }
+    }
+
+    // 본문은 새 것일 때만 글자가 써지듯 나타납니다. 이미 본 것은 처음부터 다 보입니다.
+    var shownChars by remember(tip?.createdAt) { mutableIntStateOf(if (isNew) 0 else Int.MAX_VALUE) }
+    LaunchedEffect(tip?.createdAt) {
+        val length = tip?.message?.length ?: return@LaunchedEffect
+        if (shownChars >= length) return@LaunchedEffect
+        val step = (REVEAL_MS / length.coerceAtLeast(1)).coerceIn(8L, 45L)
+        while (shownChars < length) {
+            delay(step)
+            shownChars += 1
+        }
+    }
+    val revealed = tip == null || shownChars >= tip.message.length
+    LaunchedEffect(tip?.createdAt, isNew, revealed) {
+        if (isNew && revealed) {
+            delay(SEEN_AFTER_MS)
+            onSeen()
+        }
+    }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = pop.value
+                scaleY = pop.value
+            }
+            // 잘라 내지 않습니다. 잘라 내면 뒤에 그리는 빛 테두리의 바깥 절반이 사라집니다.
+            .shadow(
+                elevation = (14 * highlight).dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Indigo,
+                spotColor = Violet
+            )
+            .glowBorder(progress = sweep, alpha = highlight, shape = shape)
             .testTag(dailyCoachCardTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -86,14 +198,18 @@ fun DailyCoachCard(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
                     text = "오늘의 한마디",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
+                    fontWeight = FontWeight.Bold
                 )
+                if (isNew) {
+                    NewTipBadge(pulse = pulse)
+                }
+                Box(modifier = Modifier.weight(1f))
                 if (loading) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
@@ -108,7 +224,7 @@ fun DailyCoachCard(
 
             when {
                 tip != null -> Text(
-                    text = tip.message,
+                    text = if (revealed) tip.message else tip.message.take(shownChars),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -229,6 +345,56 @@ fun DailyCoachCard(
         }
     }
 }
+
+/** "새 한마디" 표시. 점이 숨 쉬듯 깜빡여 아직 안 본 것이 있다고 알립니다. */
+@Composable
+private fun NewTipBadge(pulse: Float) {
+    Row(
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .testTag(dailyCoachNewBadgeTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .alpha(pulse)
+                .background(MaterialTheme.colorScheme.primary, CircleShape)
+        )
+        Text(
+            text = "새 한마디",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+/**
+ * 카드 둘레를 도는 빛.
+ *
+ * 색은 앱이 이미 쓰는 넷(파랑·보라·민트·주황)만 씁니다. 새 색을 들이면 이 카드만 다른 앱처럼 보입니다.
+ * [alpha]가 0이면 아무것도 그리지 않습니다.
+ */
+private fun Modifier.glowBorder(progress: Float, alpha: Float, shape: Shape): Modifier =
+    if (alpha <= 0f) this else drawWithContent {
+        drawContent()
+        val shift = size.width * 2f * progress
+        val brush = Brush.linearGradient(
+            colors = listOf(Indigo, Violet, Mint, Amber, Indigo),
+            start = Offset(shift, 0f),
+            end = Offset(shift + size.width, size.height),
+            tileMode = TileMode.Mirror
+        )
+        drawOutline(
+            outline = shape.createOutline(size, layoutDirection, this),
+            brush = brush,
+            alpha = alpha,
+            style = Stroke(width = 2.5.dp.toPx())
+        )
+    }
 
 @Composable
 private fun SuggestionRow(

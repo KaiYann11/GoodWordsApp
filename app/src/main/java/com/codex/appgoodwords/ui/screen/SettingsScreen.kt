@@ -2,24 +2,37 @@ package com.codex.appgoodwords.ui.screen
 
 import android.app.TimePickerDialog
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -43,9 +56,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
@@ -81,9 +98,16 @@ internal const val aiCoachSwitchTag = "ai_coach_switch"
 internal const val aiCoachPreviewTag = "ai_coach_preview"
 internal const val aiCoachNudgeSwitchTag = "ai_coach_nudge_switch"
 
-/** 하루 횟수와 다시 묻기까지의 틈. 칩이 여럿이라 값으로 짚습니다. */
+/** 하루 횟수와 묻는 주기. 칩이 여럿이라 값으로 짚습니다. */
 internal fun aiCoachLimitTag(limit: Int): String = "ai_coach_limit_$limit"
 internal fun aiCoachGapTag(minutes: Int): String = "ai_coach_gap_$minutes"
+
+/** 앱을 닫아도 받는 스위치와, 하루 몫이 금방 바닥난다는 안내. */
+internal const val aiCoachBackgroundSwitchTag = "ai_coach_background_switch"
+internal const val aiCoachShortDayTag = "ai_coach_short_day"
+
+/** 이보다 짧은 동안 하루 몫을 다 쓰면 알려 줍니다(6시간). 그 뒤 하루가 길게 조용합니다. */
+private const val COACH_SHORT_DAY_MINUTES = 6 * 60
 
 internal fun aiScheduleTag(name: String): String = "ai_schedule_" + name.ifBlank { "off" }
 
@@ -98,6 +122,25 @@ internal fun dailyStepRowTag(step: DailyStep): String = "daily_step_" + step.nam
 internal fun dailyStepToggleTag(step: DailyStep): String = "daily_step_toggle_" + step.name.lowercase()
 
 internal fun dailyStepUpTag(step: DailyStep): String = "daily_step_up_" + step.name.lowercase()
+
+/**
+ * 설정의 갈래. 첫 화면은 이 목록만 늘어놓고, 누르면 그 갈래 화면이 열립니다.
+ *
+ * 한 화면에 카드 열다섯 개를 이어 두었더니 알림과 데이터와 서버가 뒤섞여 어디에 무엇이 있는지 눈에 들어오지
+ * 않았습니다(사용자 말, 2026-10-19). 휴대폰 기본 설정 앱처럼 갈래로 나눴습니다. 자주 고치는 것이 앞입니다.
+ */
+enum class SettingsSection(val title: String, val icon: ImageVector) {
+    NOTIFICATIONS("알림", Icons.Outlined.Notifications),
+    AI("AI", Icons.Outlined.AutoAwesome),
+    STEPS("오늘의 걸음", Icons.Outlined.Flag),
+    SYNC("서버·동기화", Icons.Outlined.Sync),
+    DATA("데이터·보관함", Icons.Outlined.Storage),
+    LOCK("잠금", Icons.Outlined.Lock)
+}
+
+/** 목록의 갈래 줄과, 설정 화면 전체 목록(굴려서 찾을 때 짚습니다 — 안에 가로로 굴리는 칩 줄이 여럿 있습니다). */
+internal fun settingsSectionTag(section: SettingsSection): String = "settings_section_" + section.name.lowercase()
+internal const val settingsListTag = "settings_list"
 
 private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
@@ -155,9 +198,19 @@ fun SettingsScreen(
     onDownloadAppUpdate: () -> Unit = {},
     onInstallAppUpdate: (String) -> Unit = {},
     onDismissAppUpdate: () -> Unit = {},
+    /**
+     * 보고 있는 갈래. null이면 갈래 목록입니다.
+     *
+     * 밖(`AppGoodWordsApp`)에서 들고 있습니다. 위쪽 막대가 갈래 이름을 제목으로 띄우고, 막대의 ←가 설정을 닫기 전에
+     * 목록으로 먼저 돌아가야 하기 때문입니다. 화면 안에 돌아가기 단추를 두면 내용과 함께 굴러 올라가 사라집니다.
+     */
+    section: SettingsSection? = null,
+    onSectionChange: (SettingsSection?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // 갈래 화면에서 휴대폰의 뒤로 가기를 누르면 설정을 닫지 않고 목록으로 돌아옵니다(위쪽 막대의 ←와 같게).
+    BackHandler(enabled = section != null) { onSectionChange(null) }
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -222,556 +275,678 @@ fun SettingsScreen(
     }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag(settingsListTag),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("반복 노출", style = MaterialTheme.typography.titleMedium)
-                    SettingSwitchRow(
-                        title = "주기 알림 사용",
-                        checked = settings.remindersEnabled,
-                        onCheckedChange = {
-                            onSettingsChanged(settings.copy(remindersEnabled = it))
-                        }
-                    )
-                    if (settings.remindersEnabled && notificationsBlocked) {
-                        Text(
-                            text = "알림 권한이 없어 알림이 오지 않습니다. " +
-                                "휴대폰 설정 > 앱 > 오늘의 글귀 > 알림에서 켜 주세요.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    SettingSwitchRow(
-                        title = "앱 실행 시 오늘의 글귀 표시",
-                        checked = settings.showOnLaunch,
-                        onCheckedChange = {
-                            onSettingsChanged(settings.copy(showOnLaunch = it))
-                        }
-                    )
-                    SettingSwitchRow(
-                        title = "잠금화면 알림 내용 공개",
-                        checked = settings.lockScreenVisible,
-                        onCheckedChange = {
-                            onSettingsChanged(settings.copy(lockScreenVisible = it))
-                        }
-                    )
-                    SettingSwitchRow(
-                        title = "알림 소리 사용",
-                        checked = settings.notificationSoundEnabled,
-                        onCheckedChange = {
-                            onSettingsChanged(settings.copy(notificationSoundEnabled = it))
-                        }
-                    )
-                }
+        val current = section
+        if (current == null) {
+            // 첫 화면은 갈래만 늘어놓습니다. 갈래마다 지금 상태를 한 줄로 적어, 들어가 보지 않고도 무엇이 켜져 있는지 압니다.
+            items(SettingsSection.entries) { entry ->
+                SettingsSectionRow(
+                    section = entry,
+                    summary = when (entry) {
+                        SettingsSection.NOTIFICATIONS -> notificationsSummary(settings)
+                        SettingsSection.AI -> aiSummary(aiFeedbackSettings)
+                        SettingsSection.STEPS -> dailySteps.joinToString(" · ") { it.label }
+                        SettingsSection.SYNC -> syncSummary(serverSyncSettings)
+                        SettingsSection.DATA -> "백업·가져오기 · 카테고리 ${categories.size}개 · 노출 이력"
+                        SettingsSection.LOCK -> lockSummary(appLockEnabled, diaryLockEnabled)
+                    },
+                    // 켜 두었는데 돌지 않는 것은 목록에서부터 보여야 합니다. 들어가 봐야 아는 실패는 없는 것과 같습니다.
+                    warning = when (entry) {
+                        SettingsSection.NOTIFICATIONS ->
+                            "알림 권한이 꺼져 있어 알림이 오지 않습니다".takeIf { settings.remindersEnabled && notificationsBlocked }
+                        SettingsSection.SYNC -> "마지막 동기화가 실패했습니다".takeIf { syncStatus.failed }
+                        else -> null
+                    },
+                    onClick = { onSectionChange(entry) }
+                )
             }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("반복 간격", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = intervalMinutesText,
-                        onValueChange = { value ->
-                            val filtered = value.filter(Char::isDigit)
-                            intervalMinutesText = filtered
-                            filtered.toIntOrNull()?.let { parsed ->
-                                onSettingsChanged(
-                                    settings.copy(
-                                        intervalMinutes = parsed.coerceAtLeast(ReminderSettings.MIN_INTERVAL_MINUTES)
+        } else {
+            // 어느 갈래인지는 위쪽 막대의 제목이 말합니다.
+            when (current) {
+                SettingsSection.NOTIFICATIONS -> {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("반복 노출", style = MaterialTheme.typography.titleMedium)
+                                SettingSwitchRow(
+                                    title = "주기 알림 사용",
+                                    checked = settings.remindersEnabled,
+                                    onCheckedChange = {
+                                        onSettingsChanged(settings.copy(remindersEnabled = it))
+                                    }
+                                )
+                                if (settings.remindersEnabled && notificationsBlocked) {
+                                    Text(
+                                        text = "알림 권한이 없어 알림이 오지 않습니다. " +
+                                            "휴대폰 설정 > 앱 > 오늘의 글귀 > 알림에서 켜 주세요.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
                                     )
+                                }
+                                SettingSwitchRow(
+                                    title = "앱 실행 시 오늘의 글귀 표시",
+                                    checked = settings.showOnLaunch,
+                                    onCheckedChange = {
+                                        onSettingsChanged(settings.copy(showOnLaunch = it))
+                                    }
+                                )
+                                SettingSwitchRow(
+                                    title = "잠금화면 알림 내용 공개",
+                                    checked = settings.lockScreenVisible,
+                                    onCheckedChange = {
+                                        onSettingsChanged(settings.copy(lockScreenVisible = it))
+                                    }
+                                )
+                                SettingSwitchRow(
+                                    title = "알림 소리 사용",
+                                    checked = settings.notificationSoundEnabled,
+                                    onCheckedChange = {
+                                        onSettingsChanged(settings.copy(notificationSoundEnabled = it))
+                                    }
                                 )
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("반복 간격(분)") },
-                        supportingText = { Text("최소 15분, 예: 15 / 30 / 90") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
-
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(listOf(15, 30, 60, 90, 180, 360, 720, 1440)) { minutes ->
-                            FilterChip(
-                                selected = settings.intervalMinutes == minutes,
-                                onClick = {
-                                    intervalMinutesText = minutes.toString()
-                                    onSettingsChanged(settings.copy(intervalMinutes = minutes))
-                                },
-                                label = { Text(formatInterval(minutes)) }
-                            )
                         }
                     }
-
-                    Text(
-                        text = "반복 시작 시간부터 종료 시간 사이에서만 알림을 보냅니다.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
-                    Button(
-                        onClick = {
-                            TimePickerDialog(
-                                context,
-                                { _, hour, minute ->
-                                    onSettingsChanged(
-                                        settings.copy(
-                                            preferredHour = hour,
-                                            preferredMinute = minute
-                                        )
-                                    )
-                                },
-                                settings.preferredHour,
-                                settings.preferredMinute,
-                                true
-                            ).show()
-                        }
-                    ) {
-                        Text("반복 시작 시간 ${formatTime(settings.preferredHour, settings.preferredMinute)}")
-                    }
-
-                    Button(
-                        onClick = {
-                            TimePickerDialog(
-                                context,
-                                { _, hour, minute ->
-                                    onSettingsChanged(
-                                        settings.copy(
-                                            repeatEndHour = hour,
-                                            repeatEndMinute = minute
-                                        )
-                                    )
-                                },
-                                settings.repeatEndHour,
-                                settings.repeatEndMinute,
-                                true
-                            ).show()
-                        }
-                    ) {
-                        Text("반복 종료 시간 ${formatTime(settings.repeatEndHour, settings.repeatEndMinute)}")
-                    }
-                }
-            }
-        }
-
-        item {
-            Text("카테고리 필터", style = MaterialTheme.typography.titleMedium)
-        }
-
-        item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    FilterChip(
-                        selected = settings.categoryFilter.isBlank(),
-                        onClick = {
-                            onSettingsChanged(settings.copy(categoryFilter = ""))
-                        },
-                        label = { Text("전체") }
-                    )
-                }
-                items(categories) { category ->
-                    FilterChip(
-                        selected = settings.categoryFilter == category,
-                        onClick = {
-                            onSettingsChanged(settings.copy(categoryFilter = category))
-                        },
-                        label = { Text(category) }
-                    )
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("카테고리 관리", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "카테고리를 삭제하면 해당 카테고리를 쓰던 항목은 미분류로 바뀝니다.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
-                    if (categories.isEmpty()) {
-                        Text(
-                            text = "삭제할 카테고리가 없습니다.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        categories.forEach { category ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text(category, style = MaterialTheme.typography.bodyLarge)
-                                OutlinedButton(onClick = { onDeleteCategory(category) }) {
-                                    Text("삭제")
+                                Text("반복 간격", style = MaterialTheme.typography.titleMedium)
+                                OutlinedTextField(
+                                    value = intervalMinutesText,
+                                    onValueChange = { value ->
+                                        val filtered = value.filter(Char::isDigit)
+                                        intervalMinutesText = filtered
+                                        filtered.toIntOrNull()?.let { parsed ->
+                                            onSettingsChanged(
+                                                settings.copy(
+                                                    intervalMinutes = parsed.coerceAtLeast(ReminderSettings.MIN_INTERVAL_MINUTES)
+                                                )
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("반복 간격(분)") },
+                                    supportingText = { Text("최소 15분, 예: 15 / 30 / 90") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
+
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(listOf(15, 30, 60, 90, 180, 360, 720, 1440)) { minutes ->
+                                        FilterChip(
+                                            selected = settings.intervalMinutes == minutes,
+                                            onClick = {
+                                                intervalMinutesText = minutes.toString()
+                                                onSettingsChanged(settings.copy(intervalMinutes = minutes))
+                                            },
+                                            label = { Text(formatInterval(minutes)) }
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = "반복 시작 시간부터 종료 시간 사이에서만 알림을 보냅니다.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+
+                                Button(
+                                    onClick = {
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hour, minute ->
+                                                onSettingsChanged(
+                                                    settings.copy(
+                                                        preferredHour = hour,
+                                                        preferredMinute = minute
+                                                    )
+                                                )
+                                            },
+                                            settings.preferredHour,
+                                            settings.preferredMinute,
+                                            true
+                                        ).show()
+                                    }
+                                ) {
+                                    Text("반복 시작 시간 ${formatTime(settings.preferredHour, settings.preferredMinute)}")
+                                }
+
+                                Button(
+                                    onClick = {
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hour, minute ->
+                                                onSettingsChanged(
+                                                    settings.copy(
+                                                        repeatEndHour = hour,
+                                                        repeatEndMinute = minute
+                                                    )
+                                                )
+                                            },
+                                            settings.repeatEndHour,
+                                            settings.repeatEndMinute,
+                                            true
+                                        ).show()
+                                    }
+                                ) {
+                                    Text("반복 종료 시간 ${formatTime(settings.repeatEndHour, settings.repeatEndMinute)}")
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("일일 집계", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "하루 동안 노출된 항목과 확인한 항목을 매일 한 번 리스트 형태로 집계해 알립니다.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    SettingSwitchRow(
-                        title = "일일 집계 알림 사용",
-                        checked = settings.dailySummaryEnabled,
-                        onCheckedChange = {
-                            onSettingsChanged(settings.copy(dailySummaryEnabled = it))
-                        }
-                    )
-                    Button(
-                        onClick = {
-                            TimePickerDialog(
-                                context,
-                                { _, hour, minute ->
-                                    onSettingsChanged(
-                                        settings.copy(
-                                            summaryHour = hour,
-                                            summaryMinute = minute
-                                        )
-                                    )
-                                },
-                                settings.summaryHour,
-                                settings.summaryMinute,
-                                true
-                            ).show()
-                        }
-                    ) {
-                        Text("집계 발송 시간 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("데이터 관리", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "저장된 항목, 이력, 오늘 확인 기록, 현재 알림 설정을 JSON 파일로 백업하거나 복원합니다.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    OutlinedButton(
-                        onClick = onResetViewCounts,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("읽음 처리 수 초기화")
-                    }
-                    Button(
-                        onClick = { exportLauncher.launch(defaultExportFileName()) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("데이터 내보내기")
-                    }
-                    Button(
-                        onClick = { importLauncher.launch(arrayOf("application/json")) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("데이터 가져오기 (교체)")
-                    }
-                    OutlinedButton(
-                        onClick = { fileMergeLauncher.launch(arrayOf("application/json")) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag(fileMergeButtonTag)
-                    ) {
-                        Text("파일과 병합")
-                    }
-                    Text(
-                        text = "가져오기는 기기 데이터를 파일로 통째로 바꿉니다. " +
-                            "병합은 양쪽을 항목 단위로 합칩니다. 서버 없이 두 기기를 맞출 때 쓰세요.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("서버 동기화", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = serverUrlText,
-                        onValueChange = { value ->
-                            serverUrlText = value
-                            onServerSyncSettingsChanged(serverSyncSettings.copy(serverUrl = value))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("서버 주소") },
-                        supportingText = {
-                            Text("예: https://서버이름.ts.net · 인증서가 확인되는 HTTPS 주소를 입력해 주세요.")
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = serverApiKeyText,
-                        onValueChange = { value ->
-                            serverApiKeyText = value
-                            onServerSyncSettingsChanged(serverSyncSettings.copy(apiKey = value))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("API 키") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true
-                    )
-                    OutlinedButton(
-                        onClick = onTestServerConnection,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = serverUrlText.isNotBlank()
-                    ) {
-                        Text("연결 테스트")
-                    }
-                    Button(
-                        onClick = { pendingSyncAction = PendingSyncAction.Merge },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = serverUrlText.isNotBlank()
-                    ) {
-                        Text("서버와 병합")
-                    }
-                    Text(
-                        text = "병합은 양쪽 변경을 항목 단위로 합칩니다. 여러 기기를 쓴다면 이 방식을 쓰세요.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = "아래 두 가지는 한쪽 데이터를 통째로 교체합니다. 한 기기를 기준으로 맞출 때만 쓰세요.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedButton(
-                        onClick = { pendingSyncAction = PendingSyncAction.Upload },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = serverUrlText.isNotBlank()
-                    ) {
-                        Text("서버로 업로드")
-                    }
-                    OutlinedButton(
-                        onClick = { pendingSyncAction = PendingSyncAction.Download },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = serverUrlText.isNotBlank()
-                    ) {
-                        Text("서버에서 가져오기")
-                    }
-                }
-            }
-        }
-
-        item {
-            AppUpdateCard(
-                state = appUpdateState,
-                currentVersionName = currentVersionName,
-                currentVersionCode = currentVersionCode,
-                serverConfigured = serverUrlText.isNotBlank(),
-                onCheck = onCheckAppUpdate,
-                onDownload = onDownloadAppUpdate,
-                onInstall = onInstallAppUpdate,
-                onDismiss = onDismissAppUpdate
-            )
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("자동 동기화", style = MaterialTheme.typography.titleMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("배경에서 주기적으로 병합", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = "병합만 실행합니다. 업로드·가져오기처럼 한쪽을 통째로 지우지 않습니다.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            modifier = Modifier.testTag(autoSyncSwitchTag),
-                            checked = serverSyncSettings.autoSyncEnabled,
-                            onCheckedChange = { enabled ->
-                                onServerSyncSettingsChanged(
-                                    serverSyncSettings.copy(autoSyncEnabled = enabled)
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("알림에 보낼 카테고리", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "주기 알림과 앱을 열 때 보여 줄 글귀를 이 카테고리에서만 고릅니다.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            },
-                            enabled = serverUrlText.isNotBlank()
-                        )
-                    }
-
-                    if (serverUrlText.isBlank()) {
-                        Text(
-                            text = "서버 주소를 먼저 넣어야 켤 수 있습니다.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    if (serverSyncSettings.autoSyncEnabled) {
-                        Text("주기", style = MaterialTheme.typography.bodyMedium)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(ServerSyncSettings.INTERVAL_CHOICES) { hours ->
-                                FilterChip(
-                                    selected = serverSyncSettings.effectiveIntervalHours == hours,
-                                    onClick = {
-                                        onServerSyncSettingsChanged(
-                                            serverSyncSettings.copy(autoSyncIntervalHours = hours)
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    item {
+                                        FilterChip(
+                                            selected = settings.categoryFilter.isBlank(),
+                                            onClick = {
+                                                onSettingsChanged(settings.copy(categoryFilter = ""))
+                                            },
+                                            label = { Text("전체") }
                                         )
+                                    }
+                                    items(categories) { category ->
+                                        FilterChip(
+                                            selected = settings.categoryFilter == category,
+                                            onClick = {
+                                                onSettingsChanged(settings.copy(categoryFilter = category))
+                                            },
+                                            label = { Text(category) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("일일 집계", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "하루 동안 노출된 항목과 확인한 항목을 매일 한 번 리스트 형태로 집계해 알립니다.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                SettingSwitchRow(
+                                    title = "일일 집계 알림 사용",
+                                    checked = settings.dailySummaryEnabled,
+                                    onCheckedChange = {
+                                        onSettingsChanged(settings.copy(dailySummaryEnabled = it))
+                                    }
+                                )
+                                Button(
+                                    onClick = {
+                                        TimePickerDialog(
+                                            context,
+                                            { _, hour, minute ->
+                                                onSettingsChanged(
+                                                    settings.copy(
+                                                        summaryHour = hour,
+                                                        summaryMinute = minute
+                                                    )
+                                                )
+                                            },
+                                            settings.summaryHour,
+                                            settings.summaryMinute,
+                                            true
+                                        ).show()
+                                    }
+                                ) {
+                                    Text("집계 발송 시간 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Button(
+                            onClick = onSendTestNotification,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("테스트 알림 보내기")
+                        }
+                    }
+                }
+                SettingsSection.AI -> {
+                    item {
+                        AiFeedbackSection(
+                            settings = aiFeedbackSettings,
+                            onChanged = onAiFeedbackSettingsChanged,
+                            onPreviewCoachPrompt = onPreviewCoachPrompt
+                        )
+                    }
+                }
+                SettingsSection.STEPS -> {
+                    item {
+                        DailyStepsSection(steps = dailySteps, onChanged = onDailyStepsChanged)
+                    }
+                }
+                SettingsSection.SYNC -> {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("서버 동기화", style = MaterialTheme.typography.titleMedium)
+                                OutlinedTextField(
+                                    value = serverUrlText,
+                                    onValueChange = { value ->
+                                        serverUrlText = value
+                                        onServerSyncSettingsChanged(serverSyncSettings.copy(serverUrl = value))
                                     },
-                                    label = { Text("${hours}시간") }
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("서버 주소") },
+                                    supportingText = {
+                                        Text("예: https://서버이름.ts.net · 인증서가 확인되는 HTTPS 주소를 입력해 주세요.")
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                    singleLine = true
+                                )
+                                OutlinedTextField(
+                                    value = serverApiKeyText,
+                                    onValueChange = { value ->
+                                        serverApiKeyText = value
+                                        onServerSyncSettingsChanged(serverSyncSettings.copy(apiKey = value))
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("API 키") },
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    singleLine = true
+                                )
+                                OutlinedButton(
+                                    onClick = onTestServerConnection,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = serverUrlText.isNotBlank()
+                                ) {
+                                    Text("연결 테스트")
+                                }
+                                Button(
+                                    onClick = { pendingSyncAction = PendingSyncAction.Merge },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = serverUrlText.isNotBlank()
+                                ) {
+                                    Text("서버와 병합")
+                                }
+                                Text(
+                                    text = "병합은 양쪽 변경을 항목 단위로 합칩니다. 여러 기기를 쓴다면 이 방식을 쓰세요.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = "아래 두 가지는 한쪽 데이터를 통째로 교체합니다. 한 기기를 기준으로 맞출 때만 쓰세요.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                OutlinedButton(
+                                    onClick = { pendingSyncAction = PendingSyncAction.Upload },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = serverUrlText.isNotBlank()
+                                ) {
+                                    Text("서버로 업로드")
+                                }
+                                OutlinedButton(
+                                    onClick = { pendingSyncAction = PendingSyncAction.Download },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = serverUrlText.isNotBlank()
+                                ) {
+                                    Text("서버에서 가져오기")
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("자동 동기화", style = MaterialTheme.typography.titleMedium)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("배경에서 주기적으로 병합", style = MaterialTheme.typography.bodyLarge)
+                                        Text(
+                                            text = "병합만 실행합니다. 업로드·가져오기처럼 한쪽을 통째로 지우지 않습니다.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        modifier = Modifier.testTag(autoSyncSwitchTag),
+                                        checked = serverSyncSettings.autoSyncEnabled,
+                                        onCheckedChange = { enabled ->
+                                            onServerSyncSettingsChanged(
+                                                serverSyncSettings.copy(autoSyncEnabled = enabled)
+                                            )
+                                        },
+                                        enabled = serverUrlText.isNotBlank()
+                                    )
+                                }
+
+                                if (serverUrlText.isBlank()) {
+                                    Text(
+                                        text = "서버 주소를 먼저 넣어야 켤 수 있습니다.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                if (serverSyncSettings.autoSyncEnabled) {
+                                    Text("주기", style = MaterialTheme.typography.bodyMedium)
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(ServerSyncSettings.INTERVAL_CHOICES) { hours ->
+                                            FilterChip(
+                                                selected = serverSyncSettings.effectiveIntervalHours == hours,
+                                                onClick = {
+                                                    onServerSyncSettingsChanged(
+                                                        serverSyncSettings.copy(autoSyncIntervalHours = hours)
+                                                    )
+                                                },
+                                                label = { Text("${hours}시간") }
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "네트워크가 연결된 동안에만 돕니다. 안드로이드가 배터리 상태에 따라 조금 늦출 수 있습니다.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                // 배경 동기화는 실패해도 화면에 뜨지 않으므로 여기서 확인할 수 있어야 한다.
+                                Text(
+                                    text = when {
+                                        !syncStatus.hasSynced -> "마지막 동기화: 없음"
+                                        syncStatus.failed ->
+                                            "마지막 시도: ${formatDateTime(syncStatus.lastSyncAt)} · 실패 (${syncStatus.lastError})"
+
+                                        else -> "마지막 동기화: ${formatDateTime(syncStatus.lastSyncAt)} · 성공"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (syncStatus.failed) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
                         }
-                        Text(
-                            text = "네트워크가 연결된 동안에만 돕니다. 안드로이드가 배터리 상태에 따라 조금 늦출 수 있습니다.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
-
-                    // 배경 동기화는 실패해도 화면에 뜨지 않으므로 여기서 확인할 수 있어야 한다.
-                    Text(
-                        text = when {
-                            !syncStatus.hasSynced -> "마지막 동기화: 없음"
-                            syncStatus.failed ->
-                                "마지막 시도: ${formatDateTime(syncStatus.lastSyncAt)} · 실패 (${syncStatus.lastError})"
-
-                            else -> "마지막 동기화: ${formatDateTime(syncStatus.lastSyncAt)} · 성공"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (syncStatus.failed) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("동기화 백업", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "병합·업로드·가져오기·복원 직전 상태를 자동으로 저장합니다. 종류별로 최근 5개까지 보관합니다.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (syncBackups.isEmpty()) {
-                        Text(
-                            text = "아직 저장된 백업이 없습니다.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    } else {
-                        syncBackups.forEach { backup ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Text("동기화 백업", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "병합·업로드·가져오기·복원 직전 상태를 자동으로 저장합니다. 종류별로 최근 5개까지 보관합니다.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                if (syncBackups.isEmpty()) {
                                     Text(
-                                        text = backup.kind.label,
+                                        text = "아직 저장된 백업이 없습니다.",
                                         style = MaterialTheme.typography.bodyMedium
                                     )
+                                } else {
+                                    syncBackups.forEach { backup ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = backup.kind.label,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Text(
+                                                    text = "${formatDateTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                            TextButton(onClick = { pendingSyncAction = PendingSyncAction.Restore(backup) }) {
+                                                Text("복원")
+                                            }
+                                        }
+                                    }
+                                }
+                                if (syncBackupDirectory.isNotBlank()) {
                                     Text(
-                                        text = "${formatDateTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
+                                        text = "저장 위치: $syncBackupDirectory",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
-                                TextButton(onClick = { pendingSyncAction = PendingSyncAction.Restore(backup) }) {
-                                    Text("복원")
+                            }
+                        }
+                    }
+                    item {
+                        AppUpdateCard(
+                            state = appUpdateState,
+                            currentVersionName = currentVersionName,
+                            currentVersionCode = currentVersionCode,
+                            serverConfigured = serverUrlText.isNotBlank(),
+                            onCheck = onCheckAppUpdate,
+                            onDownload = onDownloadAppUpdate,
+                            onInstall = onInstallAppUpdate,
+                            onDismiss = onDismissAppUpdate
+                        )
+                    }
+                }
+                SettingsSection.DATA -> {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("데이터 관리", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "저장된 항목, 이력, 오늘 확인 기록, 현재 알림 설정을 JSON 파일로 백업하거나 복원합니다.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                OutlinedButton(
+                                    onClick = onResetViewCounts,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("읽음 처리 수 초기화")
+                                }
+                                Button(
+                                    onClick = { exportLauncher.launch(defaultExportFileName()) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("데이터 내보내기")
+                                }
+                                Button(
+                                    onClick = { importLauncher.launch(arrayOf("application/json")) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("데이터 가져오기 (교체)")
+                                }
+                                OutlinedButton(
+                                    onClick = { fileMergeLauncher.launch(arrayOf("application/json")) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(fileMergeButtonTag)
+                                ) {
+                                    Text("파일과 병합")
+                                }
+                                Text(
+                                    text = "가져오기는 기기 데이터를 파일로 통째로 바꿉니다. " +
+                                        "병합은 양쪽을 항목 단위로 합칩니다. 서버 없이 두 기기를 맞출 때 쓰세요.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("카테고리 관리", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "카테고리를 삭제하면 해당 카테고리를 쓰던 항목은 미분류로 바뀝니다.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+
+                                if (categories.isEmpty()) {
+                                    Text(
+                                        text = "삭제할 카테고리가 없습니다.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    categories.forEach { category ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(category, style = MaterialTheme.typography.bodyLarge)
+                                            OutlinedButton(onClick = { onDeleteCategory(category) }) {
+                                                Text("삭제")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    if (syncBackupDirectory.isNotBlank()) {
-                        Text(
-                            text = "저장 위치: $syncBackupDirectory",
-                            style = MaterialTheme.typography.bodySmall
+                    // 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기에서 엽니다. 통계는 홈이 맡습니다.
+                    item {
+                        OutlinedButton(
+                            onClick = onOpenHistory,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(historyButtonTag)
+                        ) {
+                            Text("노출 이력 보기")
+                        }
+                    }
+                }
+                SettingsSection.LOCK -> {
+                    item {
+                        AppLockSection(
+                            enabled = appLockEnabled,
+                            onChanged = onAppLockChanged,
+                            diaryLocked = diaryLockEnabled,
+                            onDiaryLockChanged = onDiaryLockChanged
                         )
                     }
                 }
-            }
-        }
-
-        item {
-            Button(
-                onClick = onSendTestNotification,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("테스트 알림 보내기")
-            }
-        }
-        item {
-            DailyStepsSection(steps = dailySteps, onChanged = onDailyStepsChanged)
-        }
-
-        item {
-            AppLockSection(
-                enabled = appLockEnabled,
-                onChanged = onAppLockChanged,
-                diaryLocked = diaryLockEnabled,
-                onDiaryLockChanged = onDiaryLockChanged
-            )
-        }
-
-        item {
-            AiFeedbackSection(
-                settings = aiFeedbackSettings,
-                onChanged = onAiFeedbackSettingsChanged,
-                onPreviewCoachPrompt = onPreviewCoachPrompt
-            )
-        }
-
-        // 이력은 매일 볼 화면이 아니라 하단 바에서 빼고 여기에서 엽니다. 통계는 홈이 맡습니다.
-        item {
-            OutlinedButton(
-                onClick = onOpenHistory,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(historyButtonTag)
-            ) {
-                Text("노출 이력 보기")
             }
         }
     }
 }
+
+/**
+ * 목록의 갈래 한 줄. 아이콘·이름·지금 상태 한 줄·(있으면) 경고.
+ *
+ * 아이콘 바탕은 모든 갈래가 같은 파랑입니다. 색을 갈래마다 달리하면 이 화면만 다른 앱처럼 보입니다(`Color.kt`).
+ * 대신 이름을 굵게, 상태는 한 줄로 줄여 눈이 이름부터 짚게 합니다.
+ */
+@Composable
+private fun SettingsSectionRow(
+    section: SettingsSection,
+    summary: String,
+    warning: String?,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .testTag(settingsSectionTag(section)),
+        shape = shape
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(section.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(section.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (warning != null) {
+                    Text(warning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun notificationsSummary(settings: ReminderSettings): String = buildList {
+    add(if (settings.remindersEnabled) "주기 알림 ${formatInterval(settings.intervalMinutes)}마다" else "주기 알림 꺼짐")
+    if (settings.dailySummaryEnabled) add("일일 집계 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
+}.joinToString(" · ")
+
+private fun aiSummary(settings: AiFeedbackSettings): String = buildList {
+    add(settings.activeProvider.label)
+    add(if (settings.coachEnabled) "한마디 ${formatInterval(settings.gapMinutes.toInt())}마다" else "한마디 꺼짐")
+    settings.scheduledPeriod?.let { add("돌아보기 ${it.label}") }
+}.joinToString(" · ")
+
+/** 서버는 주소 전체 대신 이름 첫 마디만 적습니다(`https://맥미니.….ts.net` → `맥미니`). 한 줄에 다 들어가야 읽힙니다. */
+private fun syncSummary(settings: ServerSyncSettings): String {
+    if (settings.serverUrl.isBlank()) return "서버 없이 이 기기만"
+    val host = settings.serverUrl.substringAfter("://").substringBefore('/').substringBefore('.')
+    return buildList {
+        add(host)
+        add(if (settings.autoSyncEnabled) "자동 ${settings.effectiveIntervalHours}시간마다" else "자동 동기화 꺼짐")
+    }.joinToString(" · ")
+}
+
+private fun lockSummary(appLock: Boolean, diaryLock: Boolean): String = buildList {
+    add(if (appLock) "앱 잠금 켜짐" else "앱 잠금 꺼짐")
+    if (diaryLock) add("일기 잠금 켜짐")
+}.joinToString(" · ")
 
 @Composable
 private fun SyncConfirmDialog(
@@ -854,6 +1029,7 @@ private fun formatTime(hour: Int, minute: Int): String = "%02d:%02d".format(hour
 
 private fun formatInterval(intervalMinutes: Int): String {
     return when {
+        intervalMinutes == 1440 -> "하루"
         intervalMinutes % 60 == 0 -> "${intervalMinutes / 60}시간"
         intervalMinutes > 60 -> "${intervalMinutes / 60}시간 ${intervalMinutes % 60}분"
         else -> "${intervalMinutes}분"
@@ -1128,8 +1304,8 @@ private fun AiFeedbackSection(
             )
             Text(
                 text = if (settings.coachEnabled) {
-                    "홈 맨 위에서, 오늘 한 것을 보고 한마디를 건넵니다. " +
-                        "오늘 한 것이 달라졌을 때만 물어봅니다."
+                    "홈에서, 오늘 한 것을 보고 한마디를 건넵니다. " +
+                        "정한 주기마다 새로 물어봅니다."
                 } else {
                     "오늘 한 것을 보고 한마디·글귀·해 볼 일을 받습니다. " +
                         "물을 때마다 값이 들어서 켜는 것은 직접 정합니다."
@@ -1160,7 +1336,7 @@ private fun AiFeedbackSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Text("다시 묻기까지", style = MaterialTheme.typography.titleSmall)
+                    Text("묻는 주기", style = MaterialTheme.typography.titleSmall)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(AiFeedbackSettings.GAP_MINUTE_CHOICES) { minutes ->
                             FilterChip(
@@ -1172,9 +1348,39 @@ private fun AiFeedbackSection(
                         }
                     }
                     Text(
-                        text = "오늘 한 것이 달라졌을 때, ${formatInterval(settings.gapMinutes.toInt())}에 " +
-                            "한 번까지 하루 ${settings.askLimit}번 물어봅니다. " +
+                        text = "${formatInterval(settings.gapMinutes.toInt())}마다, 하루 ${settings.askLimit}번까지 " +
+                            "물어봅니다. 오늘 한 것이 하나도 없으면 묻지 않습니다. " +
                             "직접 누르는 것은 여기 세지 않습니다. 실패한 것도 한 번으로 셉니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // 주기가 짧고 횟수가 적으면 아침에 하루 몫을 다 쓰고 남은 하루는 조용합니다. 고른 대로
+                    // 두되, 그 결과를 숫자로 보여 줍니다.
+                    val spanMinutes = (settings.askLimit - 1) * settings.gapMinutes.toInt()
+                    if (settings.askLimit > 1 && spanMinutes < COACH_SHORT_DAY_MINUTES) {
+                        Text(
+                            text = "이대로면 첫 한마디부터 ${formatInterval(spanMinutes)} 안에 하루 ${settings.askLimit}번을 " +
+                                "다 씁니다. 하루 내내 받으려면 주기를 늘리거나 횟수를 늘려 보세요.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag(aiCoachShortDayTag)
+                        )
+                    }
+
+                    // 앱을 열지 않는 날에도 한마디가 오게 합니다. 값이 드는 일이라 스위치로 보이게 둡니다.
+                    SettingSwitchRow(
+                        title = "앱을 닫아도 받아 알림으로",
+                        checked = settings.coachBackground,
+                        onCheckedChange = { onChanged(settings.copy(coachBackground = it)) },
+                        modifier = Modifier.testTag(aiCoachBackgroundSwitchTag)
+                    )
+                    Text(
+                        text = if (settings.coachBackground) {
+                            "앱을 닫아 두어도 주기마다 받아 알림으로 띄웁니다. 앱을 보고 있을 때는 알림 대신 " +
+                                "홈 카드와 홈 탭의 점이 알립니다. 안드로이드가 배터리 상태에 따라 조금 늦출 수 있습니다."
+                        } else {
+                            "앱을 열어 둔 동안에만 묻습니다."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -10,8 +10,8 @@ import org.junit.Test
 /**
  * 언제 다시 물을지.
  *
- * 값이 드는 요청이라 이 규칙이 곧 요금입니다. 루틴을 연달아 다섯 개 체크하면 오늘 기록도
- * 다섯 번 바뀌는데, 그때마다 물으면 사용자가 한 일이 그대로 돈이 됩니다.
+ * 값이 드는 요청이라 이 규칙이 곧 요금입니다. 주기가 돌아오면 오늘 기록이 그대로여도 다시 묻고
+ * (사용자가 정함, 2026-10-19), 하루 횟수가 그 몫을 묶습니다.
  */
 class DailyCoachStateTest {
     private val today = LocalDate.of(2026, 10, 17)
@@ -24,11 +24,34 @@ class DailyCoachStateTest {
     }
 
     @Test
-    fun theSameRecordIsNotAskedTwice() {
-        // 기록이 그대로인데 다시 물으면 거의 같은 말이 돌아오고 값만 한 번 더 듭니다.
+    fun theSameRecordIsAskedAgainOnceTheGapHasPassed() {
+        // 예전에는 기록이 그대로면 다시 묻지 않았습니다. 그러면 앱을 열지 않는 날 한마디가 오지 않아,
+        // 주기마다 묻게 바꿨습니다. 다만 주기 안에서는 여전히 기다립니다.
         val state = asked().withTip(tip(), "abc")
 
-        assertFalse(state.needsAsk("abc", noon + 10 * 60 * minute))
+        assertFalse(state.needsAsk("abc", noon + 10 * minute))
+        assertTrue(state.needsAsk("abc", noon + AiFeedbackSettings.DEFAULT_GAP_MINUTES * minute))
+    }
+
+    @Test
+    fun aNewWordIsUnseenUntilItIsShown() {
+        // 새 한마디는 카드가 눈에 띄게 알리고, 다 보여 준 뒤 거둡니다.
+        val state = asked().withTip(tip(), "abc")
+
+        assertTrue(state.hasNewTip)
+        assertFalse(state.markSeen().hasNewTip)
+        // 다음 한마디가 오면 다시 새 것입니다.
+        assertTrue(state.markSeen().withTip(tip(message = "다음 한마디"), "abc").hasNewTip)
+    }
+
+    @Test
+    fun aWordSavedBeforeSeenExistedIsReadAsSeen() {
+        // 업데이트하자마자 옛 한마디가 새 것처럼 반짝이면 무엇이 새로 왔는지 헷갈립니다.
+        val legacy = """{"date":"2026-10-17","askCount":1,"tip":{"message":"예전 한마디","createdAt":1}}"""
+
+        val state = DailyCoachJson.decode(legacy)
+        assertEquals("예전 한마디", state.tip?.message)
+        assertFalse(state.hasNewTip)
     }
 
     @Test

@@ -39,6 +39,17 @@ class DailyCoachCoordinator(
         settingsStore.getDailyCoachState().forDate(today)
 
     /**
+     * 받아 둔 한마디를 화면에서 보았다고 적습니다.
+     *
+     * 그래야 카드의 반짝임과 홈 탭의 점이 거둬집니다. 이미 본 것이면 저장하지 않습니다 — 홈을 열 때마다
+     * 설정을 다시 쓰면 그 흐름을 보는 화면이 괜히 다시 그려집니다.
+     */
+    suspend fun markSeen(today: LocalDate = LocalDate.now()) {
+        val state = state(today)
+        if (state.hasNewTip) save(state.markSeen())
+    }
+
+    /**
      * 한마디를 받아 옵니다.
      *
      * @param force 사용자가 직접 눌렀는지. 그때는 같은 기록이어도, 틈이 덜 벌어졌어도 묻습니다.
