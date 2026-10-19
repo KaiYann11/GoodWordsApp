@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -14,6 +15,8 @@ let workDir;
 let baseUrl;
 /** 가짜 `claude`·`codex`가 놓인 폴더. 진짜 CLI를 돌리면 시험마다 값이 들고 답이 매번 다릅니다. */
 let fakeCliDir;
+/** 가짜 Ollama. 진짜에 물으면 한 번에 1분이 걸리고 답이 매번 다릅니다. */
+let fakeOllama;
 let serverCount = 0;
 
 /**
@@ -42,6 +45,58 @@ async function startServer(env = {}) {
   });
   await waitForServer(url);
   return { url, stop: () => process_.kill() };
+}
+
+/**
+ * 진짜 Ollama 대신 돌 가짜를 띄웁니다.
+ *
+ * 서버가 Ollama에 보낸 본문을 그대로 답 글로 돌려주어, 시험이 무엇이 나갔는지 볼 수 있게 합니다.
+ * 받아 둔 모델 목록에는 가장 최근에 받은 임베딩 모델을 끼워 둡니다 — 대화를 못 하는 모델이라
+ * 서버가 기본으로 고르면 안 됩니다.
+ */
+async function startFakeOllama() {
+  const server = createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (request.method === "GET" && request.url === "/api/tags") {
+      send(200, {
+        models: [
+          { name: "llama3.2:3b", modified_at: "2026-03-01T10:00:00+09:00", capabilities: ["completion"] },
+          { name: "nomic-embed-text:latest", modified_at: "2026-10-01T09:00:00.123456789+09:00", capabilities: ["embedding"] },
+          { name: "qwen3.6:27b", modified_at: "2026-06-26T00:45:45.72457708+09:00", capabilities: ["completion", "thinking"] },
+        ],
+      });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/api/chat") {
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      const body = JSON.parse(raw);
+      // 답하지 않고 붙들고 있습니다. 서버가 시간을 넘기면 끊어야 합니다.
+      if (body.model === "slow-model") return;
+      if (body.model === "missing-model") {
+        send(404, { error: 'model "missing-model" not found, try pulling it first' });
+        return;
+      }
+      send(200, {
+        model: body.model,
+        message: { role: "assistant", content: JSON.stringify(body), thinking: "생각한 내용" },
+        done: true,
+      });
+      return;
+    }
+    send(404, { error: "not found" });
+  });
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    stop: () => {
+      server.closeAllConnections();
+      server.close();
+    },
+  };
 }
 
 /**
@@ -158,16 +213,20 @@ before(async () => {
   workDir = await mkdtemp(join(tmpdir(), "appgoodwords-test-"));
   fakeCliDir = join(workDir, "fake-cli");
   await writeFakeClis(fakeCliDir);
+  fakeOllama = await startFakeOllama();
   child = await startServer({
-    // 이 PC에 진짜 CLI가 깔려 있어도 가짜를 쓴다.
+    // 이 PC에 진짜 CLI·Ollama가 있어도 가짜를 쓴다.
     APP_GOOD_WORDS_CLAUDE_CLI: fakeCliPath("claude"),
     APP_GOOD_WORDS_CODEX_CLI: fakeCliPath("codex"),
+    APP_GOOD_WORDS_OLLAMA_URL: fakeOllama.url,
+    APP_GOOD_WORDS_OLLAMA_MODEL: "",
   });
   baseUrl = child.url;
 });
 
 after(async () => {
   if (child) child.stop();
+  if (fakeOllama) fakeOllama.stop();
   if (workDir) await rm(workDir, { recursive: true, force: true });
 });
 
@@ -2380,6 +2439,125 @@ describe("AI 돌아보기", () => {
 
       assert.equal(response.status, 200, JSON.stringify(body));
       assert.equal(JSON.parse(body.text).user, "기록입니다");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("Ollama에는 열쇠 없이 JSON으로 묻고 생각 모드를 끈다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "ollama", model: "llama3.2:3b" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const seen = JSON.parse(body.text);
+    assert.equal(seen.model, "llama3.2:3b");
+    assert.deepEqual(seen.messages, [
+      { role: "system", content: "코치입니다" },
+      { role: "user", content: "기록입니다" },
+    ]);
+    // 앱은 답을 JSON으로 읽는다. 스트리밍이면 조각 여러 줄이 와서 읽을 수 없다.
+    assert.equal(seen.format, "json");
+    assert.equal(seen.stream, false);
+    // 켜 두면 PC 한 대로는 생각하는 데만 시간을 다 쓴다.
+    assert.equal(seen.think, false);
+    // 생각한 내용은 답 글에 섞지 않는다.
+    assert.ok(!body.text.includes("생각한 내용"), body.text);
+  });
+
+  it("모델을 비워 보내면 Ollama에 받아 둔 것 중 글을 쓰는 가장 최근 모델을 쓴다", async () => {
+    // 앱은 이 PC에 무엇이 받아져 있는지 모른다. 가장 최근 것이 임베딩 모델이면 건너뛴다.
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "ollama", model: "" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(JSON.parse(body.text).model, "qwen3.6:27b");
+  });
+
+  it("서버에 Ollama 모델을 정해 두면 비워 보낸 요청은 그 모델을 쓴다", async () => {
+    const server = await startServer({
+      APP_GOOD_WORDS_OLLAMA_URL: `${fakeOllama.url}/`,
+      APP_GOOD_WORDS_OLLAMA_MODEL: "llama3.2:3b",
+    });
+    try {
+      const ask = async (model) => {
+        const response = await fetch(`${server.url}/api/growth-feedback`, {
+          method: "POST",
+          headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "ollama", model }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, 200, JSON.stringify(body));
+        return JSON.parse(body.text).model;
+      };
+
+      assert.equal(await ask(""), "llama3.2:3b");
+      // 기기가 고른 모델이 있으면 그것이 먼저다.
+      assert.equal(await ask("qwen3.6:27b"), "qwen3.6:27b");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("Ollama가 실패하면 그 사유를 돌려준다", async () => {
+    // Ollama는 사유를 객체가 아니라 글 한 줄로 싣는다. 놓치면 "실패했습니다(404)"만 남는다.
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "ollama", model: "missing-model" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.ok(body.error.includes("not found"), body.error);
+  });
+
+  it("Ollama가 꺼져 있으면 어디를 봐야 하는지 알려 준다", async () => {
+    const probe = createServer();
+    await new Promise((resolveListen) => probe.listen(0, "127.0.0.1", resolveListen));
+    const closedUrl = `http://127.0.0.1:${probe.address().port}`;
+    await new Promise((resolveClose) => probe.close(resolveClose));
+
+    const server = await startServer({ APP_GOOD_WORDS_OLLAMA_URL: closedUrl, APP_GOOD_WORDS_OLLAMA_MODEL: "" });
+    try {
+      // 모델을 비워 보내면 목록부터 묻고, 고른 모델이 있으면 바로 대화를 청한다. 어느 쪽이 막혀도 같은 사유다.
+      for (const model of ["", "qwen3.6:27b"]) {
+        const response = await fetch(`${server.url}/api/growth-feedback`, {
+          method: "POST",
+          headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "ollama", model }),
+        });
+        const body = await response.json();
+
+        assert.equal(response.status, 503, JSON.stringify(body));
+        assert.ok(body.error.includes("APP_GOOD_WORDS_OLLAMA_URL"), body.error);
+      }
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("Ollama가 답을 주지 않으면 기다리다 끝내고 504를 돌려준다", async () => {
+    const server = await startServer({
+      APP_GOOD_WORDS_OLLAMA_URL: fakeOllama.url,
+      APP_GOOD_WORDS_AI_TIMEOUT_MS: "1500",
+    });
+    try {
+      const startedAt = Date.now();
+      const response = await fetch(`${server.url}/api/growth-feedback`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "ollama", model: "slow-model" }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 504, JSON.stringify(body));
+      assert.ok(body.error.includes("답하지 않았습니다"), body.error);
+      assert.ok(Date.now() - startedAt < 20_000, "시간 안에 끝내지 않았다");
     } finally {
       server.stop();
     }

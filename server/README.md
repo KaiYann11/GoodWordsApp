@@ -124,6 +124,8 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.appgoodwords.server.pl
 
 - `APP_GOOD_WORDS_NODE` — node 실행 파일 경로
 - `APP_GOOD_WORDS_CLAUDE_CLI` · `APP_GOOD_WORDS_CODEX_CLI` — CLI 공급자를 쓸 때(아래 AI 돌아보기)
+- `APP_GOOD_WORDS_OLLAMA_URL` · `APP_GOOD_WORDS_OLLAMA_MODEL` — Ollama가 기본 자리에 없거나 모델을
+  정해 두고 싶을 때(아래 AI 돌아보기). Ollama는 HTTP로 부르므로 PATH와 상관없습니다
 
 로그는 plist에 적은 `/tmp/appgoodwords-server.{out,err}.log`에 쌓입니다.
 `node --test server/tests/*.test.mjs`로 돌리는 시험도 맥에서 그대로 돕니다.
@@ -607,6 +609,34 @@ CLI는 요청이 올 때마다 찾고 새로 돌리므로, `claude login`을 다
 서버를 다시 띄울 필요는 없습니다. 다만 서버는 뜰 때의 PATH를 쓰므로, CLI를 새 폴더에 깔아
 PATH가 바뀌었으면 다시 띄워야 합니다. `claude`·`codex`는 서버가 도는 사용자 계정으로
 로그인되어 있어야 합니다 — 이 PC의 설치된 서버는 시작프로그램으로 로그인한 사용자로 뜹니다.
+
+#### 서버 PC의 Ollama로 답하기
+
+`provider`에 `ollama`를 보내면 **서버 PC에서 도는 Ollama**에 묻습니다(`askOllama`). 열쇠도
+구독도 없고, 기록이 그 PC 밖으로 나가지 않습니다. 환경 변수 없이도 Ollama의 기본 자리
+(`http://127.0.0.1:11434`)를 봅니다. 서버를 띄울 때 Ollama가 닿으면 주소와 쓸 모델을 찍어 줍니다.
+
+```text
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"ollama","model":""}
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"ollama","model":"qwen3.6:27b"}
+```
+
+- `APP_GOOD_WORDS_OLLAMA_URL` — Ollama가 다른 자리에 있을 때. **주소는 서버 설정에서만 읽습니다.**
+  기기가 보낸 주소로 부르면 서버가 남이 시키는 아무 곳에나 요청을 대신 보내 주게 됩니다.
+- `APP_GOOD_WORDS_OLLAMA_MODEL` — `model`을 비워 보냈을 때 쓸 모델. 없으면 받아 둔 모델 가운데
+  **글을 쓸 수 있는 것 중 가장 최근에 받은 것**을 씁니다(임베딩 모델은 건너뜁니다). 앱은 서버 PC에
+  무엇을 받아 두었는지 몰라 늘 비워 보냅니다. 요청마다 목록을 다시 보므로, 새 모델을 받거나
+  Ollama를 나중에 띄워도 서버를 다시 띄울 필요가 없습니다. 이 값을 바꿨을 때만 다시 띄웁니다.
+
+요청은 `/api/chat`에 `format: "json"`·`stream: false`·`think: false`로 보냅니다. 앱이 받는 답은 모두
+JSON입니다. **생각 모드는 끕니다** — PC 한 대로 돌리면 생각하는 데만 몇 분을 씁니다. M4 맥미니
+(32GB)에서 `qwen3.6:27b`로 한 주 돌아보기를 재어 보니 끄면 75초, 켜면 10분이 지나도 끝나지
+않았습니다. 시간 제한은 CLI와 같은 180초(`APP_GOOD_WORDS_AI_TIMEOUT_MS`)이고, 넘기면 504와 함께
+더 작은 모델을 쓰라고 알립니다. Ollama는 한 번에 한 요청만 받으므로, 같은 PC에서 `ollama run`으로
+대화하는 중이면 그 뒤에 줄을 섭니다.
+
+Ollama가 꺼져 있으면 503과 함께 어디를 봐야 하는지, 없는 모델이면 Ollama가 준 사유
+(`model "..." not found`)를 502로 돌려줍니다.
 
 **서버는 물음을 만들지 않습니다.** 무엇이 나갈지는 앱 `GrowthPrompt`가 정하고 서버는 전달만
 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 일기 본문은 빼라고 정해 둔 것이

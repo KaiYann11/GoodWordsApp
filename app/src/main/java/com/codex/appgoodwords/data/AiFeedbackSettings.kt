@@ -70,12 +70,12 @@ data class AiFeedbackSettings(
     val activeProvider: AiProvider
         get() = AiProvider.of(provider)
 
-    /** 지금 고른 공급자의 열쇠. CLI 공급자에는 열쇠가 없습니다. */
+    /** 지금 고른 공급자의 열쇠. 서버가 대신 묻는 공급자(CLI·Ollama)에는 열쇠가 없습니다. */
     val activeKey: String
         get() = when (activeProvider) {
             AiProvider.OPENAI -> openAiKey
             AiProvider.ANTHROPIC -> anthropicKey
-            AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI -> ""
+            AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI, AiProvider.OLLAMA -> ""
         }
 
     /**
@@ -83,7 +83,7 @@ data class AiFeedbackSettings(
      *
      * 공급자를 바꾸면 앞서 고른 모델은 그 공급자에 없는 이름입니다. 그대로 보내면
      * "모델을 찾을 수 없다"는 오류만 돌아오므로, 여기서 그 공급자의 기본으로 당겨 붙입니다.
-     * CLI 공급자의 기본은 빈 값이고, 그러면 서버가 CLI에 설정해 둔 모델로 돌립니다.
+     * CLI·Ollama의 기본은 빈 값이고, 그러면 서버가 CLI에 설정해 둔 모델(Ollama는 서버가 고른 모델)로 돌립니다.
      */
     val effectiveModel: String
         get() = activeProvider.models.firstOrNull { it == model.trim() } ?: activeProvider.defaultModel
@@ -91,15 +91,15 @@ data class AiFeedbackSettings(
     /**
      * 돌아보기에 적어 둘 "누가 썼는지".
      *
-     * CLI 기본 모델로 돌리면 [effectiveModel]이 빈 값이라 무엇이 썼는지 남지 않습니다.
+     * CLI·Ollama 기본 모델로 돌리면 [effectiveModel]이 빈 값이라 무엇이 썼는지 남지 않습니다.
      * 그때는 공급자 이름을 적습니다.
      */
     val reportModel: String
         get() = effectiveModel.ifBlank { activeProvider.label }
 
-    /** 서버가 있어야만 부를 수 있는지. CLI는 서버에 깔려 있고 이 기기에는 없습니다. */
+    /** 서버가 있어야만 부를 수 있는지. CLI와 Ollama는 서버 PC에 있고 이 기기에는 없습니다. */
     val requiresServer: Boolean
-        get() = activeProvider.serverCli
+        get() = activeProvider.serverOnly
 
     val scheduledPeriod: ReportPeriod?
         get() = ReportPeriod.entries.firstOrNull { it.name == schedule && it != ReportPeriod.MANUAL }
@@ -114,7 +114,7 @@ data class AiFeedbackSettings(
      * 서버를 거치지 않고 이 기기가 바로 부를 수 있는지.
      *
      * 서버 주소가 있으면 서버를 먼저 씁니다. 열쇠가 한 곳에만 있으면 기기를 새로 붙일 때마다
-     * 다시 넣지 않아도 되기 때문입니다. CLI 공급자는 이 기기에서 부를 길이 없습니다.
+     * 다시 넣지 않아도 되기 때문입니다. CLI·Ollama는 이 기기에서 부를 길이 없습니다.
      */
     val canCallDirectly: Boolean
         get() = !requiresServer && activeKey.isNotBlank()
@@ -157,11 +157,11 @@ data class AiFeedbackSettings(
     fun withProvider(provider: AiProvider): AiFeedbackSettings =
         copy(provider = provider.name, model = "")
 
-    /** 지금 고른 공급자의 열쇠 자리에만 넣습니다. CLI 공급자에는 넣을 자리가 없어 그대로 둡니다. */
+    /** 지금 고른 공급자의 열쇠 자리에만 넣습니다. 서버가 대신 묻는 공급자에는 넣을 자리가 없어 그대로 둡니다. */
     fun withKey(key: String): AiFeedbackSettings = when (activeProvider) {
         AiProvider.OPENAI -> copy(openAiKey = key.trim())
         AiProvider.ANTHROPIC -> copy(anthropicKey = key.trim())
-        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI -> this
+        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI, AiProvider.OLLAMA -> this
     }
 
     companion object {
