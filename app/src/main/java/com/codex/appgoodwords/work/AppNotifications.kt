@@ -38,6 +38,8 @@ object AppNotifications {
     const val extraTodoId = "extra_todo_id"
     /** 위젯의 적기 버튼. 앱을 열자마자 번뜩인 것 담는 칸을 띄웁니다. */
     const val extraCaptureIdea = "extra_capture_idea"
+    /** 오늘의 한마디 알림. 홈의 한마디 카드까지 데려갑니다. */
+    const val extraOpenDailyCoach = "extra_open_daily_coach"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -128,6 +130,7 @@ object AppNotifications {
 
         val openAppIntent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(extraOpenDailyCoach, true)
         val pendingIntent = PendingIntent.getActivity(
             context,
             9_007,

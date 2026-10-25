@@ -88,6 +88,11 @@ class MainActivity : FragmentActivity() {
         if (intent?.getBooleanExtra(AppNotifications.extraCaptureIdea, false) == true) {
             viewModel.handleCaptureIdeaRequest()
         }
+        // 한 번 쓰고 지웁니다. 남겨 두면 화면을 돌릴 때마다 보던 탭에서 홈으로 끌려갑니다.
+        if (intent?.getBooleanExtra(AppNotifications.extraOpenDailyCoach, false) == true) {
+            intent?.removeExtra(AppNotifications.extraOpenDailyCoach)
+            viewModel.handleOpenDailyCoachRequest()
+        }
         if (contentId > 0L) {
             viewModel.handleOpenItemRequest(
                 itemId = contentId,

@@ -131,7 +131,8 @@ class AppContainer(
             database = database,
             settingsStore = settingsStore,
             repository = repository,
-            client = aiFeedbackClient
+            client = aiFeedbackClient,
+            handOver = { reminderScheduler.handOverDailyCoach() }
         )
     }
 

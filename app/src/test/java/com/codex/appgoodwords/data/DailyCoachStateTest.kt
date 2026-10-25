@@ -92,6 +92,41 @@ class DailyCoachStateTest {
     }
 
     @Test
+    fun anAskCutOffByLeavingTheScreenIsNotCounted() {
+        // 홈에서 묻던 중에 앱을 나가 Android 15에 통신이 끊기면, 연결 탓이 아니라 세지도 사유를 남기지도
+        // 않습니다. 세면 하루 횟수만 줄고 "인터넷 연결과 열쇠를 확인해 주세요"가 남습니다.
+        val before = asked().withTip(tip(), "abc")
+        val later = noon + AiFeedbackSettings.DEFAULT_GAP_MINUTES * minute
+
+        val cut = before.asked(today, later).interrupted(before)
+
+        assertEquals(before.askCount, cut.askCount)
+        assertEquals(before.lastAskedAt, cut.lastAskedAt)
+        assertEquals("", cut.lastError)
+        assertEquals(before.tip, cut.tip)
+        assertTrue(cut.interruptedAsk)
+    }
+
+    @Test
+    fun aCutOffAskIsAskedAgainWithoutWaitingForTheGap() {
+        // 이미 묻기로 했던 것입니다. 주기를 다시 기다리면 앱을 나갔다는 이유로 한마디가 한 주기 밀립니다.
+        // 눌러서 받던 것(주기 안)이 끊겼어도, 하루 횟수를 다 쓴 뒤였어도 같습니다.
+        var used = DailyCoachState()
+        repeat(AiFeedbackSettings.DEFAULT_ASK_LIMIT) { index -> used = used.asked(today, noon + index * minute) }
+        val cut = used.asked(today, noon + 10 * minute).interrupted(used)
+
+        assertTrue(cut.needsAsk("abc", noon + 11 * minute))
+        // 오늘 한 것이 없으면 그래도 묻지 않습니다. 보낼 기록이 없습니다.
+        assertFalse(cut.needsAsk("", noon + 11 * minute))
+
+        // 이어 물으면 표시를 거둡니다. 그다음부터는 다시 주기와 횟수를 봅니다.
+        val resumed = cut.asked(today, noon + 12 * minute)
+        assertFalse(resumed.interruptedAsk)
+        assertEquals(AiFeedbackSettings.DEFAULT_ASK_LIMIT + 1, resumed.askCount)
+        assertFalse(resumed.needsAsk("abc", noon + 12 * 60 * minute))
+    }
+
+    @Test
     fun theLimitAndTheGapAreWhateverWasChosen() {
         // 값이 드는 정도는 사람마다 다르게 느낍니다. 앱이 정해 주지 않습니다.
         var state = DailyCoachState()
@@ -153,6 +188,9 @@ class DailyCoachStateTest {
             .copy(quoteKept = true, lastError = "")
 
         assertEquals(state, DailyCoachJson.decode(DailyCoachJson.encode(state)))
+        // 끊긴 물음도 앱을 껐다 켜도 남아야 이어 묻습니다.
+        val cut = asked().asked(today, noon + minute).interrupted(asked())
+        assertEquals(cut, DailyCoachJson.decode(DailyCoachJson.encode(cut)))
     }
 
     @Test

@@ -16,6 +16,8 @@ import com.codex.appgoodwords.AppGoodWordsApplication
  *
  * **보고 있는 화면 위에 알림을 겹쳐 띄우지 않습니다.** 앱이 앞에 떠 있으면 카드와 홈 탭의 점이 알립니다.
  *
+ * 홈에서 묻던 중에 앱을 나가 끊긴 것도 넘겨받아 이어 묻습니다([ReminderScheduler.handOverDailyCoach]).
+ *
  * 한 번 돌고 나면 다음 차례를 겁니다. 주기 작업은 안드로이드가 15분보다 촘촘히 돌리지 않아 10분 주기를
  * 지킬 수 없습니다.
  */
@@ -29,10 +31,10 @@ class DailyCoachWorker(
         val aiSettings = container.settingsStore.getAiFeedbackSettings()
         if (!aiSettings.coachRunsInBackground) return Result.success()
 
-        val before = container.dailyCoachCoordinator.state()
-        val after = container.dailyCoachCoordinator.refresh()
-        val tip = after.tip
-        if (tip != null && tip.createdAt != before.tip?.createdAt && !app.mainScreenVisible) {
+        val startedAt = System.currentTimeMillis()
+        val tip = container.dailyCoachCoordinator.refresh(now = startedAt).tip
+        // 이번에 받은 것만 알립니다. 홈이 묻는 동안 기다렸다 들여다본 것이면 그 한마디는 홈이 받은 것입니다.
+        if (tip != null && tip.createdAt >= startedAt && !app.mainScreenVisible) {
             val reminderSettings = container.settingsStore.getSettings()
             AppNotifications.showDailyCoachNotification(
                 context = applicationContext,
@@ -43,8 +45,16 @@ class DailyCoachWorker(
         }
 
         // 물었든 아니든(오늘 한 것이 없거나 하루 횟수를 다 썼어도) 한 주기 뒤에 다시 봅니다.
-        container.reminderScheduler.scheduleNextDailyCoach(aiSettings)
+        // 홈에서 끊긴 것을 넘겨받은 한 번이면 잇지 않습니다 — 주기 예약은 따로 돌고 있습니다.
+        if (!inputData.getBoolean(KEY_HAND_OVER, false)) {
+            container.reminderScheduler.scheduleNextDailyCoach(aiSettings)
+        }
         return Result.success()
+    }
+
+    companion object {
+        /** 홈에서 묻다 끊긴 것을 넘겨받은 한 번인지([ReminderScheduler.handOverDailyCoach]). */
+        const val KEY_HAND_OVER = "hand_over"
     }
 }
 
