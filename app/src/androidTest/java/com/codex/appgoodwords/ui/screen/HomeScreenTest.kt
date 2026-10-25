@@ -1,5 +1,11 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -7,10 +13,14 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.DailyCoachState
+import com.codex.appgoodwords.data.DailyCoachTip
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.FeedbackKind
@@ -152,6 +162,52 @@ class HomeScreenTest {
 
         assertFalse(swiped)
     }
+
+    @Test
+    fun comingForTheWordBringsTheCardIntoView() {
+        // 한마디 카드는 오늘의 걸음과 기분 아래에 있어, 홈을 열면 화면 아래에 걸쳐 반쯤 가립니다.
+        // 알림이나 "새 한마디 · 보기"를 눌러 왔으면 카드를 올려 보여 줍니다.
+        var focusRequested by mutableStateOf(false)
+        var focused = 0
+        compose.setContent {
+            Box(modifier = Modifier.height(300.dp)) {
+                HomeScreen(
+                    summary = emptySummary,
+                    notes = emptyList(),
+                    routines = emptyList(),
+                    checks = emptyList(),
+                    dailyLoop = DailyProgress(
+                        steps = DailyStep.DEFAULTS,
+                        doneSteps = emptySet(),
+                        streakDays = 0,
+                        bestStreakDays = 0
+                    ),
+                    coach = DailyCoachState(
+                        date = LocalDate.now(),
+                        tip = DailyCoachTip(message = "물 한 컵으로 하루를 여셨네요.", createdAt = 1L)
+                    ),
+                    coachFocusRequested = focusRequested,
+                    onCoachFocused = {
+                        focusRequested = false
+                        focused += 1
+                    }
+                )
+            }
+        }
+        assertFalse(coachCardIsOnScreen())
+
+        focusRequested = true
+        compose.waitForIdle()
+
+        assertTrue(coachCardIsOnScreen())
+        // 한 번 내리고 거둡니다. 남아 있으면 홈에 돌아올 때마다 카드로 끌려 내려갑니다.
+        assertEquals(1, focused)
+        assertFalse(focusRequested)
+    }
+
+    private fun coachCardIsOnScreen(): Boolean =
+        compose.onAllNodesWithTag(dailyCoachCardTag).fetchSemanticsNodes().isNotEmpty() &&
+            runCatching { compose.onNodeWithTag(dailyCoachCardTag).assertIsDisplayed() }.isSuccess
 
     @androidx.compose.runtime.Composable
     private fun homeScreen(

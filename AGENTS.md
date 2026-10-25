@@ -248,7 +248,11 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
   않습니다**(`RoutineNudgeCalculator`). 오늘의 한마디는 사용자가 정해(2026-10-19) **주기마다 기록이
   그대로여도 묻고, 앱을 닫아 두어도 배경에서 돕니다**(`DailyCoachWorker`) — 대신 주기(10분~하루)·
   하루 횟수·배경 스위치가 설정에 보이고, 오늘 한 것이 없으면 묻지 않습니다. 묻는 규칙은
-  `DailyCoachState.needsAsk` 한 곳이고 홈과 배경 일꾼이 같이 씁니다.
+  `DailyCoachState.needsAsk` 한 곳이고 홈과 배경 일꾼이 같이 쓰며, 한 번에 하나만 묻습니다
+  (`DailyCoachCoordinator`의 잠금). **홈의 물음은 앱이 화면에 있을 때만** 나갑니다 — Android 15는
+  화면 밖으로 나간 앱의 통신을 끊습니다. 묻던 중에 앱을 나가면 답은 알림으로 오고, 그 사이 끊긴 것은
+  세지 않고 배경 일꾼에게 넘깁니다(`DailyCoachState.interrupted`). 그래서 하루 횟수는 서버에 간 물음
+  수보다 적을 수 있습니다.
 - **AI에 못 붙어도 막다른 길이 아닙니다** — 물음을 복사해 붙여넣고 답을 도로 넣는 길을 둡니다.
   **미리 보기와 복사되는 글은 같아야 하고**, 붙여넣은 답은 형식이 어긋나도 버리지 않습니다.
 - **추천은 이미 가진 것을 되돌려 주지 않습니다**(`ownedQuoteLines`는 빼 달라는 목록입니다).

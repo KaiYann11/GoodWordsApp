@@ -53,11 +53,21 @@ data class DailyCoachState(
      * 한마디인지 남겨 두는 데만 씁니다.
      */
     val fingerprint: String = "",
-    /** 오늘 몇 번 물었는지. **실패도 셉니다** — 안 되는 설정으로 하루 종일 두드리지 않습니다. */
+    /**
+     * 오늘 몇 번 물었는지. **실패도 셉니다** — 안 되는 설정으로 하루 종일 두드리지 않습니다.
+     * 화면을 떠나 끊긴 것만 뺍니다([interrupted]).
+     */
     val askCount: Int = 0,
     val lastAskedAt: Long = 0L,
     /** 마지막 실패 사유. 저절로 도는 일이라 화면에 뜨지 않아 여기에 남깁니다. */
     val lastError: String = "",
+    /**
+     * 묻던 중에 화면을 떠나 끊긴 물음이 남아 있는지([interrupted]).
+     *
+     * 이미 묻기로 했던 것이라, 다음에 들여다볼 때 주기와 하루 횟수를 다시 보지 않고 묻습니다 — 배경 일꾼이
+     * 곧 이어 묻고, 그 전에 앱으로 돌아오면 홈이 묻습니다.
+     */
+    val interruptedAsk: Boolean = false,
     /** 집어 간 것. 두 번 눌러 같은 루틴이 두 개 생기지 않게 합니다. */
     val quoteKept: Boolean = false,
     val routineKept: Boolean = false,
@@ -112,6 +122,8 @@ data class DailyCoachState(
         // 오늘 한 것이 없으면 물어볼 거리가 없습니다. 빈 기록으로 물으면 누구에게나 같은
         // "오늘을 시작해 보세요"가 돌아옵니다. 그 말은 앱이 공짜로 할 수 있습니다.
         if (fingerprint.isBlank()) return false
+        // 끊긴 물음은 이미 묻기로 했던 것입니다. 주기를 다시 보면 앱을 나갔다는 이유로 한마디가 한 주기 밀립니다.
+        if (interruptedAsk) return true
         if (askCount >= limit) return false
         return now - lastAskedAt >= gapMinutes * 60_000L
     }
@@ -119,8 +131,19 @@ data class DailyCoachState(
     /** 물어본 사실만 먼저 적습니다. 실패해도 남아야 다음 물음이 틈을 둡니다. */
     fun asked(today: LocalDate, now: Long): DailyCoachState {
         val fresh = forDate(today)
-        return fresh.copy(askCount = fresh.askCount + 1, lastAskedAt = now)
+        return fresh.copy(askCount = fresh.askCount + 1, lastAskedAt = now, interruptedAsk = false)
     }
+
+    /**
+     * 화면을 떠나 끊긴 물음을 없던 일로 합니다 — 횟수와 마지막으로 물은 때를 묻기 전([before])으로 돌리고,
+     * 이어 물을 것으로 적어 둡니다([interruptedAsk]).
+     *
+     * Android 15는 화면 밖으로 나간 앱의 통신을 끊습니다. 홈에서 묻던 중에 앱을 나가 그 사이 끊기면 답이
+     * 오지 않는데, 그것을 세면 하루 횟수만 줄고 "인터넷 연결과 열쇠를 확인해 주세요"라는 맞지 않는 사유가
+     * 남습니다(화면 밖에서 새로 물은 홈의 타이머가 그렇게 실패했습니다). 그래서 사유도 적지 않습니다.
+     */
+    fun interrupted(before: DailyCoachState): DailyCoachState =
+        copy(askCount = before.askCount, lastAskedAt = before.lastAskedAt, interruptedAsk = true)
 
     fun withTip(tip: DailyCoachTip, fingerprint: String): DailyCoachState = copy(
         tip = tip,
@@ -152,6 +175,7 @@ object DailyCoachJson {
             .put("askCount", state.askCount)
             .put("lastAskedAt", state.lastAskedAt)
             .put("lastError", state.lastError)
+            .put("interruptedAsk", state.interruptedAsk)
             .put("quoteKept", state.quoteKept)
             .put("routineKept", state.routineKept)
             .put("actionKept", state.actionKept)
@@ -193,6 +217,7 @@ object DailyCoachJson {
             askCount = json.optInt("askCount"),
             lastAskedAt = json.optLong("lastAskedAt"),
             lastError = json.optString("lastError"),
+            interruptedAsk = json.optBoolean("interruptedAsk"),
             quoteKept = json.optBoolean("quoteKept"),
             routineKept = json.optBoolean("routineKept"),
             actionKept = json.optBoolean("actionKept"),

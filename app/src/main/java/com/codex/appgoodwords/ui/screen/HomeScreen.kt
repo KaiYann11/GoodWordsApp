@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -126,6 +128,14 @@ fun HomeScreen(
     onKeepCoachAction: () -> Unit = {},
     /** 새로 온 한마디를 다 보여 주었습니다. */
     onCoachSeen: () -> Unit = {},
+    /**
+     * 한마디 카드까지 내려 보여 달라는 요청. 알림이나 "새 한마디 · 보기"를 눌러 왔을 때입니다.
+     *
+     * 카드는 오늘의 걸음과 기분 아래에 있어, 홈을 열면 화면 아래에 걸쳐 반쯤 가립니다. 보러 온 것을
+     * 다시 찾게 하지 않습니다. 내린 뒤 [onCoachFocused]로 알립니다.
+     */
+    coachFocusRequested: Boolean = false,
+    onCoachFocused: () -> Unit = {},
     /** 오늘 점수와 최근 흐름. null이면 카드를 두지 않습니다. */
     todayScore: DayScore? = null,
     scoreTrend: ScoreTrend? = null,
@@ -136,7 +146,18 @@ fun HomeScreen(
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
     var showInsights by rememberSaveable { mutableStateOf(false) }
 
+    val listState = rememberLazyListState()
+    // 카드 앞의 줄: 날짜, 오늘의 걸음(있을 때), 기분. 위에 줄을 더하면 여기도 함께 셉니다.
+    val coachItemIndex = if (dailyLoop != null) 3 else 2
+    // 앱을 막 띄웠을 때는 켜 둔 설정을 읽기 전이라 카드가 아직 없습니다. 카드가 생기면 그때 내립니다.
+    LaunchedEffect(coachFocusRequested, coach != null) {
+        if (!coachFocusRequested || coach == null) return@LaunchedEffect
+        listState.animateScrollToItem(coachItemIndex)
+        onCoachFocused()
+    }
+
     LazyColumn(
+        state = listState,
         modifier = modifier
             .fillMaxSize()
             .testTag(homeListTag)
@@ -192,7 +213,7 @@ fun HomeScreen(
         }
 
         // 오늘 걸은 것과 오늘 어땠는지 바로 아래입니다. 코치가 보는 것이 그 둘이라,
-        // 무엇을 보고 하는 말인지가 읽는 순서에서 드러납니다.
+        // 무엇을 보고 하는 말인지가 읽는 순서에서 드러납니다. 이 자리를 `coachItemIndex`가 셉니다.
         coach?.let { state ->
             item {
                 DailyCoachCard(

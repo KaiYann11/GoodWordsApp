@@ -1,9 +1,12 @@
 package com.codex.appgoodwords.data
 
+import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 오늘 기록을 추려 코치에게 묻고, 받은 한마디를 이 기기에 적어 두기까지.
@@ -23,8 +26,18 @@ class DailyCoachCoordinator(
     private val database: AppDatabase,
     private val settingsStore: SettingsStore,
     private val repository: AppRepository,
-    private val client: AiFeedbackClient = AiFeedbackClient()
+    private val client: AiFeedbackClient = AiFeedbackClient(),
+    /**
+     * 화면을 떠나 끊긴 물음을 배경 일꾼에게 넘깁니다([refresh]의 `interrupted`).
+     *
+     * 인터넷을 조건으로 건 일꾼에게는 Android 15도 앱 밖에서 통신을 열어 줍니다. 그래서 앱을 나간 뒤에도
+     * 한마디가 알림으로 옵니다.
+     */
+    private val handOver: () -> Unit = {}
 ) {
+    /** 한 번에 하나만 묻습니다([refresh]). */
+    private val askLock = Mutex()
+
     /** 설정에서 "무엇이 나가는지" 보여 줄 글. 실제로 보내는 것과 같은 함수로 만듭니다. */
     suspend fun preview(
         today: LocalDate = LocalDate.now(),
@@ -52,16 +65,30 @@ class DailyCoachCoordinator(
     /**
      * 한마디를 받아 옵니다.
      *
+     * **한 번에 하나만 묻습니다.** 홈과 배경 일꾼이 같은 때 들여다보면 둘 다 "물을 때"로 읽어 두 번 나갑니다.
+     * 뒤에 온 쪽은 앞의 물음이 끝나기를 기다렸다가 다시 봅니다 — 대개는 물을 때가 지나 있어 그냥 돌아갑니다.
+     *
      * @param force 사용자가 직접 눌렀는지. 그때는 같은 기록이어도, 틈이 덜 벌어졌어도 묻습니다.
      *   자기가 눌러 자기 몫을 쓰는 것이라 앱이 말릴 일이 아닙니다. 다만 오늘 한 것이 하나도
      *   없으면 그때도 묻지 않습니다 — 보낼 기록이 없습니다.
+     * @param interrupted 묻던 중에 앱이 화면을 떠났는지. 홈이 넘깁니다 — 그때 끊긴 연결은 세지 않고
+     *   ([DailyCoachState.interrupted]) 배경 일꾼에게 넘깁니다([handOver]). 배경 일꾼은 화면과 상관없이 돕니다.
      * @return 새로 적힌 상태. 물을 때가 아니었으면 들고 있던 것 그대로입니다.
      */
     suspend fun refresh(
         force: Boolean = false,
         today: LocalDate = LocalDate.now(),
         at: LocalTime = LocalTime.now(),
-        now: Long = System.currentTimeMillis()
+        now: Long = System.currentTimeMillis(),
+        interrupted: () -> Boolean = { false }
+    ): DailyCoachState = askLock.withLock { ask(force, today, at, now, interrupted) }
+
+    private suspend fun ask(
+        force: Boolean,
+        today: LocalDate,
+        at: LocalTime,
+        now: Long,
+        interrupted: () -> Boolean
     ): DailyCoachState {
         val aiSettings = settingsStore.getAiFeedbackSettings()
         val syncSettings = settingsStore.getServerSyncSettings()
@@ -88,7 +115,9 @@ class DailyCoachCoordinator(
         if (!force && !due) return stored
 
         // 물어본 사실부터 적습니다. 실패해도 남아야 다음 물음이 틈을 둡니다.
-        val asked = save(stored.asked(today, now))
+        save(stored.asked(today, now))
+        // 답은 그때의 상태(`state(today)`)에 얹습니다. 묻는 데 몇 분이 걸리기도 해서, 그 사이 눌러 둔
+        // 담기·보기를 묻기 전의 것으로 덮지 않게 합니다.
         val rawText = try {
             client.ask(
                 system = DailyCoachPrompt.systemPrompt(),
@@ -98,12 +127,19 @@ class DailyCoachCoordinator(
                 syncSettings = syncSettings
             )
         } catch (failure: Exception) {
-            return save(asked.withError(failure.message ?: "오늘의 한마디를 받지 못했습니다."))
+            // 연결이 끊긴 것이 화면을 떠난 탓이면(Android 15는 화면 밖으로 나간 앱의 통신을 끊습니다) 세지 않고
+            // 넘깁니다. "인터넷 연결을 확인해 주세요"는 맞지 않는 말이라 남기지 않습니다.
+            if (failure is IOException && interrupted()) {
+                val restored = save(state(today).interrupted(stored))
+                if (aiSettings.coachRunsInBackground) handOver()
+                return restored
+            }
+            return save(state(today).withError(failure.message ?: "오늘의 한마디를 받지 못했습니다."))
         }
 
         val tip = DailyCoachParser.parse(rawText, model = aiSettings.reportModel, now = now)
-            ?: return save(asked.withError("코치가 보낸 답을 읽지 못했습니다."))
-        return save(asked.withTip(tip, digest.fingerprint))
+            ?: return save(state(today).withError("코치가 보낸 답을 읽지 못했습니다."))
+        return save(state(today).withTip(tip, digest.fingerprint))
     }
 
     /**

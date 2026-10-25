@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.codex.appgoodwords.BuildConfig
 import java.io.File
 import com.codex.appgoodwords.data.AppUpdateInstaller
@@ -218,6 +219,9 @@ fun AppGoodWordsApp(
     val captureIdeaRequest by viewModel.captureIdeaRequest.collectAsStateWithLifecycle()
     // 위젯의 적기로 들어왔거나 홈에서 왼쪽으로 밀었을 때 뜹니다.
     var capturingIdea by remember { mutableStateOf(false) }
+    val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
+    // 홈이 한마디 카드까지 내려 보여 주면 거둡니다.
+    var coachFocusRequested by remember { mutableStateOf(false) }
 
     /**
      * 설정에서 보고 있는 갈래. null이면 갈래 목록입니다.
@@ -346,6 +350,12 @@ fun AppGoodWordsApp(
      */
     fun selectTab(tab: AppTab) {
         navStack = listOf(tabRoute(tab))
+    }
+
+    /** 홈의 한마디 카드로 데려갑니다. 홈만 열면 카드가 화면 아래에 걸쳐 반쯤 가립니다. */
+    fun openDailyCoach() {
+        selectTab(AppTab.HOME)
+        coachFocusRequested = true
     }
 
     fun popRoute() {
@@ -488,40 +498,57 @@ fun AppGoodWordsApp(
         }
     }
 
+    // 알림을 눌러 왔으면 홈의 한마디 카드로 데려갑니다.
+    LaunchedEffect(openDailyCoachRequest) {
+        if (openDailyCoachRequest) {
+            openDailyCoach()
+            viewModel.consumeOpenDailyCoachRequest()
+        }
+    }
+
     /**
      * 홈을 보고 있는 동안, 코치에게 다시 물을 때인지 들여다봅니다 — 오늘 한 것이 바뀔 때와,
      * 홈을 열어 둔 채로 주기가 돌아올 때.
      *
-     * 앱을 닫아 둔 동안에는 배경 일꾼이 같은 규칙으로 묻습니다(`DailyCoachWorker`). 실제로 물을지는
-     * [MainViewModel.refreshDailyCoach]가 가립니다 — 대부분은 들여다보고 지나갑니다.
+     * **앱이 화면에 떠 있는 동안만 셉니다.** 앱을 나가도 이 화면은 남아 있어서, 예전에는 화면 밖에서도 주기가
+     * 돌아오면 물었습니다 — Android 15가 화면 밖으로 나간 앱의 통신을 끊어 하루 횟수만 쓰고 실패했습니다.
+     * 화면 밖은 배경 일꾼의 몫이고(`DailyCoachWorker`), 같은 규칙으로 묻습니다. 앱으로 돌아오면 처음부터
+     * 다시 들여다봅니다. 실제로 물을지는 [MainViewModel.refreshDailyCoach]가 가립니다 — 대부분은 들여다보고
+     * 지나갑니다.
      */
-    LaunchedEffect(currentTab, coachFingerprint, dailyCoach.lastAskedAt, aiFeedbackSettings.gapMinutes) {
+    LaunchedEffect(lifecycleOwner, currentTab, coachFingerprint, dailyCoach.lastAskedAt, aiFeedbackSettings.gapMinutes) {
         if (currentTab != AppTab.HOME || coachFingerprint.isBlank()) return@LaunchedEffect
-        viewModel.refreshDailyCoach()
-        delay(
-            DailyCoachSchedule.delayMillis(
-                gapMinutes = aiFeedbackSettings.gapMinutes,
-                lastAskedAt = dailyCoach.lastAskedAt,
-                now = System.currentTimeMillis()
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.refreshDailyCoach()
+            delay(
+                DailyCoachSchedule.delayMillis(
+                    gapMinutes = aiFeedbackSettings.gapMinutes,
+                    lastAskedAt = dailyCoach.lastAskedAt,
+                    now = System.currentTimeMillis()
+                )
             )
-        )
-        viewModel.refreshDailyCoach()
+            viewModel.refreshDailyCoach()
+        }
     }
 
     /**
      * 다른 탭에 있는 동안 새 한마디가 오면 아래에 알리고 데려갈 길을 줍니다.
      *
      * 홈에 있으면 카드가 알리므로 띄우지 않습니다. 앱을 막 열었을 때 이미 와 있던 것도 홈이 먼저 보여 줍니다.
+     * 알림을 눌러 들어온 참이면 곧 카드로 가므로 띄우지 않습니다.
      */
     val newCoachTipAt = dailyCoach.tip?.createdAt?.takeIf { dailyCoach.hasNewTip && aiFeedbackSettings.coachEnabled }
     LaunchedEffect(newCoachTipAt) {
-        if (newCoachTipAt == null || currentTab == AppTab.HOME) return@LaunchedEffect
+        // 둘 다 봅니다. 알림 요청을 거둔 뒤에 돌 수도, 거두기 전에 돌 수도 있습니다.
+        if (newCoachTipAt == null || currentTab == AppTab.HOME || openDailyCoachRequest || coachFocusRequested) {
+            return@LaunchedEffect
+        }
         val result = snackbarHostState.showSnackbar(
             message = "새 한마디가 도착했습니다",
             actionLabel = "보기",
             duration = SnackbarDuration.Long
         )
-        if (result == SnackbarResult.ActionPerformed) selectTab(AppTab.HOME)
+        if (result == SnackbarResult.ActionPerformed) openDailyCoach()
     }
 
     LaunchedEffect(openItemRequest, allItems, currentTab) {
@@ -865,6 +892,8 @@ fun AppGoodWordsApp(
                                 }
                             },
                             onCoachSeen = { viewModel.markDailyCoachSeen() },
+                            coachFocusRequested = coachFocusRequested,
+                            onCoachFocused = { coachFocusRequested = false },
                             // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
                             todayScore = todayScore,
                             scoreTrend = scoreTrend,

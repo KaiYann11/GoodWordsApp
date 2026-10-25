@@ -511,6 +511,23 @@ class MainViewModel(
         _captureIdeaRequest.value = false
     }
 
+    /**
+     * 오늘의 한마디 알림을 눌러 들어왔는지.
+     *
+     * 홈의 한마디 카드까지 데려갑니다. 앱만 열면 보던 탭이 뜨거나, 홈이어도 카드가 화면 아래에 반쯤 가려
+     * 무엇을 보러 왔는지 다시 찾아야 했습니다.
+     */
+    private val _openDailyCoachRequest = MutableStateFlow(false)
+    val openDailyCoachRequest: StateFlow<Boolean> = _openDailyCoachRequest.asStateFlow()
+
+    fun handleOpenDailyCoachRequest() {
+        _openDailyCoachRequest.value = true
+    }
+
+    fun consumeOpenDailyCoachRequest() {
+        _openDailyCoachRequest.value = false
+    }
+
     private val _confirmedTodayIds = MutableStateFlow<Set<Long>>(emptySet())
     val confirmedTodayIds: StateFlow<Set<Long>> = _confirmedTodayIds.asStateFlow()
 
@@ -532,6 +549,9 @@ class MainViewModel(
 
     /** 앱이 화면에서 물러난 시각. 아직 한 번도 물러난 적이 없으면 0입니다. */
     private var leftAtMillis = 0L
+
+    /** 앱이 화면에서 물러난 횟수. 오늘의 한마디를 묻던 중에 앱을 나갔는지 가립니다([refreshDailyCoach]). */
+    private var screenLeaves = 0
 
     val appLockEnabled = container.settingsStore.appLockEnabledFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -660,6 +680,7 @@ class MainViewModel(
 
     fun onAppBackgrounded() {
         leftAtMillis = SystemClock.elapsedRealtime()
+        screenLeaves += 1
     }
 
     /**
@@ -1008,8 +1029,26 @@ class MainViewModel(
             // 화면이 다시 그려지거나 손가락이 두 번 닿아도 한 번만 나갑니다.
             if (_coachLoading.value) return@launch
             _coachLoading.value = true
+            // 묻는 데 몇 분이 걸리기도 합니다. 그 사이 앱을 나가 끊긴 것은 세지 않고 배경 일꾼에게 넘깁니다.
+            val leavesAtStart = screenLeaves
+            val startedAt = System.currentTimeMillis()
             try {
-                container.dailyCoachCoordinator.refresh(force = force)
+                val tip = container.dailyCoachCoordinator.refresh(
+                    force = force,
+                    now = startedAt,
+                    interrupted = { screenLeaves != leavesAtStart }
+                ).tip
+                // 끊기지 않고 앱 밖에서 답이 왔으면 알립니다. 화면에 없는 카드는 알릴 수 없고, 묻던 것을 두고
+                // 나간 사람은 다시 열어 보기 전까지 온 줄 모릅니다. 배경 일꾼이 알리는 것과 같습니다.
+                if (tip != null && tip.createdAt >= startedAt && leftAtMillis != 0L) {
+                    val reminderSettings = container.settingsStore.getSettings()
+                    AppNotifications.showDailyCoachNotification(
+                        context = container.appContext,
+                        tip = tip,
+                        soundEnabled = reminderSettings.notificationSoundEnabled,
+                        lockScreenVisible = reminderSettings.lockScreenVisible
+                    )
+                }
             } finally {
                 _coachLoading.value = false
             }

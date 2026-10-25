@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.ReminderSettings
@@ -193,8 +194,31 @@ class ReminderScheduler(
         )
     }
 
+    /**
+     * 홈에서 묻다 끊긴 것을 배경 일꾼이 이어 묻게 합니다([com.codex.appgoodwords.data.DailyCoachCoordinator.refresh]).
+     *
+     * **주기 예약과 이름을 따로 둡니다.** 같은 이름으로 바꿔 걸면 그때 돌고 있던 일꾼이 지워지고, 뒤에 이으면
+     * 주기 예약이 돈 다음에야 묻습니다. 이미 걸어 둔 것이 있으면 그대로 둡니다 — 끊긴 물음은 하나만 남습니다
+     * ([DailyCoachState.interruptedAsk]). 이 한 번은 다음 차례를 잇지 않습니다.
+     */
+    fun handOverDailyCoach() {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            dailyCoachHandOverWorkName,
+            ExistingWorkPolicy.KEEP,
+            dailyCoachRequest(delayMillis = DailyCoachSchedule.MIN_DELAY_MILLIS, handOver = true)
+        )
+    }
+
     private fun enqueueDailyCoach(delayMillis: Long, policy: ExistingWorkPolicy) {
-        val request = OneTimeWorkRequestBuilder<DailyCoachWorker>()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            dailyCoachWorkName,
+            policy,
+            dailyCoachRequest(delayMillis = delayMillis, handOver = false)
+        )
+    }
+
+    private fun dailyCoachRequest(delayMillis: Long, handOver: Boolean) =
+        OneTimeWorkRequestBuilder<DailyCoachWorker>()
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
             // 인터넷이 끊긴 채로 깨우면 횟수만 쓰고 실패합니다.
             .setConstraints(
@@ -202,9 +226,8 @@ class ReminderScheduler(
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build()
             )
+            .setInputData(workDataOf(DailyCoachWorker.KEY_HAND_OVER to handOver))
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(dailyCoachWorkName, policy, request)
-    }
 
     // 계산은 ReminderSchedule에 있습니다. 시각을 인자로 받아야 테스트할 수 있어서입니다.
     private fun calculateRepeatingDelay(settings: ReminderSettings): Duration =
@@ -222,5 +245,6 @@ class ReminderScheduler(
         const val growthFeedbackWorkName = "good_words_growth_feedback"
         const val growthNudgeWorkName = "good_words_growth_nudge"
         const val dailyCoachWorkName = "good_words_daily_coach"
+        const val dailyCoachHandOverWorkName = "good_words_daily_coach_hand_over"
     }
 }
