@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -89,6 +90,11 @@ internal const val historyButtonTag = "history_button"
 
 /** 교체와 병합은 결과가 정반대라 버튼을 헷갈리면 안 된다. */
 internal const val fileMergeButtonTag = "file_merge_button"
+
+/** 글자마다 저장하는 칸들. 치는 동안 늦게 돌아온 저장값이 칸을 덮지 않는지 짚습니다. */
+internal const val reminderIntervalFieldTag = "reminder_interval_field"
+internal const val serverUrlFieldTag = "server_url_field"
+internal const val serverApiKeyFieldTag = "server_api_key_field"
 
 /** AI 열쇠 칸과 주기 칩. 설정에는 칸과 칩이 여럿이라 표식으로 짚습니다. */
 internal const val aiApiKeyFieldTag = "ai_api_key_field"
@@ -239,21 +245,29 @@ fun SettingsScreen(
     // 화면이 다시 만들어지면 확인 대화상자를 닫아 실수로 실행되지 않게 한다.
     var pendingSyncAction by remember { mutableStateOf<PendingSyncAction?>(null) }
 
-    LaunchedEffect(settings.intervalMinutes) {
+    // 세 칸은 글자마다 저장하고, 저장된 값은 한 박자 늦게 돌아옵니다. 치는 동안 돌아온 옛 값으로 칸을 덮으면
+    // 그 사이 친 글자가 지워지고 커서가 엉뚱한 데로 가, 빠르게 친 서버 주소가 뒤섞인 채 저장됐습니다
+    // (에뮬레이터, 2026-10-25). 반복 간격은 "3"을 치자마자 최소값 15로 덮여 "30"을 칠 수 없었습니다.
+    // 그래서 칸을 누르고 있는 동안은 칸이 주인이고, 칸을 떠나면 저장된 값을 보여 줍니다.
+    var intervalFieldFocused by remember { mutableStateOf(false) }
+    var serverUrlFieldFocused by remember { mutableStateOf(false) }
+    var serverApiKeyFieldFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(settings.intervalMinutes, intervalFieldFocused) {
         val normalized = settings.intervalMinutes.toString()
-        if (intervalMinutesText != normalized) {
+        if (!intervalFieldFocused && intervalMinutesText != normalized) {
             intervalMinutesText = normalized
         }
     }
 
-    LaunchedEffect(serverSyncSettings.serverUrl) {
-        if (serverUrlText != serverSyncSettings.serverUrl) {
+    LaunchedEffect(serverSyncSettings.serverUrl, serverUrlFieldFocused) {
+        if (!serverUrlFieldFocused && serverUrlText != serverSyncSettings.serverUrl) {
             serverUrlText = serverSyncSettings.serverUrl
         }
     }
 
-    LaunchedEffect(serverSyncSettings.apiKey) {
-        if (serverApiKeyText != serverSyncSettings.apiKey) {
+    LaunchedEffect(serverSyncSettings.apiKey, serverApiKeyFieldFocused) {
+        if (!serverApiKeyFieldFocused && serverApiKeyText != serverSyncSettings.apiKey) {
             serverApiKeyText = serverSyncSettings.apiKey
         }
     }
@@ -375,7 +389,10 @@ fun SettingsScreen(
                                             )
                                         }
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { intervalFieldFocused = it.isFocused }
+                                        .testTag(reminderIntervalFieldTag),
                                     label = { Text("반복 간격(분)") },
                                     supportingText = { Text("최소 15분, 예: 15 / 30 / 90") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -556,7 +573,10 @@ fun SettingsScreen(
                                         serverUrlText = value
                                         onServerSyncSettingsChanged(serverSyncSettings.copy(serverUrl = value))
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { serverUrlFieldFocused = it.isFocused }
+                                        .testTag(serverUrlFieldTag),
                                     label = { Text("서버 주소") },
                                     supportingText = {
                                         Text("예: https://서버이름.ts.net · 인증서가 확인되는 HTTPS 주소를 입력해 주세요.")
@@ -570,7 +590,10 @@ fun SettingsScreen(
                                         serverApiKeyText = value
                                         onServerSyncSettingsChanged(serverSyncSettings.copy(apiKey = value))
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { serverApiKeyFieldFocused = it.isFocused }
+                                        .testTag(serverApiKeyFieldTag),
                                     label = { Text("API 키") },
                                     visualTransformation = PasswordVisualTransformation(),
                                     singleLine = true
