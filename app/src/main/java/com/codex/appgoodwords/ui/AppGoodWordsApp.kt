@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Home
@@ -102,6 +103,9 @@ import com.codex.appgoodwords.ui.screen.DiaryScreen
 import com.codex.appgoodwords.ui.screen.DiaryUnlockCard
 import com.codex.appgoodwords.ui.screen.GrowthFeedbackScreen
 import com.codex.appgoodwords.ui.screen.HistoryScreen
+import com.codex.appgoodwords.ui.screen.GoalDetailScreen
+import com.codex.appgoodwords.ui.screen.GoalTab
+import com.codex.appgoodwords.ui.screen.GoalTabsScreen
 import com.codex.appgoodwords.ui.screen.HomeScreen
 import com.codex.appgoodwords.ui.screen.IdeaCaptureDialog
 import com.codex.appgoodwords.ui.screen.IdeaCaptureField
@@ -128,6 +132,11 @@ private enum class AppTab(
     HOME("홈"),
     LIBRARY("보관함"),
     ROUTINE("루틴"),
+    /**
+     * 이상향·목표·롤모델(사용자가 정함, 2026-10-29). 할 일이나 메모와 섞이지 않게 제 칸을 둡니다 — 끝내는 것도 적어 두고
+     * 마는 것도 아니라 자꾸 마주치고 되새기는 것입니다. 하단 바의 여섯째입니다.
+     */
+    GOALS("목표"),
     /** 할 일은 루틴과 성격이 달라 자리를 나눴습니다. 루틴은 매일 세는 것이고 할 일은 한 번 끝나는 것입니다. */
     TODO("할 일"),
     DIARY("일기"),
@@ -140,6 +149,8 @@ private enum class AppTab(
     BOOK_PROGRESS("독서 진행률"),
     /** 루틴 하나의 연속 날수와 요일. 루틴 카드의 기록 줄에서 엽니다. */
     ROUTINE_STATS("루틴 기록"),
+    /** 이상향·목표·롤모델 하나. 목표 탭의 카드나 홈의 한 줄에서 엽니다. 하단 바에는 없습니다. */
+    GOAL_DETAIL("목표"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
@@ -173,7 +184,9 @@ private data class AppDestination(
     /** 날짜별 진행을 펼친 책. */
     val progressBookId: Long? = null,
     /** 쌓인 기록을 펼친 루틴. */
-    val statsRoutineId: Long? = null
+    val statsRoutineId: Long? = null,
+    /** 펼친 이상향·목표·롤모델. */
+    val goalId: Long? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -220,6 +233,8 @@ fun AppGoodWordsApp(
     // 위젯의 적기로 들어왔거나 홈의 "아이디어 담기"를 눌렀을 때 뜹니다.
     var capturingIdea by remember { mutableStateOf(false) }
     val homeQuote by viewModel.homeQuote.collectAsStateWithLifecycle()
+    val goalTracks by viewModel.goalTracks.collectAsStateWithLifecycle()
+    val homeGoalLine by viewModel.homeGoalLine.collectAsStateWithLifecycle()
     val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
     // 홈이 한마디 칸을 열어 보여 주면 거둡니다.
     var coachFocusRequested by remember { mutableStateOf(false) }
@@ -631,6 +646,11 @@ fun AppGoodWordsApp(
                                 destination.editingItemId != null -> "항목 수정"
                                 destination.newItemType == ContentType.CONCEPT -> "개념 적기"
                                 destination.newItemType == ContentType.MEMO -> "메모 적기"
+                                // 이상향·목표·롤모델 중 무엇인지가 제목입니다.
+                                currentTab == AppTab.GOAL_DETAIL -> goalTracks
+                                    .firstOrNull { it.goal.id == destination.goalId }
+                                    ?.let { GoalTab.of(it.goal.type).label }
+                                    ?: AppTab.GOAL_DETAIL.title
                                 // 설정의 갈래 안에서는 그 갈래 이름이 제목입니다.
                                 else -> settingsSection?.takeIf { currentTab == AppTab.SETTINGS }?.title
                                     ?: currentTab.title
@@ -700,7 +720,7 @@ fun AppGoodWordsApp(
                         // 지금은 보관함의 글귀 화면 안에 있습니다.
                         // 설정은 매일 쓰는 것이 아니라 위쪽 톱니로 옮겼습니다. 하단 바는 매일
                         // 들르는 다섯 곳만 남깁니다.
-                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.ROUTINE, AppTab.TODO, AppTab.DIARY)
+                        listOf(AppTab.HOME, AppTab.LIBRARY, AppTab.ROUTINE, AppTab.GOALS, AppTab.TODO, AppTab.DIARY)
                             .forEach { tab ->
                                 val selected = currentTab == tab
                                 // 새 한마디가 와 있는데 다른 탭에 있으면 홈에 점을 답니다(메신저 앱의 읽지 않은 표시처럼).
@@ -716,6 +736,7 @@ fun AppGoodWordsApp(
                                                 AppTab.HOME -> Icons.Outlined.Home
                                                 AppTab.LIBRARY -> Icons.AutoMirrored.Outlined.LibraryBooks
                                                 AppTab.ROUTINE -> Icons.Outlined.CheckCircle
+                                                AppTab.GOALS, AppTab.GOAL_DETAIL -> Icons.Outlined.Explore
                                                 AppTab.TODO -> Icons.AutoMirrored.Outlined.ListAlt
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
@@ -843,6 +864,9 @@ fun AppGoodWordsApp(
                             onNextQuote = { viewModel.nextHomeQuote() },
                             onOpenQuote = { item -> openItemDetail(AppTab.HOME, item.id) },
                             onAddQuote = { openFreshAddForm() },
+                            // 되고 싶은 나와 목표·롤모델 하나를 매일 마주칩니다. 누르면 그 기록으로.
+                            goalLine = homeGoalLine,
+                            onOpenGoal = { id -> pushRoute(goalRoute(id)) },
                             dailyLoop = dailyLoop,
                             // 걸음마다 그 화면으로 데려갑니다. 글귀 읽기는 홈 맨 위의 글귀로 올려 주므로 여기까지 오지 않습니다.
                             onOpenStep = { step ->
@@ -1308,6 +1332,9 @@ fun AppGoodWordsApp(
                             onOpenHit = { hit ->
                                 if (hit.kind in listOf(SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT)) {
                                     openItemDetail(AppTab.SEARCH, hit.id)
+                                } else if (hit.kind == SearchKind.GOAL) {
+                                    // 목표는 목록에서 짚어 주기보다 그 기록을 바로 엽니다. 되새긴 기록까지 거기 있습니다.
+                                    pushRoute(goalRoute(hit.id))
                                 } else {
                                     // 나머지는 각자 사는 탭으로 데려가 그 항목을 짚어 줍니다.
                                     pushRoute(focusRoute(hit.kind, hit.id))
@@ -1329,6 +1356,39 @@ fun AppGoodWordsApp(
                                         BookProgressCalculator.build(book, bookReadingLogs)
                                     },
                                     today = LocalDate.now()
+                                )
+                            }
+                        }
+
+                        AppTab.GOALS -> GoalTabsScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            tracks = goalTracks,
+                            onOpen = { id -> pushRoute(goalRoute(id)) },
+                            onSave = viewModel::saveGoal
+                        )
+
+                        AppTab.GOAL_DETAIL -> {
+                            val track = goalTracks.firstOrNull { it.goal.id == destination.goalId }
+                            if (track == null) {
+                                // 막 적은 것은 목록이 따라오는 데 잠깐 걸립니다. 기다렸다가 끝내 없으면(다른 기기에서 지움) 목록으로.
+                                LaunchedEffect(destination.goalId) {
+                                    delay(GOAL_APPEAR_GRACE_MS)
+                                    popRoute()
+                                }
+                            } else {
+                                GoalDetailScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    track = track,
+                                    routines = routines,
+                                    onSaveText = { title, body -> viewModel.saveGoal(track.goal.id, track.goal.type, title, body) },
+                                    onSetRoutines = { ids -> viewModel.setGoalRoutines(track.goal.id, ids) },
+                                    onSetPinned = { pinned -> viewModel.setGoalPinned(track.goal.id, pinned) },
+                                    onDelete = { viewModel.deleteContent(track.goal.id).onSuccess { popRoute() } },
+                                    onReflect = { body -> viewModel.saveContentMemo(track.goal.id, body) },
+                                    onDeleteReflection = { memoId -> viewModel.deleteContentMemo(memoId) },
+                                    onOpenQuote = { quote -> openItemDetail(AppTab.GOALS, quote.id) },
+                                    onOpenRoutines = { selectTab(AppTab.ROUTINE) },
+                                    onMessage = { message -> coroutineScope.launch { snackbarHostState.showSnackbar(message) } }
                                 )
                             }
                         }
@@ -1847,6 +1907,12 @@ private fun progressRoute(bookId: Long): String = "progress:$bookId"
 /** 루틴 하나의 연속 날수와 요일. 루틴 카드의 기록 줄에서 엽니다. */
 private fun routineStatsRoute(routineId: Long): String = "routine-stats:$routineId"
 
+/** 이상향·목표·롤모델 하나. 목표 탭의 카드나 홈의 한 줄에서 엽니다. */
+private fun goalRoute(goalId: Long): String = "goal:$goalId"
+
+/** 막 적은 목표가 목록에 따라오기를 기다리는 시간. 지나도 없으면 다른 기기에서 지운 것으로 보고 목록으로 돌립니다. */
+private const val GOAL_APPEAR_GRACE_MS = 1_500L
+
 private fun editRoute(returnTab: AppTab, itemId: Long): String = "edit:${returnTab.name}:$itemId"
 
 /** 검색 결과로 가는 길. 어느 탭인지는 종류가 정합니다. */
@@ -1859,6 +1925,7 @@ private fun tabOf(kind: SearchKind): AppTab = when (kind) {
     SearchKind.DIARY -> AppTab.DIARY
     SearchKind.TODO -> AppTab.TODO
     SearchKind.ROUTINE, SearchKind.NOT_TO_DO, SearchKind.PRINCIPLE -> AppTab.ROUTINE
+    SearchKind.GOAL -> AppTab.GOALS
     SearchKind.GROWTH -> AppTab.GROWTH
 }
 
@@ -1890,6 +1957,10 @@ private fun parseRoute(route: String): AppDestination {
         "progress" -> AppDestination(
             tab = AppTab.BOOK_PROGRESS,
             progressBookId = parts.getOrNull(1)?.toLongOrNull()
+        )
+        "goal" -> AppDestination(
+            tab = AppTab.GOAL_DETAIL,
+            goalId = parts.getOrNull(1)?.toLongOrNull()
         )
         "routine-stats" -> AppDestination(
             tab = AppTab.ROUTINE_STATS,

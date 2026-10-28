@@ -68,6 +68,7 @@ import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.FeedbackKind
 import com.codex.appgoodwords.data.FeedbackNote
 import com.codex.appgoodwords.data.GrowthReportEntity
+import com.codex.appgoodwords.data.HomeGoalLine
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.MoodPracticeRow
 import com.codex.appgoodwords.data.OnThisDayMemory
@@ -141,6 +142,9 @@ fun HomeScreen(
     onOpenQuote: (ContentItemEntity) -> Unit = {},
     /** 보관함에 글귀가 하나도 없을 때 담으러 갑니다. */
     onAddQuote: () -> Unit = {},
+    /** 되고 싶은 나와 목표·롤모델 하나([com.codex.appgoodwords.data.GoalTracking.homeLine]). 목표 탭이 비었으면 null입니다. */
+    goalLine: HomeGoalLine? = null,
+    onOpenGoal: (Long) -> Unit = {},
     /** 오늘의 걸음. null이면 카드를 두지 않습니다. */
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
@@ -279,6 +283,9 @@ fun HomeScreen(
                     when (tabs[page]) {
                         // 오늘 무엇부터 할지와 오늘 어땠는지. 매일 손이 가는 둘이라 첫 칸입니다.
                         HomeTab.TODAY -> {
+                            // 무엇을 향해 가는지가 오늘 무엇부터 할지보다 앞에 놓입니다(사용자가 정함, 2026-10-29).
+                            // 목표 탭에 아무것도 없으면 자리를 내지 않습니다 — 적어 보라는 카드가 매일 뜨면 잔소리가 됩니다.
+                            goalLine?.let { line -> HomeGoalCard(line = line, onOpen = onOpenGoal) }
                             dailyLoop?.let { progress ->
                                 DailyLoopCard(
                                     progress = progress,

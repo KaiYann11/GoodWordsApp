@@ -28,8 +28,11 @@ object SyncDeduplicator {
         return snapshot.copy(
             items = items.kept.map { item ->
                 // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙입니다. 안 옮기면 출처를 잃습니다.
-                if (item.bookSyncId.isBlank()) item
+                val withBook = if (item.bookSyncId.isBlank()) item
                 else item.copy(bookSyncId = books.survivorOf(item.bookSyncId))
+                // 목표에 이어 둔 루틴도 남은 루틴으로 옮깁니다. 두 루틴이 하나로 합쳐졌으면 한 번만 남깁니다.
+                if (withBook.linkedRoutineSyncIds.isEmpty()) withBook
+                else withBook.copy(linkedRoutineSyncIds = withBook.linkedRoutineSyncIds.map(routines::survivorOf).distinct())
             },
             // 사라진 글귀를 가리키던 루틴은 남은 글귀로 옮겨 붙입니다. 안 옮기면 출처를 잃습니다.
             routines = routines.kept.map { routine ->

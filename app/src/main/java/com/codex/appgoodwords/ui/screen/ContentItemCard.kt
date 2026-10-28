@@ -258,5 +258,8 @@ private fun ContentType.displayLabel(): String {
         ContentType.NOT_TO_DO -> "하지 않을 일"
         ContentType.PRINCIPLE -> "원칙"
         ContentType.CONCEPT -> "개념"
+        ContentType.VISION -> "이상향"
+        ContentType.GOAL -> "목표"
+        ContentType.ROLE_MODEL -> "롤모델"
     }
 }

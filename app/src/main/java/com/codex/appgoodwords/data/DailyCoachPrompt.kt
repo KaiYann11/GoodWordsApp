@@ -39,7 +39,13 @@ data class DailyCoachDigest(
      *
      * 추천을 받으려는 것이 아니라 **빼 달라고** 보냅니다([GrowthDigest.ownedQuoteLines]와 같은 이유).
      */
-    val ownedQuoteLines: List<String>
+    val ownedQuoteLines: List<String>,
+    /**
+     * 내가 가려는 방향 — 이상향·목표·롤모델([GrowthPrompt.directionLines]). 켜지 않았으면 빈 목록입니다.
+     *
+     * **지문에는 넣지 않습니다.** 목표를 고친 것은 오늘 한 일이 아닙니다.
+     */
+    val directionLines: List<String> = emptyList()
 ) {
     /** 오늘 한 것이 하나도 없으면 물어볼 거리가 없습니다. */
     val isEmpty: Boolean
@@ -88,7 +94,9 @@ object DailyCoachPrompt {
         todayChecks: List<RoutineCheckEntity>,
         diaries: List<DiaryEntity>,
         items: List<ContentItemEntity>,
-        includeDiaryBody: Boolean
+        includeDiaryBody: Boolean,
+        /** 이상향·목표·롤모델을 실을지([AiFeedbackSettings.includeGoals], 기본 꺼짐). */
+        includeGoals: Boolean = false
     ): DailyCoachDigest {
         val todayDiaries = diaries.filter { runCatching { LocalDate.parse(it.entryDate) }.getOrNull() == today }
 
@@ -128,7 +136,9 @@ object DailyCoachPrompt {
             stepLine = "걸음 ${progress.doneCount}/${progress.stepCount}",
             streakDays = progress.streakDays,
             moodLabel = dayDigest.score.mood?.label.orEmpty(),
-            ownedQuoteLines = ownedQuoteLines
+            ownedQuoteLines = ownedQuoteLines,
+            // 무엇이 나가는지는 한 곳에서 정합니다. 돌아보기와 같은 함수입니다.
+            directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList()
         )
     }
 
@@ -168,6 +178,10 @@ object DailyCoachPrompt {
                 "권할 하나를 고르는 데만 씁니다."
         )
         appendLine("- 지금 시각을 봅니다. 이른 아침이면 재촉하지 않고, 밤이면 새 일을 벌이게 하지 않습니다.")
+        appendLine(
+            "- [내가 가려는 방향]이 있으면 오늘 한 것을 그 방향과 이어 짚습니다. 방향을 숙제처럼 들이밀거나 " +
+                "아직 멀다고 말하지 않습니다."
+        )
         appendLine("- 한마디는 두 문장을 넘기지 않습니다. 홈 화면에서 스치듯 읽는 글입니다.")
         appendLine("- 존댓말로 담담하게 씁니다. 느낌표와 이모지는 쓰지 않습니다.")
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
@@ -199,6 +213,8 @@ object DailyCoachPrompt {
         if (digest.streakDays > 0) append(" · ${digest.streakDays}일째 이어 오는 중")
         appendLine()
         appendLine()
+        // 방향을 먼저 놓습니다. 무엇을 향해 가는지 알고 나서 오늘 한 것을 읽어야 이어 짚을 수 있습니다.
+        section("내가 가려는 방향", digest.directionLines)
         section("오늘 한 것", digest.doneLines)
         section("아직 안 밟은 루틴", digest.restRoutines)
         section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)

@@ -12,6 +12,8 @@ enum class SearchKind(val label: String) {
     ROUTINE("루틴"),
     NOT_TO_DO("하지 않을 일"),
     PRINCIPLE("원칙"),
+    /** 이상향·목표·롤모델. 고르면 그 기록의 화면으로 갑니다. */
+    GOAL("목표"),
     GROWTH("돌아보기")
 }
 
@@ -80,6 +82,7 @@ object AppSearch {
                     ContentType.INBOX -> SearchKind.INBOX
                     ContentType.NOT_TO_DO -> SearchKind.NOT_TO_DO
                     ContentType.PRINCIPLE -> SearchKind.PRINCIPLE
+                    ContentType.VISION, ContentType.GOAL, ContentType.ROLE_MODEL -> SearchKind.GOAL
                     else -> SearchKind.QUOTE
                 }
             }

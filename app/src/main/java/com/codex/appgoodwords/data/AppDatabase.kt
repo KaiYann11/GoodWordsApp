@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MoodLogEntity::class,
         BookReadingLogEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -42,6 +42,20 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookReadingLogDao(): BookReadingLogDao
 
     companion object {
+        /**
+         * 이상향·목표·롤모델에 이어 둔 루틴을 담을 자리를 만듭니다. 세 종류 자체는 표를 건드리지 않습니다.
+         *
+         * 빈 목록(`[]`)을 기본값으로 둡니다. 글귀처럼 루틴을 잇지 않는 기록이 대부분이고, NULL을 허용하면
+         * 읽는 쪽마다 "없음"과 "빈 목록"을 따로 다뤄야 합니다(첨부 칸 `imageUris`와 같은 방식).
+         */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE content_items ADD COLUMN linkedRoutineSyncIds TEXT NOT NULL DEFAULT '[]'"
+                )
+            }
+        }
+
         /**
          * 책에 독후감 자리를 만듭니다. 원칙 종류는 표를 건드리지 않습니다.
          *

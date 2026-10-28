@@ -29,6 +29,12 @@ data class GrowthDigest(
     /** 일기를 쓰지 않은 날의 기분까지. 없으면 빈 목록입니다. */
     val moodLines: List<String> = emptyList(),
     /**
+     * 내가 가려는 방향 — 이상향·목표·롤모델([GrowthPrompt.directionLines]). 켜지 않았으면 빈 목록입니다.
+     *
+     * **[isEmpty]에는 세지 않습니다.** 방향만 있고 이 기간에 한 일이 없으면 돌아볼 것이 없습니다.
+     */
+    val directionLines: List<String> = emptyList(),
+    /**
      * 지난번에 권해 받은 것.
      *
      * 없으면 빈 목록입니다. **[isEmpty]에는 세지 않습니다.** 이것만 있고 이 기간에 한 일이
@@ -83,6 +89,14 @@ object GrowthPrompt {
     /** 일기 본문을 실을 때의 한 편당 글자 수. */
     private const val DIARY_BODY_LIMIT = 400
 
+    /** 방향은 몇 개만 있어도 충분합니다. 많이 실으면 어느 것을 향해 말할지 흐려집니다. */
+    private const val MAX_DIRECTION_LINES = 12
+
+    /** 이상향·목표·롤모델에 적어 둔 설명의 글자 수. 제목이 주인이고 설명은 뜻을 더하는 정도입니다. */
+    private const val DIRECTION_BODY_LIMIT = 120
+
+    private val WHITESPACE = Regex("\\s+")
+
     /**
      * 이보다 오래된 돌아보기는 "지난번"이라 부르지 않습니다.
      *
@@ -105,6 +119,8 @@ object GrowthPrompt {
         includeDiaryBody: Boolean,
         /** 바로 앞에 받은 돌아보기. 없으면 null. */
         previousReport: GrowthReportEntity? = null,
+        /** 이상향·목표·롤모델을 실을지([AiFeedbackSettings.includeGoals], 기본 꺼짐). */
+        includeGoals: Boolean = false,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): GrowthDigest {
         val from = today.minusDays((period.days - 1).toLong())
@@ -188,6 +204,7 @@ object GrowthPrompt {
             bookLines = bookLines,
             ownedQuoteLines = ownedQuoteLines,
             moodLines = moodLines,
+            directionLines = if (includeGoals) directionLines(items, routines) else emptyList(),
             previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
             previousAdviceOn = previousOn,
             previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) }
@@ -236,6 +253,33 @@ object GrowthPrompt {
         }
     }
 
+    /**
+     * 내가 가려는 방향 — 이상향·목표·롤모델 한 줄씩. **설정에서 켜야만 실립니다**([AiFeedbackSettings.includeGoals]).
+     *
+     * 오늘의 한마디([DailyCoachPrompt])도 이 함수를 씁니다. 무엇이 나가는지를 정하는 자리는 하나여야 합니다
+     * ([diaryLine]과 같은 이유). 제목과 적어 둔 설명, 이어 둔 루틴의 이름까지만 나갑니다. **되새긴 기록(덧메모)은
+     * 싣지 않습니다** — 그때그때 적은 속마음이라 일기만큼 사적입니다.
+     */
+    fun directionLines(items: List<ContentItemEntity>, routines: List<RoutineEntity>): List<String> {
+        val routineTitles = routines.associate { it.syncId to it.title.trim() }
+        return ContentType.goalTypes.flatMap { type ->
+            val label = when (type) {
+                ContentType.VISION -> "되고 싶은 나"
+                ContentType.ROLE_MODEL -> "롤모델"
+                else -> "목표"
+            }
+            items.filter { it.type == type && it.title.isNotBlank() }.sortedBy { it.createdAt }.map { item ->
+                val body = item.body.trim().replace(WHITESPACE, " ").take(DIRECTION_BODY_LIMIT)
+                val linked = item.linkedRoutineSyncIds.mapNotNull(routineTitles::get).filter { it.isNotBlank() }
+                buildString {
+                    append("$label: ${item.title.trim()}")
+                    if (body.isNotBlank()) append(" — $body")
+                    if (linked.isNotEmpty()) append(" (이어 둔 루틴: ${linked.joinToString(", ")})")
+                }
+            }
+        }.take(MAX_DIRECTION_LINES)
+    }
+
     /** 모델에게 어떤 사람으로 답하라고 일러 주는 말. */
     fun systemPrompt(): String = buildString {
         appendLine("당신은 사용자의 습관 기록을 함께 돌아보는 한국어 코치입니다.")
@@ -248,6 +292,10 @@ object GrowthPrompt {
                 "못했으면 다그치는 대신 더 작게 쪼개어 다시 권합니다."
         )
         appendLine("- 지난번과 똑같은 말을 그대로 되풀이하지 않습니다.")
+        appendLine(
+            "- [내가 가려는 방향]이 있으면 기록을 그 방향과 이어 봅니다. 가까워진 것을 먼저 짚고, 다음 걸음도 " +
+                "그쪽으로 권합니다. 방향을 숙제처럼 들이밀거나 멀다고 나무라지 않습니다."
+        )
         appendLine("- 존댓말로, 한 문장은 짧게 씁니다.")
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
         appendLine("""{"strengths":["..."],"improvements":["..."],"suggestedQuote":{"text":"...","author":"..."},"suggestedRoutines":["..."],"guide":"..."}""")
@@ -266,6 +314,8 @@ object GrowthPrompt {
     fun userPrompt(digest: GrowthDigest): String = buildString {
         appendLine("기간: ${digest.from} ~ ${digest.to} (${digest.period.label})")
         appendLine()
+        // 방향을 맨 앞에 둡니다. 무엇을 향해 가는지 알고 나서 기록을 읽어야 이어 볼 수 있습니다.
+        section("내가 가려는 방향", digest.directionLines)
         // 지난 조언을 먼저 놓습니다. 기록보다 앞에 있어야 "그 뒤로 어땠는지"를 보며 읽습니다.
         if (digest.previousAdviceLines.isNotEmpty()) {
             // 손으로 부른 것은 단위가 없습니다. "직접 부름 돌아보기"는 말이 되지 않습니다.

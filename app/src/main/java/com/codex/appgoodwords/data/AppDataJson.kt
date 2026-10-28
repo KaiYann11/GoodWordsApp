@@ -52,7 +52,7 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 22
+    const val schemaVersion: Int = 23
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -496,6 +496,7 @@ object AppDataJson {
         .put("videoUris", JSONArray(videoUris))
         .put("bookSyncId", bookSyncId)
         .put("bookPage", bookPage)
+        .put("linkedRoutineSyncIds", JSONArray(linkedRoutineSyncIds))
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
         .put("lastShownAt", lastShownAt ?: JSONObject.NULL)
@@ -604,6 +605,9 @@ object AppDataJson {
                         videoUris = item.optJSONArray("videoUris").toStringList(),
                         bookSyncId = item.optString("bookSyncId").trim(),
                         bookPage = item.optInt("bookPage", 0).coerceAtLeast(0),
+                        // 22까지의 파일에는 없는 칸입니다. 없으면 이어 둔 루틴이 없는 것입니다.
+                        linkedRoutineSyncIds = item.optJSONArray("linkedRoutineSyncIds").toStringList()
+                            .map(String::trim).filter(String::isNotBlank).distinct(),
                         createdAt = item.optLong("createdAt", System.currentTimeMillis()),
                         lastShownAt = item.optNullableLong("lastShownAt"),
                         showCount = item.optInt("showCount", 0),

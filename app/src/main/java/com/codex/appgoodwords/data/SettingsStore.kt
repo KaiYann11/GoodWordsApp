@@ -58,6 +58,7 @@ class SettingsStore(
         val aiHour = intPreferencesKey("ai_hour")
         val aiMinute = intPreferencesKey("ai_minute")
         val aiIncludeDiaryBody = booleanPreferencesKey("ai_include_diary_body")
+        val aiIncludeGoals = booleanPreferencesKey("ai_include_goals")
         val aiLastRunAt = longPreferencesKey("ai_last_run_at")
         val aiLastError = stringPreferencesKey("ai_last_error")
         val aiNudgeEnabled = booleanPreferencesKey("ai_nudge_enabled")
@@ -146,6 +147,7 @@ class SettingsStore(
             hour = preferences[Keys.aiHour] ?: AiFeedbackSettings.DEFAULT_HOUR,
             minute = preferences[Keys.aiMinute] ?: 0,
             includeDiaryBody = preferences[Keys.aiIncludeDiaryBody] ?: false,
+            includeGoals = preferences[Keys.aiIncludeGoals] ?: false,
             lastRunAt = preferences[Keys.aiLastRunAt] ?: 0L,
             lastError = preferences[Keys.aiLastError].orEmpty(),
             // 알림은 기본으로 켭니다. 오래 뜸해졌다는 것은 알려 주는 편이 낫고, 값도 들지 않습니다.
@@ -239,6 +241,7 @@ class SettingsStore(
             preferences[Keys.aiHour] = settings.hour.coerceIn(0, 23)
             preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
             preferences[Keys.aiIncludeDiaryBody] = settings.includeDiaryBody
+            preferences[Keys.aiIncludeGoals] = settings.includeGoals
             preferences[Keys.aiNudgeEnabled] = settings.nudgeEnabled
             preferences[Keys.aiCoachEnabled] = settings.coachEnabled
             preferences[Keys.aiCoachAskLimit] = settings.askLimit

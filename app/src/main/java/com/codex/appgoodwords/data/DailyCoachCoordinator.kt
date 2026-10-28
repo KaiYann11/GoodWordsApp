@@ -43,8 +43,8 @@ class DailyCoachCoordinator(
         today: LocalDate = LocalDate.now(),
         at: LocalTime = LocalTime.now()
     ): String {
-        val includeDiaryBody = settingsStore.getAiFeedbackSettings().includeDiaryBody
-        return DailyCoachPrompt.chatPrompt(buildDigest(today, at, includeDiaryBody))
+        val aiSettings = settingsStore.getAiFeedbackSettings()
+        return DailyCoachPrompt.chatPrompt(buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals))
     }
 
     /** 받아 둔 것을 오늘 것으로만 추려 돌려줍니다. 날이 바뀌었으면 빈 상태입니다. */
@@ -96,7 +96,7 @@ class DailyCoachCoordinator(
         // 꺼 두었으면 아무것도 하지 않습니다. 켜는 것은 사용자가 정합니다.
         if (!aiSettings.coachEnabled) return stored
 
-        val digest = buildDigest(today, at, aiSettings.includeDiaryBody)
+        val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals)
         if (digest.isEmpty) {
             // 눌러서 부른 것이면 왜 아무 일도 없는지 말해 주어야 합니다. 저절로 도는 길에서는
             // 아직 아무것도 안 한 아침마다 사유를 띄울 일이 아니라 조용히 지나갑니다.
@@ -193,6 +193,7 @@ class DailyCoachCoordinator(
         today: LocalDate,
         at: LocalTime,
         includeDiaryBody: Boolean,
+        includeGoals: Boolean,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): DailyCoachDigest {
         val events = database.exposureEventDao().getAll()
@@ -233,7 +234,8 @@ class DailyCoachCoordinator(
             todayChecks = routineChecks.filter { toDate(it.checkedAt, zoneId) == today },
             diaries = diaries,
             items = database.contentItemDao().getAll(),
-            includeDiaryBody = includeDiaryBody
+            includeDiaryBody = includeDiaryBody,
+            includeGoals = includeGoals
         )
     }
 

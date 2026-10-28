@@ -2593,7 +2593,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 22);
+    assert.equal(stored.schemaVersion, 23);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2921,6 +2921,102 @@ describe("원칙", () => {
     const stored = await (await api("/api/snapshot")).json();
     // 내가 정한 기준을 읽음으로 세면 "오늘 읽은 글귀"가 저절로 늘어난다.
     assert.equal(stored.exposureEvents.filter((event) => event.contentItemId === created.id).length, 0);
+  });
+});
+
+describe("목표", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ deletions: [] }) });
+  }
+
+  function goal(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "goal-1",
+      updatedAt: 1000,
+      type: "GOAL",
+      title: "하프 마라톤 완주",
+      body: "",
+      linkedRoutineSyncIds: [],
+      createdAt: 1000,
+      ...overrides,
+    };
+  }
+
+  function routine(syncId, updatedAt) {
+    return {
+      id: 0,
+      syncId,
+      updatedAt,
+      title: "아침 달리기",
+      note: "",
+      category: "",
+      orderIndex: 0,
+      sourceContentSyncId: "",
+      reminderEnabled: true,
+      createdAt: updatedAt,
+    };
+  }
+
+  it("이상향·목표·롤모델을 제 종류로 두고, 이어 둔 루틴을 병합해도 지킨다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [
+            goal({ linkedRoutineSyncIds: ["routine-a", "routine-a", "routine-b"] }),
+            goal({ id: 2, syncId: "vision-1", type: "VISION", title: "아침을 지배하는 사람" }),
+            goal({ id: 3, syncId: "model-1", type: "ROLE_MODEL", title: "James Clear" }),
+          ],
+        }),
+      })
+    ).json();
+    const bySyncId = Object.fromEntries(merged.items.map((item) => [item.syncId, item]));
+
+    // 서버가 모르는 종류로 보면 글귀로 바꿔 버려, 목표 탭에서 사라지고 알림에 "오늘의 글귀"로 뜬다.
+    assert.equal(bySyncId["goal-1"].type, "GOAL");
+    assert.equal(bySyncId["vision-1"].type, "VISION");
+    assert.equal(bySyncId["model-1"].type, "ROLE_MODEL");
+    assert.deepEqual(bySyncId["goal-1"].linkedRoutineSyncIds, ["routine-a", "routine-b"]);
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.deepEqual(stored.items.find((item) => item.syncId === "goal-1").linkedRoutineSyncIds, ["routine-a", "routine-b"]);
+  });
+
+  it("같은 루틴 둘이 하나로 합쳐지면 목표가 남은 루틴을 가리킨다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [goal({ linkedRoutineSyncIds: ["r-old", "r-new"] })],
+          routines: [routine("r-new", 2000), routine("r-old", 1000)],
+        }),
+      })
+    ).json();
+
+    // 앱 SyncDeduplicator와 같은 규칙이어야 두 기기가 서로를 고치지 않는다.
+    assert.deepEqual(merged.items.find((item) => item.syncId === "goal-1").linkedRoutineSyncIds, ["r-new"]);
+  });
+
+  it("웹에서는 제목만 있으면 적히고, 고쳐도 이어 둔 루틴은 남는다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [goal({ linkedRoutineSyncIds: ["r-1"] })] }) });
+    const stored = await (await api("/api/snapshot")).json();
+    const existing = stored.items.find((item) => item.syncId === "goal-1");
+
+    const edited = await (
+      await api(`/api/content/${existing.id}`, { method: "PUT", body: { type: "GOAL", title: "풀 마라톤", body: "" } })
+    ).json();
+    assert.equal(edited.title, "풀 마라톤");
+    // 편집 칸에 없는 것을 비우면, 웹에서 제목만 고쳐도 기기에서 이어 둔 루틴이 사라진다.
+    assert.deepEqual(edited.linkedRoutineSyncIds, ["r-1"]);
+
+    const created = await api("/api/content", { method: "POST", body: { type: "VISION", title: "끝까지 듣는 사람" } });
+    assert.equal(created.status, 201);
+    const empty = await api("/api/content", { method: "POST", body: { type: "ROLE_MODEL", title: "  " } });
+    assert.equal(empty.status, 400);
   });
 });
 

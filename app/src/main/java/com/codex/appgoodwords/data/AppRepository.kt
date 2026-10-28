@@ -77,12 +77,57 @@ class AppRepository(
                 tags = draft.tags.map(String::trim).filter(String::isNotBlank),
                 imageUris = draft.imageUris.distinct(),
                 videoUris = draft.videoUris.distinct(),
+                // 편집 칸에 없는 것은 있던 그대로 둡니다. 예전에는 고칠 때마다 책에서 뽑은 글귀의 책·쪽이 지워졌습니다.
+                bookSyncId = existing?.bookSyncId.orEmpty(),
+                bookPage = existing?.bookPage ?: 0,
+                linkedRoutineSyncIds = existing?.linkedRoutineSyncIds.orEmpty(),
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 lastShownAt = existing?.lastShownAt,
                 lastSurfacedAt = existing?.lastSurfacedAt,
                 showCount = existing?.showCount ?: 0,
                 isFavorite = draft.isFavorite
             )
+        )
+    }
+
+    /**
+     * 이상향·목표·롤모델을 적거나 고칩니다.
+     *
+     * 고칠 때는 제목과 글만 바꿉니다. 되새긴 기록(덧메모)·이어 둔 루틴·홈에 두기는 그대로입니다 — 편집 칸에 없는
+     * 것을 비우면 쌓아 온 것이 사라집니다.
+     *
+     * @return 저장한 기록의 id.
+     */
+    suspend fun saveGoal(id: Long, type: ContentType, title: String, body: String): Long {
+        require(type.isGoal) { "목표 탭의 종류가 아닙니다." }
+        val trimmed = title.trim()
+        require(trimmed.isNotBlank()) {
+            when (type) {
+                ContentType.VISION -> "되고 싶은 모습을 한 줄로 적어 주세요."
+                ContentType.ROLE_MODEL -> "닮고 싶은 사람의 이름을 적어 주세요."
+                else -> "목표를 적어 주세요."
+            }
+        }
+        val now = System.currentTimeMillis()
+        val existing = if (id != 0L) contentItemDao.getById(id) else null
+        if (existing != null) {
+            check(existing.type.isGoal) { "목표 탭의 기록이 아닙니다." }
+            contentItemDao.insert(existing.copy(title = trimmed, body = body.trim(), updatedAt = maxOf(now, existing.updatedAt + 1)))
+            return existing.id
+        }
+        return contentItemDao.insert(
+            ContentItemEntity(type = type, title = trimmed, body = body.trim(), createdAt = now, updatedAt = now)
+        )
+    }
+
+    /** 이 이상향·목표·롤모델을 위해 하는 루틴을 바꿉니다. 루틴의 syncId로 가리킵니다. */
+    suspend fun setGoalRoutines(id: Long, routineSyncIds: List<String>) {
+        val existing = contentItemDao.getById(id) ?: error("목표를 찾을 수 없습니다.")
+        check(existing.type.isGoal) { "목표 탭의 기록이 아닙니다." }
+        val linked = routineSyncIds.map(String::trim).filter(String::isNotBlank).distinct()
+        if (linked == existing.linkedRoutineSyncIds) return
+        contentItemDao.insert(
+            existing.copy(linkedRoutineSyncIds = linked, updatedAt = maxOf(System.currentTimeMillis(), existing.updatedAt + 1))
         )
     }
 
