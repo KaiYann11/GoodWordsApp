@@ -179,6 +179,36 @@ class ContentRotationTest {
         assertEquals("반복 노출에서 빠지는 항목이 없어야 합니다.", ids, seen)
     }
 
+    @Test
+    fun nextNeverRepeatsTheQuoteOnScreenWhenThereAreOthers() = runBlocking {
+        // 글귀가 후보 수보다 적으면 방금 본 것도 후보에 듭니다. "다음 글귀"를 눌렀는데 같은 것이 나오면 안 됩니다.
+        val shown = insertItem("지금 보는 것")
+        val others = setOf(insertItem("다른 것 1"), insertItem("다른 것 2"))
+
+        repeat(30) {
+            val item = repository.pickFeaturedContent(
+                category = "",
+                trigger = ExposureTrigger.MANUAL_REFRESH,
+                excludedId = shown
+            )
+            assertTrue("지금 보는 글귀가 다시 뽑혔습니다.", item!!.id in others)
+        }
+    }
+
+    @Test
+    fun aSingleQuoteIsStillShown() = runBlocking {
+        // 하나뿐이면 그것이라도 보여 줍니다. 빼고 나니 없다고 빈 칸을 두지 않습니다.
+        val only = insertItem("하나뿐")
+
+        val item = repository.pickFeaturedContent(
+            category = "",
+            trigger = ExposureTrigger.MANUAL_REFRESH,
+            excludedId = only
+        )
+
+        assertEquals(only, item?.id)
+    }
+
     private suspend fun pick(poolSize: Int): ContentItemEntity? =
         database.contentItemDao().pickLeastRecentlySurfaced(category = "", poolSize = poolSize)
 

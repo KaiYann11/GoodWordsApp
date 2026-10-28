@@ -217,10 +217,11 @@ fun AppGoodWordsApp(
     val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
     val moodLogs by viewModel.moodLogs.collectAsStateWithLifecycle()
     val captureIdeaRequest by viewModel.captureIdeaRequest.collectAsStateWithLifecycle()
-    // 위젯의 적기로 들어왔거나 홈에서 왼쪽으로 밀었을 때 뜹니다.
+    // 위젯의 적기로 들어왔거나 홈의 "아이디어 담기"를 눌렀을 때 뜹니다.
     var capturingIdea by remember { mutableStateOf(false) }
+    val homeQuote by viewModel.homeQuote.collectAsStateWithLifecycle()
     val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
-    // 홈이 한마디 카드까지 내려 보여 주면 거둡니다.
+    // 홈이 한마디 칸을 열어 보여 주면 거둡니다.
     var coachFocusRequested by remember { mutableStateOf(false) }
 
     /**
@@ -352,7 +353,7 @@ fun AppGoodWordsApp(
         navStack = listOf(tabRoute(tab))
     }
 
-    /** 홈의 한마디 카드로 데려갑니다. 홈만 열면 카드가 화면 아래에 걸쳐 반쯤 가립니다. */
+    /** 홈의 한마디 칸으로 데려갑니다. 홈만 열면 글귀 아래 "오늘" 칸이 보여 한마디는 옆 칸에 숨어 있습니다. */
     fun openDailyCoach() {
         selectTab(AppTab.HOME)
         coachFocusRequested = true
@@ -498,7 +499,7 @@ fun AppGoodWordsApp(
         }
     }
 
-    // 알림을 눌러 왔으면 홈의 한마디 카드로 데려갑니다.
+    // 알림을 눌러 왔으면 홈의 한마디 칸으로 데려갑니다.
     LaunchedEffect(openDailyCoachRequest) {
         if (openDailyCoachRequest) {
             openDailyCoach()
@@ -835,8 +836,15 @@ fun AppGoodWordsApp(
                             notes = feedbackNotes,
                             routines = routines,
                             checks = routineChecks,
+                            // 위젯·알림과 같은 글귀입니다. 읽음은 보관함에서 누르는 것과 같은 기록이라 오늘의 걸음을 채웁니다.
+                            quote = homeQuote,
+                            quoteConfirmedToday = homeQuote?.item?.id?.let { it in confirmedTodayIds } == true,
+                            onConfirmQuote = { item -> toggleConfirmed(item, showMessage = true) },
+                            onNextQuote = { viewModel.nextHomeQuote() },
+                            onOpenQuote = { item -> openItemDetail(AppTab.HOME, item.id) },
+                            onAddQuote = { openFreshAddForm() },
                             dailyLoop = dailyLoop,
-                            // 글귀 읽기는 이제 보관함에 있습니다. 걸음마다 다른 화면으로 데려갑니다.
+                            // 걸음마다 그 화면으로 데려갑니다. 글귀 읽기는 홈 맨 위의 글귀로 올려 주므로 여기까지 오지 않습니다.
                             onOpenStep = { step ->
                                 when (step) {
                                     DailyStep.QUOTE -> selectTab(AppTab.LIBRARY)
@@ -862,6 +870,14 @@ fun AppGoodWordsApp(
                             coachHasRecordToday = coachFingerprint.isNotBlank(),
                             coachLoading = coachLoading,
                             coachNudge = routineNudge,
+                            // 앱을 닫아 두어도 알람이 깨워 받아 오는 경우에만 말합니다. 앱을 열어 둔 동안만 묻게 했으면
+                            // 그 시각에 앱이 닫혀 있을 때 오지 않으니 약속하지 않습니다.
+                            coachNextAt = DailyCoachSchedule.nextAskAt(
+                                gapMinutes = aiFeedbackSettings.gapMinutes,
+                                limit = aiFeedbackSettings.askLimit,
+                                askCount = dailyCoach.askCount,
+                                lastAskedAt = dailyCoach.lastAskedAt
+                            ).takeIf { aiFeedbackSettings.coachRunsInBackground && coachFingerprint.isNotBlank() },
                             onOpenRoutines = { selectTab(AppTab.ROUTINE) },
                             onRefreshCoach = { viewModel.refreshDailyCoach(force = true) },
                             onKeepCoachQuote = {
@@ -901,8 +917,7 @@ fun AppGoodWordsApp(
                             memories = if (diaryLocked) onThisDay.filter { it.kind != SearchKind.DIARY } else onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,
-                            onCaptureIdea = { title -> captureIdea(title) },
-                            onSwipeToCapture = { capturingIdea = true },
+                            onOpenCapture = { capturingIdea = true },
                             onPickMood = { mood -> viewModel.saveTodayMood(mood) },
                             // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
                             onClearMood = todayMoodLog?.let { { viewModel.clearTodayMood() } },
@@ -1604,6 +1619,10 @@ fun AppGoodWordsApp(
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
                             // 켜기 전에 무엇이 나가는지 눈으로 볼 수 있어야 합니다.
                             onPreviewCoachPrompt = { viewModel.previewDailyCoachPrompt() },
+                            canScheduleExactAlarms = canScheduleExactAlarms,
+                            onOpenExactAlarmSettings = {
+                                viewModel.exactAlarmSettingsIntent()?.let(context::startActivity)
+                            },
                             dailySteps = dailySteps,
                             onDailyStepsChanged = { updated -> viewModel.setDailySteps(updated) },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,

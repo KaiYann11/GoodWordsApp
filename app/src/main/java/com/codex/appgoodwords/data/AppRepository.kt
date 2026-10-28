@@ -204,20 +204,30 @@ class AppRepository(
         return pickCandidate(category)
     }
 
+    /**
+     * 다음에 보여 줄 글귀를 골라 노출로 남깁니다.
+     *
+     * @param excludedId 지금 보여 주고 있는 것. 다른 것이 있으면 그것을 고릅니다 — "다음 글귀"를 눌렀는데 같은 것이
+     *   다시 나오지 않게. 그것 하나뿐이면 그것입니다.
+     */
     suspend fun pickFeaturedContent(
         category: String,
-        trigger: ExposureTrigger
+        trigger: ExposureTrigger,
+        excludedId: Long = 0L
     ): ContentItemEntity? {
-        val item = pickCandidate(category) ?: return null
+        val item = pickCandidate(category, excludedId) ?: return null
         recordContentSurfaced(item, trigger)
         return item
     }
 
-    private suspend fun pickCandidate(category: String): ContentItemEntity? {
-        return contentItemDao.pickLeastRecentlySurfaced(
+    private suspend fun pickCandidate(category: String, excludedId: Long = 0L): ContentItemEntity? {
+        val other = contentItemDao.pickLeastRecentlySurfaced(
             category = category,
-            poolSize = SURFACE_POOL_SIZE
+            poolSize = SURFACE_POOL_SIZE,
+            excludedId = excludedId
         )
+        if (other != null || excludedId == 0L) return other
+        return contentItemDao.pickLeastRecentlySurfaced(category = category, poolSize = SURFACE_POOL_SIZE)
     }
 
     suspend fun recordContentSurfaced(

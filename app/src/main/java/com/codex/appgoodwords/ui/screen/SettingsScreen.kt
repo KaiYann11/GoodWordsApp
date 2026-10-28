@@ -110,6 +110,8 @@ internal fun aiCoachGapTag(minutes: Int): String = "ai_coach_gap_$minutes"
 
 /** 앱을 닫아도 받는 스위치와, 하루 몫이 금방 바닥난다는 안내. */
 internal const val aiCoachBackgroundSwitchTag = "ai_coach_background_switch"
+/** 정확한 알람 권한이 없을 때 그 설정 화면으로 데려가는 단추. */
+internal const val aiCoachExactAlarmTag = "ai_coach_exact_alarm"
 internal const val aiCoachShortDayTag = "ai_coach_short_day"
 
 /** 이보다 짧은 동안 하루 몫을 다 쓰면 알려 줍니다(6시간). 그 뒤 하루가 길게 조용합니다. */
@@ -193,6 +195,12 @@ fun SettingsScreen(
      * 실제로 보내는 글과 **같은 함수**로 만듭니다([DailyCoachPrompt.chatPrompt]).
      */
     onPreviewCoachPrompt: (suspend () -> Result<String>)? = null,
+    /**
+     * 정확한 알람을 걸 수 있는지. 없으면 배경 한마디가 정한 때보다 늦게 올 수 있어 한마디 칸에서 알리고
+     * 그 권한 화면으로 데려갑니다([onOpenExactAlarmSettings]). 할 일 알람과 같은 권한입니다.
+     */
+    canScheduleExactAlarms: Boolean = true,
+    onOpenExactAlarmSettings: () -> Unit = {},
     /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
     dailySteps: List<DailyStep> = DailyStep.DEFAULTS,
     onDailyStepsChanged: (List<DailyStep>) -> Unit = {},
@@ -345,8 +353,9 @@ fun SettingsScreen(
                                         color = MaterialTheme.colorScheme.error
                                     )
                                 }
+                                // 홈 맨 위의 글귀를 앱을 열 때마다 새것으로 넘길지. 끄면 위젯·알림이 마지막으로 보여 준 것이 남습니다.
                                 SettingSwitchRow(
-                                    title = "앱 실행 시 오늘의 글귀 표시",
+                                    title = "앱을 열 때마다 새 글귀로",
                                     checked = settings.showOnLaunch,
                                     onCheckedChange = {
                                         onSettingsChanged(settings.copy(showOnLaunch = it))
@@ -550,7 +559,9 @@ fun SettingsScreen(
                         AiFeedbackSection(
                             settings = aiFeedbackSettings,
                             onChanged = onAiFeedbackSettingsChanged,
-                            onPreviewCoachPrompt = onPreviewCoachPrompt
+                            onPreviewCoachPrompt = onPreviewCoachPrompt,
+                            canScheduleExactAlarms = canScheduleExactAlarms,
+                            onOpenExactAlarmSettings = onOpenExactAlarmSettings
                         )
                     }
                 }
@@ -1172,7 +1183,9 @@ private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {
 private fun AiFeedbackSection(
     settings: AiFeedbackSettings,
     onChanged: (AiFeedbackSettings) -> Unit,
-    onPreviewCoachPrompt: (suspend () -> Result<String>)? = null
+    onPreviewCoachPrompt: (suspend () -> Result<String>)? = null,
+    canScheduleExactAlarms: Boolean = true,
+    onOpenExactAlarmSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val provider = settings.activeProvider
@@ -1399,14 +1412,29 @@ private fun AiFeedbackSection(
                     )
                     Text(
                         text = if (settings.coachBackground) {
-                            "앱을 닫아 두어도 주기마다 받아 알림으로 띄웁니다. 앱을 보고 있을 때는 알림 대신 " +
-                                "홈 카드와 홈 탭의 점이 알립니다. 안드로이드가 배터리 상태에 따라 조금 늦출 수 있습니다."
+                            "앱을 닫아 두어도 정한 주기가 되면 알람처럼 깨워 받아 알림으로 띄웁니다. " +
+                                "앱을 보고 있을 때는 알림 대신 홈의 한마디 칸에 점이 뜹니다."
                         } else {
                             "앱을 열어 둔 동안에만 묻습니다."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // 권한이 없어도 알람은 걸립니다(잠자기 중에도 울리되 몇 분 밀릴 수 있는 것으로). 막지 않고 알리기만 합니다.
+                    if (settings.coachBackground && !canScheduleExactAlarms) {
+                        Text(
+                            text = "정확한 알람 권한이 꺼져 있어 정한 때보다 몇 분 늦게 올 수 있습니다. " +
+                                "할 일 알람과 같은 권한입니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        TextButton(
+                            onClick = onOpenExactAlarmSettings,
+                            modifier = Modifier.testTag(aiCoachExactAlarmTag)
+                        ) {
+                            Text("알람 권한 켜기")
+                        }
+                    }
                 }
 
                 // 무거운 쪽(AI)과 따로 켭니다. 이쪽은 값이 들지 않습니다.

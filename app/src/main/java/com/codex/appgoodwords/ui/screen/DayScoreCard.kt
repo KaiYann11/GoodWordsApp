@@ -54,14 +54,17 @@ fun DayScoreCard(
     onOpenDay: (LocalDate) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 홈 돌아보기 칸의 다른 카드와 같은 모서리·여백입니다. 카드마다 글이 시작하는 자리가 다르면 어수선해 보입니다.
     Card(
         modifier = modifier
             .fillMaxWidth()
             .testTag(dayScoreCardTag),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(

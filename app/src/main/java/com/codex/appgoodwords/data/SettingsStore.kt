@@ -325,8 +325,17 @@ class SettingsStore(
         }
     }
 
-    /** 위젯이 지금 보여주는 항목. 0이면 아직 고른 항목이 없다는 뜻이다. */
-    suspend fun getWidgetContentId(): Long = context.dataStore.data.first()[Keys.widgetContentId] ?: 0L
+    /**
+     * 지금의 글귀 — 위젯이 보여 주는 항목. 0이면 아직 고른 항목이 없다는 뜻이다.
+     *
+     * 홈 맨 위의 글귀도 이것을 봅니다. 알림이 오면 위젯이 그 글귀로 바뀌고([com.codex.appgoodwords.work.QuoteReminderWorker]),
+     * 홈·위젯 어느 쪽에서 "다음 글귀"를 눌러도 같은 자리가 바뀌어 셋이 늘 같은 글귀를 말합니다.
+     */
+    val widgetContentIdFlow: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[Keys.widgetContentId] ?: 0L
+    }
+
+    suspend fun getWidgetContentId(): Long = widgetContentIdFlow.first()
 
     suspend fun setWidgetContentId(itemId: Long) {
         context.dataStore.edit { preferences ->

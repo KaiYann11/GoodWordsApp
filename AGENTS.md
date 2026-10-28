@@ -177,6 +177,7 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
 | AI 추천 글귀가 담기는 갈래 | `AI_CATEGORY` |
 | 일기가 AI에 어디까지 나가는지 | `GrowthPrompt.diaryLine` (돌아보기·한마디 공용) |
 | 루틴 차례 | `RoutineOrder` |
+| 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기는 `QuoteWidget.pickNextItem` |
 | 색·글자·모서리·움직임·진동 | `ui/theme`의 `Color`·`Type`·`Theme`·`Motion`, `ui/screen/Feedback.kt` |
 
 ## 함께 고쳐야 하는 것
@@ -247,7 +248,9 @@ adb -s <기기> exec-out run-as com.codex.appgoodwords cat databases/app-good-wo
   **알리기만 하는 것(`GrowthNudgeWorker`)은 아무것도 만들지 않고**, **가벼운 쪽은 AI를 부르지
   않습니다**(`RoutineNudgeCalculator`). 오늘의 한마디는 사용자가 정해(2026-10-19) **주기마다 기록이
   그대로여도 묻고, 앱을 닫아 두어도 배경에서 돕니다**(`DailyCoachWorker`) — 대신 주기(10분~하루)·
-  하루 횟수·배경 스위치가 설정에 보이고, 오늘 한 것이 없으면 묻지 않습니다. 묻는 규칙은
+  하루 횟수·배경 스위치가 설정에 보이고, 오늘 한 것이 없으면 묻지 않습니다. **배경은 알람이 깨웁니다**
+  (`DailyCoachAlarm` → 곧바로 도는 일꾼, 사용자가 정함 2026-10-28). WorkManager에 "주기 뒤"로 미뤄 걸면
+  휴대폰을 내려놓은 동안 안드로이드가 몇 시간씩 늦춰 앱을 열 때만 왔습니다 — 미룬 일꾼으로 되돌리지 마세요. 묻는 규칙은
   `DailyCoachState.needsAsk` 한 곳이고 홈과 배경 일꾼이 같이 쓰며, 한 번에 하나만 묻습니다
   (`DailyCoachCoordinator`의 잠금). **홈의 물음은 앱이 화면에 있을 때만** 나갑니다 — Android 15는
   화면 밖으로 나간 앱의 통신을 끊습니다. 묻던 중에 앱을 나가면 답은 알림으로 오고, 그 사이 끊긴 것은

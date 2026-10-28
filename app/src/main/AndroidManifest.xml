@@ -9,9 +9,13 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 할 일 알람은 사용자가 정한 시각에 울려야 해서 정확한 알람이 필요합니다.
-         Android 12+에서는 사용자가 시스템 설정에서 한 번 켜 줘야 하고, 앱이 그 화면으로 안내합니다. -->
+    <!-- 할 일 알람은 사용자가 정한 시각에 울려야 해서 정확한 알람이 필요합니다. 오늘의 한마디도 정한 주기에
+         같은 권한으로 깨웁니다. Android 12+에서는 사용자가 시스템 설정에서 한 번 켜 줘야 하고, 앱이 그 화면으로 안내합니다. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Android 13+에서는 위 권한이 처음부터 꺼져 있어, 켜러 가지 않으면 한마디·할 일 알람이 몇 분씩 밀렸습니다.
+         알람 앱처럼 설치만으로 허용되는 이쪽을 함께 둡니다. Play 스토어는 알람·달력 앱에만 이것을 허락하지만,
+         이 앱은 서버에서 직접 받아 깔므로 그 심사를 거치지 않습니다. 스토어에 올리게 되면 다시 봐야 합니다. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 재부팅하면 AlarmManager 예약이 모두 사라지므로 다시 걸어야 합니다. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -48,6 +52,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 오늘의 한마디 알람. 재부팅·업데이트로 사라진 알람과, 정확한 알람 권한을 켰을 때 다시 겁니다. -->
+        <receiver
+            android:name=".work.DailyCoachAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 

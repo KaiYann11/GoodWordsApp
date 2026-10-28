@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.codex.appgoodwords.AppGoodWordsApplication
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * 앱을 닫아 두어도 주기마다 오늘의 한마디를 받아 알립니다.
@@ -16,10 +18,11 @@ import com.codex.appgoodwords.AppGoodWordsApplication
  *
  * **보고 있는 화면 위에 알림을 겹쳐 띄우지 않습니다.** 앱이 앞에 떠 있으면 카드와 홈 탭의 점이 알립니다.
  *
- * 홈에서 묻던 중에 앱을 나가 끊긴 것도 넘겨받아 이어 묻습니다([ReminderScheduler.handOverDailyCoach]).
+ * **알람이 깨웁니다**([DailyCoachAlarm]). 예전에는 WorkManager에 "주기 뒤"로 미뤄 걸었는데, 휴대폰을 내려놓으면
+ * 안드로이드가 몇 시간씩 늦춰서 앱을 열어야만 한마디가 왔습니다. 홈에서 묻던 중에 앱을 나가 끊긴 것도 넘겨받아
+ * 이어 묻습니다([ReminderScheduler.handOverDailyCoach]).
  *
- * 한 번 돌고 나면 다음 차례를 겁니다. 주기 작업은 안드로이드가 15분보다 촘촘히 돌리지 않아 10분 주기를
- * 지킬 수 없습니다.
+ * 한 번 돌고 나면 다음 알람을 겁니다 — 마지막으로 물은 때부터 한 주기 뒤.
  */
 class DailyCoachWorker(
     appContext: Context,
@@ -32,7 +35,8 @@ class DailyCoachWorker(
         if (!aiSettings.coachRunsInBackground) return Result.success()
 
         val startedAt = System.currentTimeMillis()
-        val tip = container.dailyCoachCoordinator.refresh(now = startedAt).tip
+        val state = container.dailyCoachCoordinator.refresh(now = startedAt)
+        val tip = state.tip
         // 이번에 받은 것만 알립니다. 홈이 묻는 동안 기다렸다 들여다본 것이면 그 한마디는 홈이 받은 것입니다.
         if (tip != null && tip.createdAt >= startedAt && !app.mainScreenVisible) {
             val reminderSettings = container.settingsStore.getSettings()
@@ -44,17 +48,10 @@ class DailyCoachWorker(
             )
         }
 
-        // 물었든 아니든(오늘 한 것이 없거나 하루 횟수를 다 썼어도) 한 주기 뒤에 다시 봅니다.
-        // 홈에서 끊긴 것을 넘겨받은 한 번이면 잇지 않습니다 — 주기 예약은 따로 돌고 있습니다.
-        if (!inputData.getBoolean(KEY_HAND_OVER, false)) {
-            container.reminderScheduler.scheduleNextDailyCoach(aiSettings)
-        }
+        // 물었든 아니든(오늘 한 것이 없거나 하루 횟수를 다 썼어도) 다음 차례를 겁니다. 알람은 하나뿐이라
+        // 홈에서 끊긴 것을 넘겨받은 한 번이 걸어도 겹치지 않고 덮어씁니다.
+        container.reminderScheduler.scheduleNextDailyCoach(aiSettings, state)
         return Result.success()
-    }
-
-    companion object {
-        /** 홈에서 묻다 끊긴 것을 넘겨받은 한 번인지([ReminderScheduler.handOverDailyCoach]). */
-        const val KEY_HAND_OVER = "hand_over"
     }
 }
 
@@ -78,4 +75,37 @@ object DailyCoachSchedule {
         if (lastAskedAt <= 0L) return MIN_DELAY_MILLIS
         return (lastAskedAt + gap - now).coerceIn(MIN_DELAY_MILLIS, gap.coerceAtLeast(MIN_DELAY_MILLIS))
     }
+
+    /**
+     * 일꾼이 한 번 돈 뒤 다음에 깨울 때까지.
+     *
+     * 마지막으로 물은 때부터 한 주기 뒤입니다. 물을 때가 지났는데도 묻지 않았으면 — 오늘 한 것이 아직 없으면 —
+     * 지금부터 한 주기 뒤에 다시 봅니다. [delayMillis]처럼 곧 깨우면 같은 것을 보고 그냥 돌아가기를 1분마다 되풀이합니다.
+     */
+    fun nextDelayMillis(gapMinutes: Long, lastAskedAt: Long, now: Long): Long {
+        val gap = gapMinutes * 60_000L
+        val due = lastAskedAt + gap - now
+        return if (lastAskedAt > 0L && due > 0L) due.coerceIn(MIN_DELAY_MILLIS, gap) else gap
+    }
+
+    /**
+     * 하루 몫을 다 썼을 때 새 하루가 열릴 때까지.
+     *
+     * 자정이 지나면 횟수가 비지만 그때는 오늘 한 것도 비어 있어 묻지 않습니다. 그래도 그 뒤로는 주기마다 다시
+     * 들여다봐야 첫 걸음을 밟은 뒤에 한마디가 옵니다.
+     */
+    fun untilTomorrowMillis(now: Long, zoneId: ZoneId): Long {
+        val tomorrow = Instant.ofEpochMilli(now).atZone(zoneId).toLocalDate().plusDays(1)
+        val midnight = tomorrow.atStartOfDay(zoneId).toInstant().toEpochMilli()
+        return (midnight - now).coerceAtLeast(MIN_DELAY_MILLIS)
+    }
+
+    /**
+     * 다음 한마디가 저절로 올 때. 홈 카드가 "다음 한마디 15:20쯤"으로 보여 줍니다.
+     *
+     * 오늘 아직 묻지 않았거나(무엇을 해야 오는지는 카드가 따로 말합니다) 하루 몫을 다 썼으면 null입니다.
+     * 남은 횟수는 세어 보이지 않습니다 — 다음 하나만 말합니다.
+     */
+    fun nextAskAt(gapMinutes: Long, limit: Int, askCount: Int, lastAskedAt: Long): Long? =
+        if (limit <= 0 || askCount >= limit || lastAskedAt <= 0L) null else lastAskedAt + gapMinutes * 60_000L
 }
