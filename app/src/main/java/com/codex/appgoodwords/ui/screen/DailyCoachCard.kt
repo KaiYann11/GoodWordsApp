@@ -71,6 +71,9 @@ internal const val dailyCoachNudgeOpenTag = "home_daily_coach_nudge_open"
 /** 아직 보지 않은 한마디라는 표시. */
 internal const val dailyCoachNewBadgeTag = "home_daily_coach_new"
 
+/** "다음 한마디 15:20쯤". */
+internal const val dailyCoachNextTag = "home_daily_coach_next"
+
 /** 새 한마디가 다 써진 뒤 본 것으로 적기까지 보여 두는 시간. 다 읽기 전에 반짝임이 꺼지면 무엇이 새 것이었는지 놓칩니다. */
 private const val SEEN_AFTER_MS = 2_500L
 
@@ -111,6 +114,12 @@ fun DailyCoachCard(
      * 다 썼어도 뜹니다 — 이 카드가 값을 치러야만 쓸모 있는 자리가 되지 않게 합니다.
      */
     nudge: RoutineNudge? = null,
+    /**
+     * 다음 한마디가 저절로 올 때([com.codex.appgoodwords.work.DailyCoachSchedule.nextAskAt]). 모르거나 지났으면 null입니다.
+     *
+     * 정한 주기마다 온다는 것이 카드에 보여야 앱을 닫아 두고도 기다릴 수 있습니다. 남은 횟수는 세지 않고 다음 하나만 말합니다.
+     */
+    nextAskAt: Long? = null,
     onOpenRoutines: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onKeepQuote: () -> Unit = {},
@@ -121,7 +130,7 @@ fun DailyCoachCard(
 ) {
     val tip = state.tip
     val isNew = state.hasNewTip
-    val shape = RoundedCornerShape(20.dp)
+    val shape = MaterialTheme.shapes.large
 
     // 반짝임은 새 것일 때 차오르고 본 뒤에 사그라듭니다. 툭 꺼지면 눈이 뭔가 사라졌다고만 느낍니다.
     val highlight by animateFloatAsState(
@@ -333,14 +342,29 @@ fun DailyCoachCard(
                 )
             }
 
-            if (tip != null) {
-                Text(
-                    text = listOf(formatTime(tip.createdAt), tip.model)
-                        .filter { it.isNotBlank() }
-                        .joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            val upcoming = nextAskAt?.takeIf { it > System.currentTimeMillis() }
+            if (tip != null || upcoming != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = listOf(tip?.let { formatTime(it.createdAt) }.orEmpty(), tip?.model.orEmpty())
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    upcoming?.let { at ->
+                        Text(
+                            text = "다음 한마디 ${formatTime(at)}쯤",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag(dailyCoachNextTag)
+                        )
+                    }
+                }
             }
         }
     }

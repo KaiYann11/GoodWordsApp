@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,12 +37,18 @@ fun StatsCard(
     summary: StatsSummary,
     modifier: Modifier = Modifier
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
+    // 홈의 다른 카드와 같은 모서리·여백·제목 굵기입니다. 홈의 "돌아보기" 칸 안에 놓이므로 제목은 "통계"입니다.
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("돌아보기", style = MaterialTheme.typography.titleMedium)
+            Text("통계", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
             if (!summary.hasActivity) {
                 Text(

@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui
 
 import android.net.Uri
 import android.os.SystemClock
+import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AI_CATEGORY
@@ -54,6 +55,8 @@ import com.codex.appgoodwords.data.SyncStatus
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
 import com.codex.appgoodwords.ui.screen.AppLockState
+import com.codex.appgoodwords.ui.screen.HomeQuote
+import com.codex.appgoodwords.widget.QuoteWidget
 import com.codex.appgoodwords.work.AppNotifications
 import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,6 +66,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -74,6 +78,27 @@ class MainViewModel(
 ) : ViewModel() {
     val allItems = container.repository.observeAllContent()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 홈 맨 위의 글귀 — 위젯·알림과 같은 "지금의 글귀"([com.codex.appgoodwords.data.SettingsStore.widgetContentIdFlow]).
+     *
+     * 앱 이름이 "오늘의 글귀"인데 홈에 글귀가 없어 읽으려면 보관함까지 들어가야 했습니다. 고르는 규칙은 알림·위젯과
+     * 같습니다 — 가장 오래 못 만난 것부터, 알림에 보낼 카테고리 안에서. 아직 읽는 중이면 null입니다
+     * (빈 보관함으로 읽혀 "글귀를 담아 보세요"가 잠깐 비치지 않게 [allItems]가 아니라 DB를 바로 봅니다).
+     */
+    val homeQuote = combine(
+        container.settingsStore.widgetContentIdFlow,
+        container.repository.observeAllContent(),
+        container.settingsStore.settingsFlow.map { it.categoryFilter }.distinctUntilChanged()
+    ) { id, items, category ->
+        val reading = items.filter { it.type.isReadingContent }
+        val inCategory = reading.filter { category.isBlank() || it.category == category }
+        HomeQuote(
+            item = reading.firstOrNull { it.id == id },
+            hasCandidates = inCategory.isNotEmpty(),
+            filteredOut = reading.isNotEmpty() && inCategory.isEmpty()
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val historyEvents = container.repository.observeExposureEvents()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -514,8 +539,8 @@ class MainViewModel(
     /**
      * 오늘의 한마디 알림을 눌러 들어왔는지.
      *
-     * 홈의 한마디 카드까지 데려갑니다. 앱만 열면 보던 탭이 뜨거나, 홈이어도 카드가 화면 아래에 반쯤 가려
-     * 무엇을 보러 왔는지 다시 찾아야 했습니다.
+     * 홈의 한마디 칸까지 데려갑니다. 앱만 열면 보던 탭이 뜨거나, 홈이어도 글귀 아래 "오늘" 칸이 보여
+     * 무엇을 보러 왔는지 다시 찾아야 합니다.
      */
     private val _openDailyCoachRequest = MutableStateFlow(false)
     val openDailyCoachRequest: StateFlow<Boolean> = _openDailyCoachRequest.asStateFlow()
@@ -601,13 +626,18 @@ class MainViewModel(
             } else {
                 AppLockState.OPEN
             }
+        }
 
-            val currentSettings = container.settingsStore.getSettings()
-            if (currentSettings.showOnLaunch) {
-                container.repository.pickFeaturedContent(
-                    category = currentSettings.categoryFilter,
-                    trigger = ExposureTrigger.APP_LAUNCH
-                )
+        // 홈 맨 위의 글귀. 앱을 열 때마다 새 글귀로 넘깁니다(설정에서 끌 수 있습니다 — 끄면 위젯·알림이 마지막으로
+        // 보여 준 것이 그대로 남습니다). 가리키던 글귀를 지웠거나(동기화로 사라진 것도) 아직 고른 것이 없어도 하나 고릅니다.
+        viewModelScope.launch {
+            var opening = true
+            homeQuote.filterNotNull().collect { quote ->
+                val newOnOpen = opening && container.settingsStore.getSettings().showOnLaunch
+                opening = false
+                if (newOnOpen || (quote.item == null && quote.hasCandidates)) {
+                    pickHomeQuote(ExposureTrigger.APP_LAUNCH)
+                }
             }
         }
 
@@ -681,6 +711,13 @@ class MainViewModel(
     fun onAppBackgrounded() {
         leftAtMillis = SystemClock.elapsedRealtime()
         screenLeaves += 1
+        // 화면에 있는 동안 홈이 물었을 수 있습니다. 배경 한마디 알람을 마지막으로 물은 때에 맞춰 다시 겁니다.
+        viewModelScope.launch {
+            container.reminderScheduler.syncDailyCoach(
+                container.settingsStore.getAiFeedbackSettings(),
+                container.dailyCoachCoordinator.state()
+            )
+        }
     }
 
     /**
@@ -721,14 +758,14 @@ class MainViewModel(
         return generateSequence { Random.nextLong() }.first { it != 0L }
     }
 
-    fun refreshFeatured() {
-        viewModelScope.launch {
-            val currentSettings = container.settingsStore.getSettings()
-            container.repository.pickFeaturedContent(
-                category = currentSettings.categoryFilter,
-                trigger = ExposureTrigger.MANUAL_REFRESH
-            )
-        }
+    /** 홈의 "다음 글귀". 위젯과 같은 자리를 바꾸므로 위젯도 함께 넘어갑니다. */
+    fun nextHomeQuote() {
+        viewModelScope.launch { pickHomeQuote(ExposureTrigger.MANUAL_REFRESH) }
+    }
+
+    private suspend fun pickHomeQuote(trigger: ExposureTrigger) {
+        QuoteWidget.pickNextItem(container, trigger) ?: return
+        QuoteWidget().updateAll(container.appContext)
     }
 
     fun recordContentViewed(

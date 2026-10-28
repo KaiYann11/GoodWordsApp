@@ -1,25 +1,29 @@
 package com.codex.appgoodwords.work
 
 import android.content.Context
+import android.os.Build
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.workDataOf
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ServerSyncSettings
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 class ReminderScheduler(
     private val context: Context
 ) {
+    private val dailyCoachAlarm = DailyCoachAlarm(context)
+
     suspend fun sync(settings: ReminderSettings) {
         val workManager = WorkManager.getInstance(context)
 
@@ -161,72 +165,104 @@ class ReminderScheduler(
     }
 
     /**
-     * 오늘의 한마디를 앱을 닫아 두어도 주기마다 받는 예약([DailyCoachWorker]).
+     * 오늘의 한마디를 앱을 닫아 두어도 주기마다 받는 알람([DailyCoachAlarm]).
      *
-     * 앱을 켤 때와 AI 설정을 바꿀 때 다시 겁니다. 이미 걸려 있던 것은 지우고 새로 겁니다 — 주기를 바꿨는데
-     * 옛 주기의 예약이 그대로 남아 있으면 바꾼 값이 다음 한 번을 지나야 먹힙니다.
+     * 앱을 켤 때·나갈 때, AI 설정을 바꿀 때, 기기를 다시 켰을 때 지금 상태에 맞춰 다시 겁니다. 알람은 하나뿐이라
+     * 다시 걸면 앞의 것을 덮어씁니다 — 주기를 바꿨는데 옛 주기의 알람이 남아 있으면 바꾼 값이 다음 한 번을 지나야
+     * 먹힙니다. 하루 몫을 다 썼으면 새 하루가 열릴 때까지 깨우지 않습니다.
      */
     fun syncDailyCoach(
         settings: AiFeedbackSettings,
         state: DailyCoachState,
         now: Long = System.currentTimeMillis()
     ) {
+        // 1.11.1까지는 WorkManager에 미뤄 걸었습니다. 업데이트한 기기에 남아 있으면 알람과 따로 한 번 더 깨웁니다.
+        WorkManager.getInstance(context).cancelUniqueWork(legacyDailyCoachWorkName)
         if (!settings.coachRunsInBackground) {
-            WorkManager.getInstance(context).cancelUniqueWork(dailyCoachWorkName)
+            dailyCoachAlarm.cancel()
             return
         }
-        enqueueDailyCoach(
-            delayMillis = DailyCoachSchedule.delayMillis(settings.gapMinutes, state.lastAskedAt, now),
-            policy = ExistingWorkPolicy.REPLACE
-        )
+        val delay = if (state.askCount >= settings.askLimit) {
+            DailyCoachSchedule.untilTomorrowMillis(now, ZoneId.systemDefault())
+        } else {
+            DailyCoachSchedule.delayMillis(settings.gapMinutes, state.lastAskedAt, now)
+        }
+        dailyCoachAlarm.set(now + delay)
     }
 
     /**
-     * 일꾼이 한 번 돈 뒤 다음 차례를 겁니다.
+     * 일꾼이 한 번 돈 뒤 다음 차례를 겁니다 — 마지막으로 물은 때부터 한 주기 뒤.
      *
-     * **뒤에 잇습니다**(`APPEND_OR_REPLACE`). 돌고 있는 일꾼이 같은 이름으로 바꿔 걸면 자기 자신을 지웁니다.
+     * 물을 때가 지났는데 묻지 않았으면(오늘 한 것이 아직 없으면) 지금부터 한 주기 뒤입니다
+     * ([DailyCoachSchedule.nextDelayMillis]).
      */
-    fun scheduleNextDailyCoach(settings: AiFeedbackSettings) {
+    fun scheduleNextDailyCoach(
+        settings: AiFeedbackSettings,
+        state: DailyCoachState,
+        now: Long = System.currentTimeMillis()
+    ) {
         if (!settings.coachRunsInBackground) return
-        enqueueDailyCoach(
-            delayMillis = settings.gapMinutes * 60_000L,
-            policy = ExistingWorkPolicy.APPEND_OR_REPLACE
-        )
+        val delay = if (state.askCount >= settings.askLimit) {
+            DailyCoachSchedule.untilTomorrowMillis(now, ZoneId.systemDefault())
+        } else {
+            DailyCoachSchedule.nextDelayMillis(settings.gapMinutes, state.lastAskedAt, now)
+        }
+        dailyCoachAlarm.set(now + delay)
+    }
+
+    /**
+     * 알람이 울린 참에 다음 차례를 한 주기 뒤로 먼저 걸어 둡니다([DailyCoachAlarmReceiver]).
+     *
+     * 일꾼이 인터넷을 기다리거나 도중에 멈춰도 알람이 끊기지 않게 하려는 것입니다. 끊기면 앱을 열 때까지 한마디가
+     * 오지 않습니다. 일꾼이 다 물은 뒤 [scheduleNextDailyCoach]로 다시 맞춥니다.
+     */
+    fun armDailyCoachFallback(settings: AiFeedbackSettings, now: Long = System.currentTimeMillis()) {
+        if (!settings.coachRunsInBackground) return
+        dailyCoachAlarm.set(now + settings.gapMinutes * 60_000L)
+    }
+
+    /**
+     * 지금 곧바로 묻는 일꾼을 겁니다. 알람이 울렸을 때 부릅니다.
+     *
+     * **미뤄 두지 않고 곧바로 돌게 합니다**(expedited). 보통 일꾼은 잠자기 중이면 다음 정비 창까지 기다리는데,
+     * 곧바로 도는 일꾼은 잠자기 중에도 돌고 인터넷도 열립니다. 하루에 쓸 수 있는 몫을 넘기면 보통 일꾼으로 돕니다.
+     * Android 12 아래에서는 곧바로 도는 일꾼이 알림을 띄우는 포그라운드 서비스가 되어야 해서 보통 일꾼으로 겁니다.
+     *
+     * 앞의 것이 아직 돌거나 인터넷을 기다리고 있으면 그대로 둡니다 — 한 번에 하나만 묻습니다.
+     */
+    fun runDailyCoachNow() {
+        val request = OneTimeWorkRequestBuilder<DailyCoachWorker>()
+            .setConstraints(connectedConstraints())
+            .apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                }
+            }
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(dailyCoachRunWorkName, ExistingWorkPolicy.KEEP, request)
     }
 
     /**
      * 홈에서 묻다 끊긴 것을 배경 일꾼이 이어 묻게 합니다([com.codex.appgoodwords.data.DailyCoachCoordinator.refresh]).
      *
-     * **주기 예약과 이름을 따로 둡니다.** 같은 이름으로 바꿔 걸면 그때 돌고 있던 일꾼이 지워지고, 뒤에 이으면
-     * 주기 예약이 돈 다음에야 묻습니다. 이미 걸어 둔 것이 있으면 그대로 둡니다 — 끊긴 물음은 하나만 남습니다
-     * ([DailyCoachState.interruptedAsk]). 이 한 번은 다음 차례를 잇지 않습니다.
+     * **알람과 이름을 따로 둡니다.** 같은 이름이면 알람이 건 일꾼이 기다리는 동안 이것이 묻히거나 그 반대가 됩니다.
+     * 이미 걸어 둔 것이 있으면 그대로 둡니다 — 끊긴 물음은 하나만 남습니다([DailyCoachState.interruptedAsk]).
      */
     fun handOverDailyCoach() {
         WorkManager.getInstance(context).enqueueUniqueWork(
             dailyCoachHandOverWorkName,
             ExistingWorkPolicy.KEEP,
-            dailyCoachRequest(delayMillis = DailyCoachSchedule.MIN_DELAY_MILLIS, handOver = true)
+            OneTimeWorkRequestBuilder<DailyCoachWorker>()
+                .setInitialDelay(DailyCoachSchedule.MIN_DELAY_MILLIS, TimeUnit.MILLISECONDS)
+                .setConstraints(connectedConstraints())
+                .build()
         )
     }
 
-    private fun enqueueDailyCoach(delayMillis: Long, policy: ExistingWorkPolicy) {
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            dailyCoachWorkName,
-            policy,
-            dailyCoachRequest(delayMillis = delayMillis, handOver = false)
-        )
-    }
-
-    private fun dailyCoachRequest(delayMillis: Long, handOver: Boolean) =
-        OneTimeWorkRequestBuilder<DailyCoachWorker>()
-            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
-            // 인터넷이 끊긴 채로 깨우면 횟수만 쓰고 실패합니다.
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-            )
-            .setInputData(workDataOf(DailyCoachWorker.KEY_HAND_OVER to handOver))
+    /** 인터넷이 끊긴 채로 깨우면 횟수만 쓰고 실패합니다. */
+    private fun connectedConstraints(): Constraints =
+        Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
     // 계산은 ReminderSchedule에 있습니다. 시각을 인자로 받아야 테스트할 수 있어서입니다.
@@ -244,7 +280,9 @@ class ReminderScheduler(
         const val autoSyncWorkName = "good_words_auto_sync"
         const val growthFeedbackWorkName = "good_words_growth_feedback"
         const val growthNudgeWorkName = "good_words_growth_nudge"
-        const val dailyCoachWorkName = "good_words_daily_coach"
+        /** 1.11.1까지 쓰던 미뤄 둔 예약. 지금은 지우기만 합니다([syncDailyCoach]). */
+        const val legacyDailyCoachWorkName = "good_words_daily_coach"
+        const val dailyCoachRunWorkName = "good_words_daily_coach_run"
         const val dailyCoachHandOverWorkName = "good_words_daily_coach_hand_over"
     }
 }

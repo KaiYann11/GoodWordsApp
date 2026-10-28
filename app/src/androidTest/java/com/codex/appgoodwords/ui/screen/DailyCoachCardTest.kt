@@ -233,4 +233,26 @@ class DailyCoachCardTest {
 
         compose.onNodeWithTag(dailyCoachNewBadgeTag).assertDoesNotExist()
     }
+
+    @Test
+    fun theCardSaysWhenTheNextWordComes() {
+        // 정한 주기마다 온다는 것이 보여야 앱을 닫아 두고도 기다립니다. 남은 횟수는 세지 않고 다음 하나만 말합니다.
+        val next = System.currentTimeMillis() + 90 * 60_000L
+        compose.setContent { DailyCoachCard(state = state(tip = tip()), nextAskAt = next) }
+
+        compose.onNodeWithTag(dailyCoachNextTag).assertIsDisplayed()
+        val clock = java.time.Instant.ofEpochMilli(next).atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        compose.onNodeWithText("다음 한마디 ${clock}쯤").assertIsDisplayed()
+    }
+
+    @Test
+    fun aTimeAlreadyPastIsNotPromised() {
+        // 인터넷이 없어 밀렸으면 지난 시각을 "다음"이라고 적지 않습니다.
+        compose.setContent {
+            DailyCoachCard(state = state(tip = tip()), nextAskAt = System.currentTimeMillis() - 60_000L)
+        }
+
+        compose.onNodeWithTag(dailyCoachNextTag).assertDoesNotExist()
+    }
 }

@@ -69,12 +69,21 @@ class QuoteWidget : GlanceAppWidget() {
     }
 
     companion object {
-        /** 위젯에 보여줄 다음 항목을 고르고 노출로 기록한다. */
-        suspend fun pickNextItem(container: AppContainer): ContentItemEntity? {
+        /**
+         * 위젯에 보여줄 다음 항목을 고르고 노출로 기록한다. 지금 보여 주는 것과 다른 것을 고른다.
+         *
+         * 홈 맨 위의 글귀도 이 자리를 본다([com.codex.appgoodwords.data.SettingsStore.widgetContentIdFlow]).
+         * 홈의 "다음 글귀"도 여기를 거쳐 위젯과 함께 넘어간다.
+         */
+        suspend fun pickNextItem(
+            container: AppContainer,
+            trigger: ExposureTrigger = ExposureTrigger.WIDGET_REFRESH
+        ): ContentItemEntity? {
             val settings = container.settingsStore.getSettings()
             val item = container.repository.pickFeaturedContent(
                 category = settings.categoryFilter,
-                trigger = ExposureTrigger.WIDGET_REFRESH
+                trigger = trigger,
+                excludedId = container.settingsStore.getWidgetContentId()
             ) ?: return null
             container.settingsStore.setWidgetContentId(item.id)
             return item

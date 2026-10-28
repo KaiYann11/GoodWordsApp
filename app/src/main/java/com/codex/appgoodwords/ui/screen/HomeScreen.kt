@@ -1,8 +1,8 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,32 +10,46 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material3.Button
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabPosition
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -44,6 +58,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
@@ -63,6 +79,8 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 internal const val feedbackCardTag = "home_feedback_card"
 internal const val growthTeaserTag = "home_growth_teaser"
@@ -70,17 +88,43 @@ internal const val onThisDayCardTag = "home_on_this_day"
 internal const val moodPracticeCardTag = "home_mood_practice"
 internal const val homeCaptureButtonTag = "home_capture_button"
 internal const val homeInsightsToggleTag = "home_insights_toggle"
+internal const val homeListTag = "home_list"
+internal const val homeTabRowTag = "home_tab_row"
+internal const val homePagerTag = "home_pager"
+/** 한마디 칸 이름에 붙는 점. 새 한마디가 와 있다는 뜻입니다. */
+internal const val homeCoachDotTag = "home_coach_dot"
+
+internal fun homeTabTag(tab: HomeTab): String = "home_tab_" + tab.name.lowercase()
 
 /**
- * 돌아보는 자리.
+ * 글귀 아래의 칸. 좌우로 밀어 넘깁니다(사용자가 고름, 2026-10-28).
  *
- * 예전에는 홈에도 글귀 목록이 있어서 보관함과 같은 일을 두 곳에서 했습니다. 읽는 일은
- * 글귀가 모여 있는 보관함으로 모으고, 홈에는 "지금 어떻게 지내고 있는지"만 남겼습니다.
- * 오늘 할 일(오늘의 걸음), 짚어 주는 문구, 그리고 통계 순서입니다. 앞에서부터 시간의 폭이
- * 넓어지도록 두어, 위에서 아래로 읽으면 오늘에서 지난 달까지 자연스럽게 이어집니다.
+ * 한 장에 카드 열 개가 이어져 있어 난잡했습니다. 하루를 밟는 것(오늘), 건네받는 말(한마디), 쌓인 것을 보는 것
+ * (돌아보기)으로 나눠 한 번에 한 묶음만 보입니다. 적어 둔 차례가 곧 화면의 차례입니다.
  */
-internal const val homeListTag = "home_list"
+enum class HomeTab(val label: String) {
+    TODAY("오늘"),
+    COACH("한마디"),
+    LOOK_BACK("돌아보기");
 
+    companion object {
+        /** 한마디를 끈 사람에게는 그 칸을 두지 않습니다. 켜 보라는 칸이 매일 보이면 고르는 자리가 아니라 권유가 됩니다. */
+        fun visible(hasCoach: Boolean): List<HomeTab> = if (hasCoach) entries else listOf(TODAY, LOOK_BACK)
+    }
+}
+
+/**
+ * 홈.
+ *
+ * **맨 위는 오늘의 글귀입니다**(사용자가 정함, 2026-10-28). 예전에는 읽는 일을 보관함으로 보내고 홈에는 "지금 어떻게
+ * 지내는지"만 남겼는데, 앱 이름이 "오늘의 글귀"인데 글귀가 보이지 않았고 카드 열 개가 한 장에 이어져 난잡했습니다.
+ * 이제 글귀를 크게 두고([TodayQuoteCard]) 그 아래를 [HomeTab] 셋으로 나눠 좌우로 밀어 넘깁니다. 칸 이름 줄은
+ * 아래로 굴려도 위에 붙어 있어 어디서든 옆 칸으로 옮겨 갈 수 있습니다.
+ *
+ * 홈을 왼쪽으로 밀어 아이디어 칸을 띄우던 몸짓은 칸 넘기기와 겹쳐 없앴습니다. 맨 위의 "아이디어 담기"와 위젯의
+ * "적기"가 그 자리를 맡습니다. 한 줄로 적던 "번뜩인 것" 카드도 같은 일을 하는 단추가 바로 위에 있어 거뒀습니다.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     summary: StatsSummary,
@@ -88,6 +132,15 @@ fun HomeScreen(
     routines: List<RoutineEntity>,
     checks: List<RoutineCheckEntity>,
     modifier: Modifier = Modifier,
+    /** 오늘의 글귀(위젯·알림과 같은 것). null이면 아직 읽는 중입니다. */
+    quote: HomeQuote? = null,
+    quoteConfirmedToday: Boolean = false,
+    /** 읽음. 오늘의 걸음 "글귀 읽기"를 채웁니다. 다시 누르면 거둡니다. */
+    onConfirmQuote: (ContentItemEntity) -> Unit = {},
+    onNextQuote: () -> Unit = {},
+    onOpenQuote: (ContentItemEntity) -> Unit = {},
+    /** 보관함에 글귀가 하나도 없을 때 담으러 갑니다. */
+    onAddQuote: () -> Unit = {},
     /** 오늘의 걸음. null이면 카드를 두지 않습니다. */
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
@@ -105,15 +158,12 @@ fun HomeScreen(
     onPickMood: (DiaryMood) -> Unit = {},
     /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
     onClearMood: (() -> Unit)? = null,
-    /** 번뜩인 것을 한 줄로 담습니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
-    onCaptureIdea: (String) -> Unit = {},
-    /** 왼쪽으로 밀었을 때. 담는 칸을 띄웁니다. */
-    onSwipeToCapture: () -> Unit = {},
+    /** 번뜩인 것을 담는 칸을 띄웁니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
+    onOpenCapture: () -> Unit = {},
     /**
-     * 오늘의 한마디. null이면 카드를 두지 않습니다 — 설정에서 켜지 않은 상태입니다.
+     * 오늘의 한마디. null이면 한마디 칸을 두지 않습니다 — 설정에서 켜지 않은 상태입니다.
      *
-     * 끈 사람의 홈에 "켜 보세요" 카드를 매일 띄우지 않습니다. 값이 드는 기능이라
-     * 권유가 아니라 고르는 자리(설정)에 둡니다.
+     * 끈 사람의 홈에 "켜 보세요"를 매일 띄우지 않습니다. 값이 드는 기능이라 권유가 아니라 고르는 자리(설정)에 둡니다.
      */
     coach: DailyCoachState? = null,
     /** 오늘 한 것이 있는지. 없으면 한마디 대신 그 사실을 적습니다. */
@@ -121,6 +171,8 @@ fun HomeScreen(
     coachLoading: Boolean = false,
     /** 아직 안 밟은 루틴 한 줄. AI 없이 기기에서 센 것이라 연결이 없어도 뜹니다. */
     coachNudge: RoutineNudge? = null,
+    /** 다음 한마디가 저절로 올 때. 카드가 "다음 한마디 15:20쯤"으로 알립니다. 모르면 null입니다. */
+    coachNextAt: Long? = null,
     onOpenRoutines: () -> Unit = {},
     onRefreshCoach: () -> Unit = {},
     onKeepCoachQuote: () -> Unit = {},
@@ -129,10 +181,10 @@ fun HomeScreen(
     /** 새로 온 한마디를 다 보여 주었습니다. */
     onCoachSeen: () -> Unit = {},
     /**
-     * 한마디 카드까지 내려 보여 달라는 요청. 알림이나 "새 한마디 · 보기"를 눌러 왔을 때입니다.
+     * 한마디 칸을 열어 보여 달라는 요청. 알림이나 "새 한마디 · 보기"를 눌러 왔을 때입니다.
      *
-     * 카드는 오늘의 걸음과 기분 아래에 있어, 홈을 열면 화면 아래에 걸쳐 반쯤 가립니다. 보러 온 것을
-     * 다시 찾게 하지 않습니다. 내린 뒤 [onCoachFocused]로 알립니다.
+     * 한마디는 글귀 아래 옆 칸에 있어 홈만 열면 보이지 않습니다. 보러 온 것을 다시 찾게 하지 않습니다.
+     * 칸을 열고 칸 이름 줄을 위로 올린 뒤 [onCoachFocused]로 알립니다.
      */
     coachFocusRequested: Boolean = false,
     onCoachFocused: () -> Unit = {},
@@ -144,184 +196,293 @@ fun HomeScreen(
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    // 칸을 넘기면 안 보이는 칸은 버려집니다. 펼쳐 둔 통계가 옆 칸에 다녀오면 접혀 있지 않게 여기서 들고 있습니다.
     var showInsights by rememberSaveable { mutableStateOf(false) }
 
+    val tabs = HomeTab.visible(hasCoach = coach != null)
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
     val listState = rememberLazyListState()
-    // 카드 앞의 줄: 날짜, 오늘의 걸음(있을 때), 기분. 위에 줄을 더하면 여기도 함께 셉니다.
-    val coachItemIndex = if (dailyLoop != null) 3 else 2
-    // 앱을 막 띄웠을 때는 켜 둔 설정을 읽기 전이라 카드가 아직 없습니다. 카드가 생기면 그때 내립니다.
+    val scope = rememberCoroutineScope()
+    // 걸음의 "글귀 읽기"를 누른 횟수. 누를 때마다 글귀 카드에 잠깐 테두리를 두릅니다.
+    var quotePulse by remember { mutableIntStateOf(0) }
+
+    // 앱을 막 띄웠을 때는 켜 둔 설정을 읽기 전이라 한마디 칸이 아직 없습니다. 칸이 생기면 그때 엽니다.
+    // **목록부터 내립니다.** 글귀가 길거나 화면이 작아 칸들이 화면 밖에 있으면 아직 그려지지 않은 것이라,
+    // 칸을 먼저 넘기려 하면 그려질 때까지 기다리느라 멈춥니다.
     LaunchedEffect(coachFocusRequested, coach != null) {
         if (!coachFocusRequested || coach == null) return@LaunchedEffect
-        listState.animateScrollToItem(coachItemIndex)
+        listState.animateScrollToItem(TAB_ROW_ITEM_INDEX)
+        pagerState.animateScrollToPage(tabs.indexOf(HomeTab.COACH))
         onCoachFocused()
+    }
+
+    // 칸 이름을 누르면 그 칸으로. 칸들이 아직 화면 밖이면(칸 이름 줄이 화면 맨 아래에 걸쳐 있을 때) 먼저 올려 보여 줍니다.
+    fun openTab(index: Int) {
+        scope.launch {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == PAGES_ITEM_INDEX }) {
+                listState.animateScrollToItem(TAB_ROW_ITEM_INDEX)
+            }
+            pagerState.animateScrollToPage(index)
+        }
     }
 
     LazyColumn(
         state = listState,
         modifier = modifier
             .fillMaxSize()
-            .testTag(homeListTag)
-            // 왼쪽으로 밀면 담는 칸이 뜹니다. 세로로 굴리는 목록이라 가로 몸짓과 부딪히지 않습니다.
-            // 문턱을 두는 이유는, 굴리다 손가락이 옆으로 흐르는 것만으로 뜨면 성가시기 때문입니다.
-            .pointerInput(Unit) {
-                var dragged = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dragged = 0f },
-                    onDragEnd = {
-                        if (dragged <= -SWIPE_TO_CAPTURE_PX) onSwipeToCapture()
-                    }
-                ) { change, amount ->
-                    dragged += amount
-                    change.consume()
-                }
-            },
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .testTag(homeListTag),
+        contentPadding = PaddingValues(bottom = 28.dp)
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = LocalDate.now().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                FilledTonalButton(
-                    onClick = onSwipeToCapture,
-                    modifier = Modifier.testTag(homeCaptureButtonTag)
-                ) {
-                    Text("아이디어 담기")
-                }
-            }
+        item(key = "date") {
+            DateRow(onOpenCapture = onOpenCapture)
         }
 
-        // 앱을 열면 가장 먼저 보이는 자리입니다. 오늘 무엇부터 할지 여기서 정해집니다.
-        dailyLoop?.let { progress ->
-            item {
-                DailyLoopCard(progress = progress, onOpenStep = onOpenStep)
-            }
+        // 앱을 열면 가장 먼저 보이는 자리입니다. 이 앱이 무엇인지가 여기서 드러납니다.
+        item(key = "quote") {
+            TodayQuoteCard(
+                quote = quote,
+                confirmedToday = quoteConfirmedToday,
+                onConfirm = onConfirmQuote,
+                onNext = onNextQuote,
+                onOpen = onOpenQuote,
+                onAdd = onAddQuote,
+                pulseKey = quotePulse,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
         }
 
-        // 3초짜리라 손이 가장 먼저 닿는 자리에 두어야 하고,
-        // 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
-        item {
-            TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
+        // 이 자리를 `TAB_ROW_ITEM_INDEX`가 셉니다. 위에 줄을 더하면 함께 고칩니다.
+        stickyHeader(key = "tabs") {
+            HomeTabRow(
+                tabs = tabs,
+                pagerState = pagerState,
+                coachHasNew = coach?.hasNewTip == true,
+                onSelect = { index -> openTab(index) }
+            )
         }
 
-        // 오늘 걸은 것과 오늘 어땠는지 바로 아래입니다. 코치가 보는 것이 그 둘이라,
-        // 무엇을 보고 하는 말인지가 읽는 순서에서 드러납니다. 이 자리를 `coachItemIndex`가 셉니다.
-        coach?.let { state ->
-            item {
-                DailyCoachCard(
-                    state = state,
-                    loading = coachLoading,
-                    hasRecordToday = coachHasRecordToday,
-                    nudge = coachNudge,
-                    onOpenRoutines = onOpenRoutines,
-                    onRefresh = onRefreshCoach,
-                    onKeepQuote = onKeepCoachQuote,
-                    onKeepRoutine = onKeepCoachRoutine,
-                    onKeepAction = onKeepCoachAction,
-                    onSeen = onCoachSeen
-                )
-            }
-        }
-
-        // 번뜩인 것은 언제 올지 모릅니다. 담으러 들어가는 사이에 날아가므로,
-        // 앱을 열면 바로 보이는 자리에 한 줄 칸을 둡니다.
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("번뜩인 것", style = MaterialTheme.typography.titleMedium)
-                    IdeaCaptureField(onCapture = onCaptureIdea)
-                    Text(
-                        text = "보관함의 아이디어에서 다시 꺼내 볼 수 있어요.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // 빠르게 남기는 기분과 아이디어를 먼저 두고, 쌓인 기록은 그 아래에서 돌아봅니다.
-        if (todayScore != null && scoreTrend != null) {
-            item {
-                DayScoreCard(
-                    todayScore = todayScore,
-                    trend = scoreTrend,
-                    onOpenDay = onOpenDay
-                )
-            }
-        }
-
-        item {
-            FeedbackCard(notes = notes)
-        }
-
-        // 없는 날이 대부분이라 있을 때만 자리를 냅니다. 빈 카드가 매일 있으면
-        // "오늘은 없음"을 매일 확인하게 됩니다.
-        if (memories.isNotEmpty()) {
-            item {
-                OnThisDayCard(memories = memories, onOpen = onOpenMemory)
-            }
-        }
-
-        item {
-            GrowthTeaserCard(report = latestReport, onOpen = onOpenGrowth)
-        }
-
-        item {
-            TextButton(
-                onClick = { showInsights = !showInsights },
+        item(key = "pages") {
+            HorizontalPager(
+                state = pagerState,
+                key = { page -> tabs[page] },
+                verticalAlignment = Alignment.Top,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag(homeInsightsToggleTag)
-                    .semantics { stateDescription = if (showInsights) "펼쳐짐" else "접힘" }
-            ) {
-                Text(
-                    text = if (showInsights) "통계와 실천 달력 접기" else "통계와 실천 달력 보기",
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = if (showInsights) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null
-                )
+                    .testTag(homePagerTag)
+            ) { page ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    when (tabs[page]) {
+                        // 오늘 무엇부터 할지와 오늘 어땠는지. 매일 손이 가는 둘이라 첫 칸입니다.
+                        HomeTab.TODAY -> {
+                            dailyLoop?.let { progress ->
+                                DailyLoopCard(
+                                    progress = progress,
+                                    onOpenStep = { step ->
+                                        // 글귀 읽기는 이 화면 맨 위에 있습니다. 보관함으로 데려가지 않고 그 카드를 보여 줍니다.
+                                        if (step == DailyStep.QUOTE) {
+                                            quotePulse += 1
+                                            scope.launch { listState.animateScrollToItem(QUOTE_ITEM_INDEX) }
+                                        } else {
+                                            onOpenStep(step)
+                                        }
+                                    }
+                                )
+                            }
+                            // 3초짜리라 걸음 바로 아래에 둡니다. 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
+                            TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
+                        }
+
+                        // 코치가 보는 것은 오늘 칸의 걸음과 기분입니다. 그래서 바로 옆 칸입니다.
+                        HomeTab.COACH -> coach?.let { state ->
+                            DailyCoachCard(
+                                state = state,
+                                loading = coachLoading,
+                                hasRecordToday = coachHasRecordToday,
+                                nudge = coachNudge,
+                                nextAskAt = coachNextAt,
+                                onOpenRoutines = onOpenRoutines,
+                                onRefresh = onRefreshCoach,
+                                onKeepQuote = onKeepCoachQuote,
+                                onKeepRoutine = onKeepCoachRoutine,
+                                onKeepAction = onKeepCoachAction,
+                                onSeen = onCoachSeen
+                            )
+                        }
+
+                        // 앞에서부터 시간의 폭이 넓어집니다 — 오늘 점수, 요즘, 지난 이맘때, AI가 정리한 기간, 통계.
+                        HomeTab.LOOK_BACK -> {
+                            if (todayScore != null && scoreTrend != null) {
+                                DayScoreCard(
+                                    todayScore = todayScore,
+                                    trend = scoreTrend,
+                                    onOpenDay = onOpenDay
+                                )
+                            }
+
+                            FeedbackCard(notes = notes)
+
+                            // 없는 날이 대부분이라 있을 때만 자리를 냅니다. 빈 카드가 매일 있으면
+                            // "오늘은 없음"을 매일 확인하게 됩니다.
+                            if (memories.isNotEmpty()) {
+                                OnThisDayCard(memories = memories, onOpen = onOpenMemory)
+                            }
+
+                            GrowthTeaserCard(report = latestReport, onOpen = onOpenGrowth)
+
+                            InsightsToggle(expanded = showInsights, onToggle = { showInsights = !showInsights })
+
+                            if (showInsights) {
+                                StatsCard(summary = summary)
+                                if (moodPractice.isNotEmpty()) {
+                                    MoodPracticeCard(rows = moodPractice)
+                                }
+                                RoutineCalendarCard(
+                                    routines = routines,
+                                    checks = checks,
+                                    selectedMonthText = selectedMonthText,
+                                    selectedDateText = selectedDateText,
+                                    onMonthChanged = { month, date ->
+                                        selectedMonthText = month.toString()
+                                        selectedDateText = date.toString()
+                                    },
+                                    onDateSelected = { date ->
+                                        selectedDateText = date.toString()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
 
-        if (showInsights) {
-            item { StatsCard(summary = summary) }
+/** 오늘 날짜와, 번뜩인 것을 담는 단추. */
+@Composable
+private fun DateRow(onOpenCapture: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = LocalDate.now().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        FilledTonalButton(
+            onClick = onOpenCapture,
+            modifier = Modifier.testTag(homeCaptureButtonTag)
+        ) {
+            Text("아이디어 담기")
+        }
+    }
+}
 
-            if (moodPractice.isNotEmpty()) {
-                item { MoodPracticeCard(rows = moodPractice) }
-            }
-
-            item {
-                RoutineCalendarCard(
-                    routines = routines,
-                    checks = checks,
-                    selectedMonthText = selectedMonthText,
-                    selectedDateText = selectedDateText,
-                    onMonthChanged = { month, date ->
-                        selectedMonthText = month.toString()
-                        selectedDateText = date.toString()
-                    },
-                    onDateSelected = { date ->
-                        selectedDateText = date.toString()
+/**
+ * 칸 이름 줄. 아래로 굴려도 위에 붙어 있습니다.
+ *
+ * 밑줄이 손가락을 따라 옆 칸으로 미끄러집니다. 다 넘긴 뒤에야 옮겨 가면 지금 어느 칸으로 가는지 손이 먼저 압니다.
+ * 한마디가 새로 와 있으면 그 칸 이름에 점을 답니다(하단 바의 홈 점과 같은 표시).
+ */
+@Composable
+private fun HomeTabRow(
+    tabs: List<HomeTab>,
+    pagerState: PagerState,
+    coachHasNew: Boolean,
+    onSelect: (Int) -> Unit
+) {
+    val current = pagerState.currentPage.coerceIn(0, tabs.lastIndex)
+    // 굴린 글이 비치지 않게 바탕을 칠합니다. 칸 이름 줄만 칠하면 위쪽 틈으로 카드가 비쳐 보입니다.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(top = 10.dp)
+    ) {
+        TabRow(
+            selectedTabIndex = current,
+            containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = { positions -> PagerTabIndicator(positions = positions, pagerState = pagerState) },
+            divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) },
+            modifier = Modifier.testTag(homeTabRowTag)
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                Tab(
+                    selected = current == index,
+                    onClick = { onSelect(index) },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(homeTabTag(tab)),
+                    text = {
+                        val label: @Composable () -> Unit = {
+                            Text(
+                                text = tab.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = if (current == index) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                        if (tab == HomeTab.COACH && coachHasNew) {
+                            BadgedBox(badge = { Badge(modifier = Modifier.testTag(homeCoachDotTag)) }) { label() }
+                        } else {
+                            label()
+                        }
                     }
                 )
             }
         }
+    }
+}
+
+/** 밑줄. 칸 너비의 절반만 그어 이름 아래에 모이게 합니다. 꽉 채우면 칸 사이 경계선처럼 보입니다. */
+@Composable
+private fun PagerTabIndicator(positions: List<TabPosition>, pagerState: PagerState) {
+    if (positions.isEmpty()) return
+    val page = pagerState.currentPage.coerceIn(0, positions.lastIndex)
+    val fraction = pagerState.currentPageOffsetFraction
+    val toward = (page + if (fraction > 0f) 1 else -1).coerceIn(0, positions.lastIndex)
+    val left = lerp(positions[page].left, positions[toward].left, abs(fraction))
+    val tabWidth = lerp(positions[page].width, positions[toward].width, abs(fraction))
+    val lineWidth = tabWidth / 2
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentSize(Alignment.BottomStart)
+            .offset(x = left + (tabWidth - lineWidth) / 2)
+            .width(lineWidth)
+            .height(3.dp)
+            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+    )
+}
+
+/** 통계와 실천 달력. 길어서 접어 둡니다. 돌아보기 칸 맨 아래입니다. */
+@Composable
+private fun InsightsToggle(expanded: Boolean, onToggle: () -> Unit) {
+    TextButton(
+        onClick = onToggle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(homeInsightsToggleTag)
+            .semantics { stateDescription = if (expanded) "펼쳐짐" else "접힘" }
+    ) {
+        Text(
+            text = if (expanded) "통계와 실천 달력 접기" else "통계와 실천 달력 보기",
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = null
+        )
     }
 }
 
@@ -337,12 +498,12 @@ private fun FeedbackCard(notes: List<FeedbackNote>) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(feedbackCardTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -417,12 +578,12 @@ private fun GrowthTeaserCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(growthTeaserTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
@@ -439,7 +600,8 @@ private fun GrowthTeaserCard(
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            Button(onClick = onOpen) {
+            // 이 칸의 주인공은 기록이라 단추를 덜 무겁게 둡니다. 가득 칠한 단추는 홈 맨 위의 "읽음" 하나입니다.
+            FilledTonalButton(onClick = onOpen) {
                 Text(if (report == null) "받아 보기" else "돌아보기 열기")
             }
         }
@@ -463,12 +625,12 @@ private fun OnThisDayCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(onThisDayCardTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -522,12 +684,12 @@ private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(moodPracticeCardTag),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
@@ -569,5 +731,11 @@ private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
     }
 }
 
-/** 이만큼은 밀어야 담는 칸이 뜹니다. 굴리다 손가락이 흐르는 것으로는 뜨지 않게 합니다. */
-private const val SWIPE_TO_CAPTURE_PX = 220f
+/** 글귀 카드의 자리(날짜 줄 다음). 걸음의 "글귀 읽기"를 누르면 여기까지 올립니다. */
+private const val QUOTE_ITEM_INDEX = 1
+
+/** 칸 이름 줄의 자리(날짜 줄, 글귀 다음). 한마디 칸으로 데려갈 때 여기까지 굴려 칸 이름 줄을 맨 위에 붙입니다. */
+private const val TAB_ROW_ITEM_INDEX = 2
+
+/** 칸들이 놓인 자리(칸 이름 줄 다음). */
+private const val PAGES_ITEM_INDEX = 3

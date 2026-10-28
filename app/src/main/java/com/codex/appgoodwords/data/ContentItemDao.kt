@@ -60,12 +60,16 @@ interface ContentItemDao {
      *
      * 정리된 글귀·링크·영상만 고른다. 임시저장소·메모·아이디어를 포함하면
      * 아직 정리하지 않은 문장이나 개인 메모가 "오늘의 글귀" 알림에 나온다.
+     *
+     * [excludedId]는 지금 보여 주고 있는 것이다. 글귀가 [poolSize]개보다 적으면 방금 본 것도 후보에 들어,
+     * "다음 글귀"를 눌렀는데 같은 글귀가 다시 나온다. 0이면 아무것도 빼지 않는다(id는 1부터).
      */
     @Query(
         "SELECT * FROM (" +
             "SELECT * FROM content_items " +
             "WHERE (:category = '' OR category = :category) " +
             "AND type IN (:included) " +
+            "AND id != :excludedId " +
             "ORDER BY COALESCE(lastSurfacedAt, 0) ASC, showCount ASC " +
             "LIMIT :poolSize" +
             ") ORDER BY RANDOM() LIMIT 1"
@@ -74,7 +78,8 @@ interface ContentItemDao {
         category: String,
         poolSize: Int,
         /** 정리된 글귀·링크·영상만 알림과 위젯에 보여 줍니다. */
-        included: List<ContentType> = ContentType.readingTypes
+        included: List<ContentType> = ContentType.readingTypes,
+        excludedId: Long = 0L
     ): ContentItemEntity?
 
     @Query("UPDATE content_items SET lastSurfacedAt = :surfacedAt WHERE id = :id")

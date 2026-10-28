@@ -48,10 +48,13 @@ fun TodayMoodCard(
         modifier = modifier
             .fillMaxWidth()
             .testTag(todayMoodCardTag),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        // 홈의 다른 카드와 같은 모서리·여백입니다. 카드마다 조금씩 다르면 화면이 어수선해 보입니다.
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
