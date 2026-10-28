@@ -563,7 +563,7 @@ DELETE /api/events?ids=1,2,3
 셸 기록에도 남기 때문입니다.
 
 ```text
-POST /api/growth-feedback   {"system":"...","user":"...","model":"gpt-4o-mini"}
+POST /api/growth-feedback   {"system":"...","user":"...","model":"gpt-6-luna"}
            ->               {"text":"모델이 쓴 JSON 문자열"}
 ```
 
@@ -573,7 +573,7 @@ POST /api/growth-feedback   {"system":"...","user":"...","model":"gpt-4o-mini"}
 돌리면 사용자가 고르지 않은 데로 기록이 나갑니다.
 
 ```text
-POST /api/growth-feedback   {"system":"...","user":"...","provider":"anthropic","model":"claude-opus-5"}
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"anthropic","model":"claude-opus-5-5"}
 ```
 
 두 곳은 요청 모양이 다릅니다. OpenAI는 일러 주는 말을 `messages`에 함께 싣고 답을
@@ -591,7 +591,7 @@ Claude Code·Codex CLI**를 돌립니다(`askCli`). API 열쇠 없이 구독을 
 
 ```text
 POST /api/growth-feedback   {"system":"...","user":"...","provider":"claude_cli","model":""}
-POST /api/growth-feedback   {"system":"...","user":"...","provider":"codex_cli","model":"gpt-5.5"}
+POST /api/growth-feedback   {"system":"...","user":"...","provider":"codex_cli","model":"gpt-6.1-sol"}
 ```
 
 `model`을 비우면 `--model`을 붙이지 않아 CLI에 설정해 둔 기본 모델이 답합니다. 모델 이름은

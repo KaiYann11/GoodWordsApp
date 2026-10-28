@@ -34,7 +34,7 @@ class DailyCoachAiIntegrationTest {
     }
 
     @Test fun claudeCliAnswersWithOneShortWord() = runBlocking {
-        askWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-4-5"))
+        askWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
     }
 
     @Test fun codexCliWithItsDefaultModelAnswers() = runBlocking {

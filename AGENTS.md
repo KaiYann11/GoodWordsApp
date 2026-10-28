@@ -132,7 +132,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
 | 같은 내용 합치기 | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
-| AI 공급자 | 앱 `AiProvider` · 서버 `aiProviders` |
+| AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
 | 글 쌓이는 새 자리 | `AppSearch`에 찾을 길(딸린 글은 부모에 얹기) |

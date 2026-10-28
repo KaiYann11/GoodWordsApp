@@ -2250,7 +2250,7 @@ describe("AI 돌아보기", () => {
   it("서버에 AI 열쇠가 없으면 왜 안 되는지 알려 준다", async () => {
     const response = await api("/api/growth-feedback", {
       method: "POST",
-      body: { system: "코치입니다", user: "기록입니다", model: "gpt-4o-mini" },
+      body: { system: "코치입니다", user: "기록입니다", model: "gpt-6-luna" },
     });
     const body = await response.json();
 
@@ -2269,7 +2269,7 @@ describe("AI 돌아보기", () => {
     // 열쇠가 둘로 나뉘어 있다. 어느 쪽을 넣어야 하는지 사유에 적히지 않으면 사용자가 알 수 없다.
     const response = await api("/api/growth-feedback", {
       method: "POST",
-      body: { system: "코치입니다", user: "기록입니다", provider: "anthropic", model: "claude-opus-5" },
+      body: { system: "코치입니다", user: "기록입니다", provider: "anthropic", model: "claude-opus-5-5" },
     });
     const body = await response.json();
 
@@ -2304,7 +2304,7 @@ describe("AI 돌아보기", () => {
     const user = "기록입니다.\n둘째 줄 & 셋째 | 줄";
     const response = await api("/api/growth-feedback", {
       method: "POST",
-      body: { system, user, provider: "claude_cli", model: "claude-opus-5" },
+      body: { system, user, provider: "claude_cli", model: "claude-opus-5-5" },
     });
     const body = await response.json();
 
@@ -2312,7 +2312,7 @@ describe("AI 돌아보기", () => {
     const seen = JSON.parse(body.text);
     assert.equal(seen.system, system);
     assert.equal(seen.user, user);
-    assert.equal(seen.model, "claude-opus-5");
+    assert.equal(seen.model, "claude-opus-5-5");
     assert.ok(seen.args.includes("-p"), seen.args.join(" "));
     assert.ok(seen.args.includes("--safe-mode"), seen.args.join(" "));
     assert.ok(seen.args.includes("--no-session-persistence"), seen.args.join(" "));
@@ -2325,14 +2325,14 @@ describe("AI 돌아보기", () => {
   it("Codex CLI에는 일러 주는 말을 앞에 붙여 표준 입력으로 건네고 답은 파일로 받는다", async () => {
     const response = await api("/api/growth-feedback", {
       method: "POST",
-      body: { system: "코치입니다", user: "기록입니다", provider: "codex_cli", model: "gpt-5.5" },
+      body: { system: "코치입니다", user: "기록입니다", provider: "codex_cli", model: "gpt-6.1-sol" },
     });
     const body = await response.json();
 
     assert.equal(response.status, 200, JSON.stringify(body));
     const seen = JSON.parse(body.text);
     assert.equal(seen.input, "코치입니다\n\n기록입니다");
-    assert.equal(seen.model, "gpt-5.5");
+    assert.equal(seen.model, "gpt-6.1-sol");
     assert.equal(seen.args[0], "exec");
     assert.ok(seen.args.includes("--ephemeral"), seen.args.join(" "));
     assert.ok(seen.args.includes("--ignore-user-config"), seen.args.join(" "));

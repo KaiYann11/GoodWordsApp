@@ -38,26 +38,36 @@ class AiFeedbackSettingsTest {
 
     @Test
     fun aModelFromTheOtherProviderIsPulledBackToItsDefault() {
-        // gpt-4o를 Claude에 보내면 "모델을 찾을 수 없다"는 말만 옵니다.
-        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "gpt-4o")
+        // gpt-6.1-sol을 Claude에 보내면 "모델을 찾을 수 없다"는 말만 옵니다.
+        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "gpt-6.1-sol")
 
-        assertEquals("claude-opus-5", settings.effectiveModel)
+        assertEquals("claude-opus-5-5", settings.effectiveModel)
     }
 
     @Test
     fun anEmptyModelMeansTheDefaultOfWhicheverProviderIsChosen() {
-        assertEquals("gpt-4o-mini", AiFeedbackSettings().effectiveModel)
+        assertEquals("gpt-6-luna", AiFeedbackSettings().effectiveModel)
         assertEquals(
-            "claude-opus-5",
+            "claude-opus-5-5",
             AiFeedbackSettings().withProvider(AiProvider.ANTHROPIC).effectiveModel
         )
     }
 
     @Test
     fun aChosenModelIsKept() {
-        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-haiku-4-5")
+        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-haiku-5-5")
 
-        assertEquals("claude-haiku-4-5", settings.effectiveModel)
+        assertEquals("claude-haiku-5-5", settings.effectiveModel)
+    }
+
+    @Test
+    fun aModelThatLeftTheListFallsBackToTheDefaultInsteadOfFailing() {
+        // 목록을 새 세대로 바꾸면 휴대폰에는 예전에 고른 이름이 그대로 남아 있습니다. 그 이름을 그대로 보내면
+        // 공급자가 "그런 모델 없음"으로 거절해, 업데이트만 했는데 돌아보기와 오늘의 한마디가 멈춥니다.
+        assertEquals("claude-opus-5-5", AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-opus-5").effectiveModel)
+        assertEquals("gpt-6-luna", AiFeedbackSettings(provider = AiProvider.OPENAI.name, model = "gpt-4o-mini").effectiveModel)
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-4-5").effectiveModel)
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = "gpt-5.5").effectiveModel)
     }
 
     @Test
@@ -91,8 +101,8 @@ class AiFeedbackSettingsTest {
         assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.effectiveModel)
         // 그래도 돌아보기에는 누가 썼는지 남아야 합니다.
         assertEquals("Codex CLI", settings.reportModel)
-        assertEquals("gpt-5.5", settings.copy(model = "gpt-5.5").reportModel)
-        // API 쪽 모델 이름을 들고 오면 CLI 기본으로 되돌립니다.
+        assertEquals("gpt-6.1-sol", settings.copy(model = "gpt-6.1-sol").reportModel)
+        // 목록에 없는 이름을 들고 오면 CLI 기본으로 되돌립니다.
         assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.copy(model = "gpt-4o").effectiveModel)
     }
 

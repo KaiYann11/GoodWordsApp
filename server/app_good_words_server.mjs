@@ -777,7 +777,7 @@ const aiProviders = {
     url: "https://api.openai.com/v1/chat/completions",
     headers: (key) => ({ Authorization: `Bearer ${key}` }),
     body: (system, user, model) => ({
-      model: model || "gpt-4o-mini",
+      model: model || "gpt-6-luna",
       messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user }],
       response_format: { type: "json_object" },
     }),
@@ -795,7 +795,7 @@ const aiProviders = {
       "anthropic-beta": "server-side-fallback-2026-07-01",
     }),
     body: (system, user, model) => ({
-      model: model || "claude-opus-5",
+      model: model || "claude-opus-5-5",
       // 없으면 안 되는 값입니다. 생각하는 데 쓰는 몫까지 여기서 셉니다.
       max_tokens: 16000,
       // 일러 주는 말은 messages가 아니라 이 자리에 따로 싣습니다.
