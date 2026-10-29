@@ -131,6 +131,21 @@ class MoodPracticeTest {
         assertEquals(listOf(DiaryMood.SAD), rows.map { it.mood })
     }
 
+    @Test
+    fun changingMoodDuringTheDayExcludesThatDaysPractice() {
+        val morning = moodLog("2026-08-25", DiaryMood.TIRED)
+        val evening = morning.copy(syncId = "evening", mood = "GOOD", updatedAt = morning.updatedAt + 1_000L)
+        val sameMood = moodLog("2026-08-26", DiaryMood.GOOD)
+        val rows = build(
+            moodLogs = listOf(morning, evening, sameMood, sameMood.copy(syncId = "again", updatedAt = sameMood.updatedAt + 1_000L),
+                moodLog("2026-08-27", DiaryMood.GOOD)),
+            checks = listOf(check("2026-08-25"), check("2026-08-25"), check("2026-08-26"), check("2026-08-27"))
+        )
+
+        assertEquals(2, rows.single().dayCount)
+        assertEquals(1f, rows.single().averagePerDay, 0.001f)
+    }
+
     private fun moodLog(date: String, mood: DiaryMood) = MoodLogEntity(
         syncId = "mood-$date",
         updatedAt = millis(date),

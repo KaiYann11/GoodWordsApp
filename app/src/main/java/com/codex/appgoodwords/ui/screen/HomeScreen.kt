@@ -71,6 +71,7 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.HomeGoalLine
 import com.codex.appgoodwords.data.DiaryMood
 import com.codex.appgoodwords.data.MoodPracticeRow
+import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.OnThisDayMemory
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineEntity
@@ -159,9 +160,10 @@ fun HomeScreen(
     moodPractice: List<MoodPracticeRow> = emptyList(),
     /** 오늘의 기분. 찍어 둔 것이 없고 일기에도 없으면 null입니다. */
     todayMood: DiaryMood? = null,
+    todayMoodLogs: List<MoodLogEntity> = emptyList(),
     onPickMood: (DiaryMood) -> Unit = {},
     /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
-    onClearMood: (() -> Unit)? = null,
+    onClearMood: ((String) -> Unit)? = null,
     /** 번뜩인 것을 담는 칸을 띄웁니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
     onOpenCapture: () -> Unit = {},
     /**
@@ -305,7 +307,7 @@ fun HomeScreen(
                                 )
                             }
                             // 3초짜리라 걸음 바로 아래에 둡니다. 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
-                            TodayMoodCard(mood = todayMood, onPick = onPickMood, onClear = onClearMood)
+                            TodayMoodCard(mood = todayMood, logs = todayMoodLogs, onPick = onPickMood, onClear = onClearMood)
                         }
 
                         // 코치가 보는 것은 오늘 칸의 걸음과 기분입니다. 그래서 바로 옆 칸입니다.

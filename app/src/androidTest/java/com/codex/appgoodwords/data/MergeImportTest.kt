@@ -107,6 +107,33 @@ class MergeImportTest {
         }
     }
 
+    @Test
+    fun importingMoodFlowKeepsEveryTapAndOnlyTheDeltaTombstoneRemovesOne() = runBlocking {
+        val first = MoodLogEntity(id = 1L, syncId = "morning", entryDate = "2026-10-29", mood = "GOOD", createdAt = 1_000L, updatedAt = 1_000L)
+        val last = first.copy(syncId = "evening", mood = "TIRED", createdAt = 2_000L, updatedAt = 2_000L)
+        val empty = AppDataSnapshot(
+            items = emptyList(), events = emptyList(), routines = emptyList(), routineChecks = emptyList(),
+            routineMemos = emptyList(), settings = ReminderSettings()
+        )
+        // 파일 병합과 같은 JSON 왕복·같은 내용 합치기·기기 id 재배치를 모두 거칩니다.
+        val merged = SyncMerger.merge(empty.copy(moodLogs = listOf(first)), empty.copy(moodLogs = listOf(last)))
+        importer.importSnapshot(AppDataJson.fromJsonText(AppDataJson.toJson(merged).toString()))
+        var stored = database.moodLogDao().getAll()
+        assertEquals(setOf(first.syncId, last.syncId), stored.map { it.syncId }.toSet())
+        assertEquals(2, stored.map { it.id }.distinct().size)
+
+        val newest = last.copy(syncId = "night", createdAt = 3_000L, updatedAt = 3_000L)
+        importer.applyDelta(empty.copy(moodLogs = listOf(newest), partial = true))
+        assertEquals(3, database.moodLogDao().getAll().size)
+        val deletion = DeletionEntity(syncId = first.syncId, entityType = SyncEntityType.MOOD_LOG, deletedAt = 4_000L)
+        importer.applyDelta(empty.copy(deletions = listOf(deletion), partial = true))
+        stored = database.moodLogDao().getAll()
+        assertEquals(setOf(last.syncId, newest.syncId), stored.map { it.syncId }.toSet())
+        // 다른 기기에 남아 있던 옛 사본을 다시 합쳐도 지운 기록은 되살아나지 않습니다.
+        val current = empty.copy(moodLogs = stored, deletions = database.deletionDao().getAll())
+        assertEquals(2, SyncMerger.merge(current, merged).moodLogs.size)
+    }
+
     /** 한 기기의 DB 모습. 두 기기 모두 id는 1부터 시작한다. */
     private fun deviceSnapshot(prefix: String, title: String) = AppDataSnapshot(
         items = listOf(

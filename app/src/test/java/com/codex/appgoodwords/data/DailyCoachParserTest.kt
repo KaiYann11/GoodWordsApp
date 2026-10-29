@@ -35,7 +35,7 @@ class DailyCoachParserTest {
 
     @Test
     fun aWordWithNothingToRecommendIsStillAWord() {
-        // 셋을 매번 채우라고 하지 않습니다. 비어 있는 것이 맞는 날이 있습니다.
+        // 글귀를 늘 청해도 모델이 비워 보내면 카드도 비웁니다. 한마디까지 버리지는 않습니다.
         val tip = parse("""{"message":"오늘은 이대로 충분합니다.","quote":{"text":"","author":""},"routine":"","action":""}""")!!
 
         assertEquals("오늘은 이대로 충분합니다.", tip.message)
@@ -65,6 +65,19 @@ class DailyCoachParserTest {
 
         assertEquals("작게 시작하라", tip?.quote)
         assertEquals("", tip?.quoteAuthor)
+    }
+
+    @Test
+    fun aNullOrMissingQuoteStaysEmptyWithoutInventingOne() {
+        assertEquals("", parse("""{"message":"밤에는 쉬어 가세요.","quote":null}""")?.quote)
+        assertEquals("", parse("""{"message":"밤에는 쉬어 가세요.","quote":{"text":null,"author":null}}""")?.quote)
+        assertEquals("", parse("""{"message":"밤에는 쉬어 가세요."}""")?.quote)
+    }
+
+    @Test
+    fun aQuoteIsKeptWhenTheRoutineAndActionAreEmpty() {
+        val tip = parse("""{"message":"오늘을 마칩니다.","quote":{"text":"고요한 밤의 글귀","author":""},"routine":"","action":""}""")!!
+        assertEquals("고요한 밤의 글귀", tip.quote)
     }
 
     @Test

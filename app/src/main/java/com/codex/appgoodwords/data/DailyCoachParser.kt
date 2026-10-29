@@ -38,12 +38,12 @@ object DailyCoachParser {
         // 글귀만 문자열로 보내오는 모델도 있습니다([GrowthReportParser]와 같습니다).
         // **덩어리로 왔으면 문자열 자리를 보지 않습니다** — `optString`은 덩어리를 글로 바꿔
         // 돌려주어서, 빈 글귀가 `{"author":"","text":""}`로 카드에 뜹니다.
-        val quoteText = quote?.optString("text") ?: json.optString("quote")
+        val quoteText = quote?.let { textOf(it, "text") } ?: textOf(json, "quote")
 
         val tip = DailyCoachTip(
             message = clip(json.optString("message"), MESSAGE_LIMIT),
             quote = clip(quoteText, QUOTE_LIMIT),
-            quoteAuthor = clip(quote?.optString("author").orEmpty(), AUTHOR_LIMIT),
+            quoteAuthor = clip(quote?.let { textOf(it, "author") }.orEmpty(), AUTHOR_LIMIT),
             routine = clip(json.optString("routine"), NAME_LIMIT),
             action = clip(json.optString("action"), NAME_LIMIT),
             model = model,

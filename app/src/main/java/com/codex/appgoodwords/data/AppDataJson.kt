@@ -52,7 +52,9 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    const val schemaVersion: Int = 23
+    // 옛 앱은 같은 날 기분을 합쳐 지웁니다. 칸은 그대로여도 서로 붙지 않게 형식을 올립니다
+    // (사용자가 정함, 2026-10-29). Room은 칸·인덱스가 바뀌지 않아 23 그대로입니다.
+    const val schemaVersion: Int = 24
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")

@@ -10,7 +10,6 @@ package com.codex.appgoodwords.data
  *
  * **하루에 책 하나당 하나입니다.** 같은 날 같은 책을 두 번 적으면 그날 것을 고칩니다
  * (마지막 쪽만 올라갑니다). 여러 줄로 쌓으면 그날 몇 쪽을 읽었는지 셀 때마다 겹쳐 세게 됩니다.
- * 기분([MoodLogEntity])이 하루에 하나인 것과 같은 이유입니다.
  */
 @androidx.room.Entity(
     tableName = "book_reading_logs",

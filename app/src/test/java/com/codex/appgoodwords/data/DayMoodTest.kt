@@ -1,7 +1,9 @@
 package com.codex.appgoodwords.data
 
 import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +56,55 @@ class DayMoodTest {
         )
 
         assertEquals(DiaryMood.SAD, moods[today])
+    }
+
+    @Test
+    fun differentTapsMakeTheDayUnsettledEvenWhenItReturnsToTheFirstMood() {
+        val logs = listOf(
+            log(today, DiaryMood.GOOD, 100L),
+            log(today, DiaryMood.TIRED, 200L),
+            log(today, DiaryMood.GOOD, 300L).copy(syncId = "last")
+        )
+        val entry = DayMood.entriesByDate(logs.reversed(), listOf(diary(1, today, DiaryMood.SAD)))[today]!!
+
+        assertEquals(DiaryMood.GOOD, entry.mood)
+        assertFalse(entry.settled)
+        assertTrue(DayMood.settledByDate(logs, emptyList()).isEmpty())
+    }
+
+    @Test
+    fun repeatedSameMoodStaysSettledAndDoesNotCountTheDiaryAgainstIt() {
+        val logs = listOf(log(today, DiaryMood.GOOD, 100L), log(today, DiaryMood.GOOD, 300L).copy(syncId = "last"))
+
+        assertTrue(DayMood.entriesByDate(logs, listOf(diary(1, today, DiaryMood.SAD)))[today]!!.settled)
+    }
+
+    @Test
+    fun theFlowUsesTheOldRecordsLastEditAndStableTies() {
+        val zone = ZoneId.of("Asia/Seoul")
+        val morning = today.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        val evening = today.atTime(18, 30).atZone(zone).toInstant().toEpochMilli()
+        val old = log(today, DiaryMood.TIRED, evening).copy(createdAt = morning, syncId = "a")
+        val tie = old.copy(syncId = "z", mood = "GOOD")
+        val earlier = log(today, DiaryMood.NEUTRAL, morning)
+        val logs = listOf(tie, old, earlier, log(today.minusDays(1), DiaryMood.SAD))
+
+        assertEquals(listOf(earlier, old, tie), DayMood.logsOn(logs, today))
+        assertEquals(DayMood.logsOn(logs, today), DayMood.logsOn(logs.reversed(), today))
+        assertEquals("18:30", DayMood.timeLabel(old, zone))
+        assertEquals(DiaryMood.GOOD, DayMood.byDate(logs, emptyList())[today])
+    }
+
+    @Test
+    fun onlyAnImmediateRepeatOfTheLastMoodIsIgnored() {
+        val last = log(today, DiaryMood.GOOD, 10_000L)
+
+        assertTrue(DayMood.isImmediateRepeat(last, DiaryMood.GOOD, 10_000L))
+        assertTrue(DayMood.isImmediateRepeat(last, DiaryMood.GOOD, 12_999L))
+        assertFalse(DayMood.isImmediateRepeat(last, DiaryMood.GOOD, 13_000L))
+        assertFalse(DayMood.isImmediateRepeat(last, DiaryMood.SAD, 10_001L))
+        assertFalse(DayMood.isImmediateRepeat(last, DiaryMood.GOOD, 9_999L))
+        assertFalse(DayMood.isImmediateRepeat(null, DiaryMood.GOOD, 10_000L))
     }
 
     @Test
@@ -110,18 +161,37 @@ class DayMoodTest {
     }
 
     @Test
-    fun aTapWithNoMoodClearsTheDay() {
-        // 병합으로 빈 값이 올 수 있습니다. 지운 것을 일기 기분으로 되살리면 안 됩니다.
+    fun unreadableTapsDoNotEraseTheDiaryWhenNoReadableTapExists() {
         val moods = DayMood.byDate(
-            logs = listOf(MoodLogEntity(syncId = "m-x", entryDate = today.toString(), mood = "")),
+            logs = listOf(
+                MoodLogEntity(syncId = "m-x", entryDate = today.toString(), mood = ""),
+                MoodLogEntity(syncId = "m-y", entryDate = today.toString(), mood = "UNKNOWN")
+            ),
             diaries = listOf(diary(1, today, DiaryMood.GOOD))
         )
 
-        assertTrue(moods.toString(), today !in moods)
+        assertEquals(DiaryMood.GOOD, moods[today])
     }
 
     @Test
-    fun theTapOfTheDayIsFoundForEditing() {
+    fun anUnreadableLastTapDoesNotHideTheDaysReadableFlow() {
+        val first = log(today, DiaryMood.GOOD, 100L)
+        val last = log(today, DiaryMood.TIRED, 200L)
+        val broken = last.copy(syncId = "broken", mood = "", updatedAt = 300L)
+        val unknown = last.copy(syncId = "unknown", mood = "UNKNOWN", updatedAt = 400L)
+        val diaries = listOf(diary(1, today, DiaryMood.SAD))
+
+        val changing = DayMood.entriesByDate(listOf(first, last, broken, unknown), diaries)[today]!!
+        assertEquals(DiaryMood.TIRED, changing.mood)
+        assertFalse(changing.settled)
+        val settled = DayMood.entriesByDate(listOf(last, broken, unknown), diaries)[today]!!
+        assertEquals(DiaryMood.TIRED, settled.mood)
+        assertTrue(settled.settled)
+        assertTrue(DayMood.byDate(listOf(broken, unknown), emptyList()).isEmpty())
+    }
+
+    @Test
+    fun theLastTapOfTheDayIsFoundForRepeatDetection() {
         val logs = listOf(
             log(today.minusDays(1), DiaryMood.GOOD),
             log(today, DiaryMood.SAD, updatedAt = 100L),
@@ -129,7 +199,7 @@ class DayMoodTest {
         )
 
         assertEquals(DiaryMood.TIRED, DayMood.logOn(logs, today)?.moodOption)
-        // 일기는 보지 않습니다. 고칠 자리를 찾는 것이라 찍어 둔 것만 봅니다.
+        // 일기는 보지 않습니다. 연속 누름을 보는 것이라 찍어 둔 것만 봅니다.
         assertNull(DayMood.logOn(emptyList(), today))
     }
 

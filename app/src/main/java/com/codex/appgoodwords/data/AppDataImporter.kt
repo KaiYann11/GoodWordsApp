@@ -279,6 +279,7 @@ class AppDataImporter(
             }
 
             if (snapshot.moodLogs.isNotEmpty()) {
+                // 날짜로 묶지 않습니다. 백업의 하루 안 흐름도 syncId마다 별개 기록입니다.
                 database.moodLogDao().insertAll(snapshot.moodLogs)
             }
 

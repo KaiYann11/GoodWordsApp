@@ -93,6 +93,8 @@ class DailyCoachAiIntegrationTest {
         val tip = DailyCoachParser.parse(rawAnswer, model = aiSettings.reportModel)
         assertNotNull("형식에 맞는 한마디가 오지 않았습니다: $rawAnswer", tip)
         assertTrue(rawAnswer, tip!!.message.isNotBlank())
+        // 밤에도 글귀는 늘 하나 받습니다(사용자가 정함, 2026-10-29).
+        assertTrue("글귀가 비었습니다: $rawAnswer", tip.quote.isNotBlank())
         // 홈 카드에 들어가야 합니다. 길게 오면 해석에서 잘립니다.
         assertTrue(tip.message, tip.message.length <= 161)
         // 일기는 켜지 않았으므로 본문이 나가지 않았습니다. 받은 말에도 묻어 있으면 안 됩니다.

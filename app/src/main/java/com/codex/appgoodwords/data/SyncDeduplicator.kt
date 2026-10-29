@@ -166,14 +166,13 @@ object SyncDeduplicator {
     ).joinToString("|")
 
     /**
-     * 하루에 하나입니다.
-     *
-     * 두 기기에서 같은 날 기분을 각각 찍으면 그날의 기분이 둘이 됩니다. 그러면 겹쳐 보는
-     * 자리가 "어느 쪽이라 할 수 없는 날"로 보고 그날을 버립니다. 기분이 무엇이었는지는
-     * 견주지 않고 날짜만 봅니다. 그래야 나중에 고친 쪽 하나가 남습니다.
-     * 서버 `moodLogFingerprint`와 같아야 합니다.
+     * 하루 안의 흐름을 남깁니다(사용자가 정함, 2026-10-29). 날짜·기분·생성·수정 시각까지
+     * 같은 사본만 합칩니다. 생성 시각만 보면 예전에 고쳐 찍은 기록을 잃고, 분 단위로 뭉개면
+     * 실제로 연달아 바뀐 기분을 잃습니다. 서버 `moodLogFingerprint`와 판정·승자가 같아야 합니다.
      */
-    private fun moodLogFingerprint(log: MoodLogEntity): String = log.entryDate.trim()
+    private fun moodLogFingerprint(log: MoodLogEntity): String = listOf(
+        log.entryDate.trim(), log.mood.trim(), log.createdAt, log.updatedAt
+    ).joinToString("|")
 
     /**
      * 하루에 책 하나당 하나입니다. 읽은 쪽수는 견주지 않습니다.

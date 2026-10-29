@@ -100,7 +100,7 @@ object SyncMerger {
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
             ),
-            // 같은 날 기분을 두 기기에서 각각 찍을 수 있습니다. 나중에 고친 쪽이 그날의 기분입니다.
+            // 같은 날에도 서로 다른 누름은 모두 남깁니다. 같은 syncId의 옛 사본만 최신 것으로 맞춥니다.
             moodLogs = mergeMutable(
                 local = local.moodLogs,
                 remote = remote.moodLogs,

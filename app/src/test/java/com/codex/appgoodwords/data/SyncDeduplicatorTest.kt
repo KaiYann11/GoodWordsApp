@@ -392,6 +392,33 @@ class SyncDeduplicatorTest {
         assertTrue(merged.items.single().syncId in listOf("app-1", "server-1"))
     }
 
+    @Test
+    fun moodOccurrencesAreNotCollapsedByDateMoodOrMinute() {
+        val first = MoodLogEntity(syncId = "a", entryDate = "2026-10-29", mood = "GOOD", createdAt = 1_000L, updatedAt = 1_000L)
+        val logs = listOf(
+            first,
+            first.copy(syncId = "b", mood = "TIRED"),
+            first.copy(syncId = "c", createdAt = 1_001L, updatedAt = 1_001L),
+            first.copy(syncId = "d", updatedAt = 2_000L),
+            first.copy(syncId = "e", createdAt = 999L),
+            first.copy(syncId = "f", entryDate = "2026-10-28")
+        )
+
+        assertEquals(logs.toSet(), SyncDeduplicator.deduplicate(snapshotOf().copy(moodLogs = logs)).moodLogs.toSet())
+    }
+
+    @Test
+    fun onlyExactMoodCopiesCollapseWithTheSameWinnerInEitherOrder() {
+        val first = MoodLogEntity(syncId = "a", entryDate = "2026-10-29", mood = "GOOD", createdAt = 1_000L, updatedAt = 2_000L)
+        val duplicate = first.copy(id = 99, syncId = "z")
+        val local = snapshotOf().copy(moodLogs = listOf(first))
+        val remote = snapshotOf().copy(moodLogs = listOf(duplicate))
+
+        assertEquals("z", SyncMerger.merge(local, remote).moodLogs.single().syncId)
+        assertEquals("z", SyncMerger.merge(remote, local).moodLogs.single().syncId)
+        assertEquals(1, SyncMerger.merge(local, local).moodLogs.size)
+    }
+
     private fun item(syncId: String, title: String, body: String, updatedAt: Long) = ContentItemEntity(
         syncId = syncId,
         updatedAt = updatedAt,

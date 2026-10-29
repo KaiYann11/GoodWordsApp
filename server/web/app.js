@@ -2049,31 +2049,51 @@ function attr(value = "") {
  * 그때 어땠는지가 아니라 지금 기억하는 것이 남습니다.
  */
 function renderMoods() {
-  const logs = [...(state.snapshot.moodLogs || [])].sort((a, b) =>
-    String(b.entryDate || "").localeCompare(String(a.entryDate || "")),
-  );
+  const days = moodDays(state.snapshot.moodLogs || []);
   app.innerHTML = `
     <section>
-      <h2 class="sectionTitle">기분 ${logs.length}일</h2>
-      <p class="meta">앱에서 찍어 둔 기분입니다. 일기를 쓰지 않은 날에도 남습니다.</p>
+      <h2 class="sectionTitle">기분 ${days.length}일</h2>
+      <p class="meta">앱에서 찍어 둔 기분입니다. 하루 안의 흐름을 시각순으로 봅니다.</p>
       <div class="itemList">
-        ${logs.length ? logs.map(moodCard).join("") : empty("아직 찍어 둔 기분이 없습니다.")}
+        ${days.length ? days.map(([date, logs]) => `
+          <article class="item">
+            <h3>${escapeHtml(date)}</h3>
+            ${logs.map(moodCard).join("")}
+          </article>
+        `).join("") : empty("아직 찍어 둔 기분이 없습니다.")}
       </div>
     </section>
   `;
 }
 
+/** 날짜는 최근 것이 먼저, 하루 안은 누른 차례입니다(사용자가 정함, 2026-10-29). */
+function moodDays(logs) {
+  const days = new Map();
+  const ordered = [...logs].sort((a, b) =>
+    // 앱 DayMood와 같이 updatedAt·createdAt·syncId 순입니다. localeCompare는 기기 언어마다
+    // 동률의 차례가 달라질 수 있어 syncId는 코드 단위로 견줍니다.
+    (a.updatedAt - b.updatedAt) || (a.createdAt - b.createdAt) ||
+    (a.syncId < b.syncId ? -1 : a.syncId > b.syncId ? 1 : 0),
+  );
+  for (const log of ordered) {
+    const date = String(log.entryDate || "");
+    if (!days.has(date)) days.set(date, []);
+    days.get(date).push(log);
+  }
+  return [...days].sort(([a], [b]) => a < b ? 1 : a > b ? -1 : 0);
+}
+
+function moodTime(log) {
+  // 옛 기록은 고칠 때 updatedAt만 바뀌었습니다. 남아 있는 기분을 고른 때를 표시합니다(앱 DayMood와 같게).
+  const at = new Date(log.updatedAt);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
 function moodCard(log) {
   const option = moodOptions.find((choice) => choice.code === log.mood);
   return `
-    <article class="item">
-      <div class="itemHeader">
-        <div>
-          <h3>${escapeHtml(option ? `${option.emoji} ${option.label}` : log.mood || "")}</h3>
-          <div class="meta"><span class="chip">${escapeHtml(log.entryDate || "")}</span></div>
-        </div>
-      </div>
-    </article>
+    <p><span class="chip">${escapeHtml(moodTime(log))}</span>
+      ${escapeHtml(option ? `${option.emoji} ${option.label}` : log.mood || "")}</p>
   `;
 }
 
