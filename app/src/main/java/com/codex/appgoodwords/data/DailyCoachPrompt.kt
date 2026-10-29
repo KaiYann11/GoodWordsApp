@@ -1,7 +1,10 @@
 package com.codex.appgoodwords.data
 
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -45,7 +48,13 @@ data class DailyCoachDigest(
      *
      * **지문에는 넣지 않습니다.** 목표를 고친 것은 오늘 한 일이 아닙니다.
      */
-    val directionLines: List<String> = emptyList()
+    val directionLines: List<String> = emptyList(),
+    /**
+     * 오늘 코치와 나눈 말([DailyCoachPrompt.talkLines]). 내가 한 말이 없으면 빈 목록입니다.
+     *
+     * **지문에는 넣지 않습니다.** 말을 주고받은 것은 오늘 한 일이 아닙니다 — 넣으면 답할 때마다 "기록이 바뀌었다"가 됩니다.
+     */
+    val talkLines: List<String> = emptyList()
 ) {
     /** 오늘 한 것이 하나도 없으면 물어볼 거리가 없습니다. */
     val isEmpty: Boolean
@@ -82,6 +91,14 @@ object DailyCoachPrompt {
     /** 한 갈래에 적을 이름 수. 루틴을 열 개 밟은 날 그 줄만 길어집니다. */
     private const val MAX_NAMES = 8
 
+    /**
+     * 오늘 나눈 말에서 물음에 싣는 줄 수. 하루 내내 이어진 대화를 다 보내면 물을 때마다 값이 커집니다. 최근 것만 갑니다 —
+     * 지금 무슨 이야기를 하고 있는지는 끝쪽에 있습니다.
+     */
+    private const val MAX_TALK_LINES = 16
+
+    private val clock = DateTimeFormatter.ofPattern("HH:mm")
+
     fun digest(
         today: LocalDate,
         at: LocalTime,
@@ -96,7 +113,10 @@ object DailyCoachPrompt {
         items: List<ContentItemEntity>,
         includeDiaryBody: Boolean,
         /** 이상향·목표·롤모델을 실을지([AiFeedbackSettings.includeGoals], 기본 꺼짐). */
-        includeGoals: Boolean = false
+        includeGoals: Boolean = false,
+        /** 오늘 나눈 말([DailyCoachState.conversation]). 내가 한 말이 있을 때만 실립니다([talkLines]). */
+        talk: List<DailyCoachLine> = emptyList(),
+        zoneId: ZoneId = ZoneId.systemDefault()
     ): DailyCoachDigest {
         val todayDiaries = diaries.filter { runCatching { LocalDate.parse(it.entryDate) }.getOrNull() == today }
 
@@ -138,9 +158,39 @@ object DailyCoachPrompt {
             moodLabel = dayDigest.score.mood?.label.orEmpty(),
             ownedQuoteLines = ownedQuoteLines,
             // 무엇이 나가는지는 한 곳에서 정합니다. 돌아보기와 같은 함수입니다.
-            directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList()
+            directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList(),
+            talkLines = talkLines(talk, zoneId)
         )
     }
+
+    /**
+     * 오늘 나눈 말을 물음에 실을 줄로 바꿉니다(사용자가 정함, 2026-10-29 — 다음 한마디도 대화를 압니다).
+     *
+     * **내가 한 말이 하나도 없으면 싣지 않습니다.** 코치 혼자 건넨 한마디들은 대화가 아니고, 답하지 않는 사람의 물음만
+     * 길어집니다. 뒤쪽 [MAX_TALK_LINES]줄만 갑니다. 무엇이 나가는지는 이 함수 한 곳에서 정합니다 — 한마디와 답 모두 이것을 씁니다.
+     */
+    fun talkLines(talk: List<DailyCoachLine>, zoneId: ZoneId = ZoneId.systemDefault()): List<String> {
+        if (talk.none { it.kind == DailyCoachLine.Kind.REPLY }) return emptyList()
+        return talk.takeLast(MAX_TALK_LINES).map { line ->
+            val time = Instant.ofEpochMilli(line.at).atZone(zoneId).format(clock)
+            when (line.kind) {
+                DailyCoachLine.Kind.TIP -> buildString {
+                    append("$time 코치(한마디): ").append(oneLine(line.text))
+                    if (line.quote.isNotBlank()) append(" / 권한 글귀: ").append(oneLine(line.quote))
+                    if (line.action.isNotBlank()) append(" / 해 볼 일: ").append(oneLine(line.action))
+                    if (line.routine.isNotBlank()) append(" / 새 루틴: ").append(oneLine(line.routine))
+                }
+                DailyCoachLine.Kind.REPLY -> "$time 나: " + oneLine(line.text)
+                DailyCoachLine.Kind.ANSWER -> buildString {
+                    append("$time 코치: ").append(oneLine(line.text))
+                    if (line.action.isNotBlank()) append(" / 해 볼 일: ").append(oneLine(line.action))
+                }
+            }
+        }
+    }
+
+    /** 내 말에 줄을 바꿔 썼어도 한 줄로 싣습니다. 줄이 갈리면 어디까지가 한 사람의 말인지 흐려집니다. */
+    private fun oneLine(text: String): String = text.trim().replace(Regex("\\s*\\n\\s*"), " ")
 
     /**
      * 지문만 셉니다.
@@ -182,6 +232,10 @@ object DailyCoachPrompt {
             "- [내가 가려는 방향]이 있으면 오늘 한 것을 그 방향과 이어 짚습니다. 방향을 숙제처럼 들이밀거나 " +
                 "아직 멀다고 말하지 않습니다."
         )
+        appendLine(
+            "- [오늘 나눈 말]이 있으면 그 흐름을 잇습니다. 사용자가 어렵다고 하거나 마다한 것은 다시 권하지 않고, " +
+                "앞서 한 말을 되풀이하지 않습니다."
+        )
         appendLine("- 한마디는 두 문장을 넘기지 않습니다. 홈 화면에서 스치듯 읽는 글입니다.")
         appendLine("- 존댓말로 담담하게 씁니다. 느낌표와 이모지는 쓰지 않습니다.")
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
@@ -205,6 +259,59 @@ object DailyCoachPrompt {
 
     /** 실제로 보낼 내 기록. 설정의 미리 보기도 이 글을 그대로 보여 줍니다. */
     fun userPrompt(digest: DailyCoachDigest): String = buildString {
+        header(digest)
+        // 방향을 먼저 놓습니다. 무엇을 향해 가는지 알고 나서 오늘 한 것을 읽어야 이어 짚을 수 있습니다.
+        section("내가 가려는 방향", digest.directionLines)
+        section("오늘 한 것", digest.doneLines)
+        section("아직 안 밟은 루틴", digest.restRoutines)
+        section("오늘 나눈 말", digest.talkLines)
+        section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
+        append("지금 건넬 한마디를 형식에 맞는 JSON으로만 답해 주세요.")
+    }
+
+    /**
+     * 내가 한 말에 이어 답하라고 일러 주는 말(사용자가 정함, 2026-10-29).
+     *
+     * 한마디와 같은 코치입니다. 다른 것은 셋입니다 — 방금 들은 말에 먼저 답하고, 세 문장까지 쓰고, 권하는 것은 해 볼 일
+     * 하나뿐입니다. 글귀·루틴은 한마디가 맡습니다. 말을 주고받는 중에 담을 것이 쏟아지면 대화가 아니라 목록이 됩니다.
+     */
+    fun replySystemPrompt(): String = buildString {
+        appendLine("당신은 사용자의 오늘 하루를 곁에서 보는 한국어 코치입니다.")
+        appendLine("앞서 건넨 한마디에 사용자가 답했습니다. [오늘 나눈 말]의 마지막 줄이 방금 들은 말입니다.")
+        appendLine("규칙:")
+        appendLine("- 방금 들은 말에 먼저 답합니다. 물은 것이 있으면 그것부터 답합니다.")
+        appendLine("- 기록과 사용자가 한 말만 근거로 삼습니다. 없는 일을 지어내지 않습니다.")
+        appendLine(
+            "- 못 한 것을 세지 않고 다그치지 않습니다. 어렵다고 한 것은 밀어붙이지 말고, 더 작게 줄여 권하거나 " +
+                "그대로 받아 줍니다."
+        )
+        appendLine("- 지금 시각을 봅니다. 이른 아침이면 재촉하지 않고, 밤이면 새 일을 벌이게 하지 않습니다.")
+        appendLine(
+            "- 몹시 힘들다고 하면 할 일보다 마음을 먼저 받아 줍니다. 자신을 해칠 생각을 내비치면 혼자 견디지 말고 " +
+                "가까운 사람이나 109(자살예방상담전화)에 기대 보라고 권합니다."
+        )
+        appendLine("- 세 문장을 넘기지 않습니다. 앞서 한 말을 되풀이하지 않습니다.")
+        appendLine("- 존댓말로 담담하게 씁니다. 느낌표와 이모지는 쓰지 않습니다.")
+        appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
+        appendLine("""{"message":"...","action":"..."}""")
+        appendLine("- message는 늘 적습니다.")
+        append("- action은 오늘 안에 끝낼 수 있는 작은 한 가지를 권할 때만 적고, 없으면 빈 문자열로 둡니다. 매번 채우지 마세요.")
+    }
+
+    /**
+     * 내 말에 답을 받을 때 보낼 글. 한마디와 같은 기록에 오늘 나눈 말을 얹습니다 — 무엇이 나가는지는 같은 설정이 정합니다
+     * (일기 본문·목표). 글귀를 권하지 않으니 이미 담아 둔 것은 싣지 않습니다.
+     */
+    fun replyUserPrompt(digest: DailyCoachDigest): String = buildString {
+        header(digest)
+        section("내가 가려는 방향", digest.directionLines)
+        section("오늘 한 것", digest.doneLines)
+        section("아직 안 밟은 루틴", digest.restRoutines)
+        section("오늘 나눈 말", digest.talkLines)
+        append("방금 들은 말에 이어 형식에 맞는 JSON으로만 답해 주세요.")
+    }
+
+    private fun StringBuilder.header(digest: DailyCoachDigest) {
         val weekday = digest.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)
         appendLine("오늘: ${digest.date} ($weekday) ${"%02d:%02d".format(digest.at.hour, digest.at.minute)}")
         append(digest.stepLine)
@@ -213,12 +320,6 @@ object DailyCoachPrompt {
         if (digest.streakDays > 0) append(" · ${digest.streakDays}일째 이어 오는 중")
         appendLine()
         appendLine()
-        // 방향을 먼저 놓습니다. 무엇을 향해 가는지 알고 나서 오늘 한 것을 읽어야 이어 짚을 수 있습니다.
-        section("내가 가려는 방향", digest.directionLines)
-        section("오늘 한 것", digest.doneLines)
-        section("아직 안 밟은 루틴", digest.restRoutines)
-        section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
-        append("지금 건넬 한마디를 형식에 맞는 JSON으로만 답해 주세요.")
     }
 
     /**

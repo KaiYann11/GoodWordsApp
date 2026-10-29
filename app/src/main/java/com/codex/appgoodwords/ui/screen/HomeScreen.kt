@@ -173,6 +173,8 @@ fun HomeScreen(
     /** 오늘 한 것이 있는지. 없으면 한마디 대신 그 사실을 적습니다. */
     coachHasRecordToday: Boolean = true,
     coachLoading: Boolean = false,
+    /** 내 말에 답을 받는 중. 카드의 마지막 한 쌍 자리에 "답을 쓰는 중"을 적습니다. */
+    coachReplying: Boolean = false,
     /** 아직 안 밟은 루틴 한 줄. AI 없이 기기에서 센 것이라 연결이 없어도 뜹니다. */
     coachNudge: RoutineNudge? = null,
     /** 다음 한마디가 저절로 올 때. 카드가 "다음 한마디 15:20쯤"으로 알립니다. 모르면 null입니다. */
@@ -184,6 +186,8 @@ fun HomeScreen(
     onKeepCoachAction: () -> Unit = {},
     /** 새로 온 한마디를 다 보여 주었습니다. */
     onCoachSeen: () -> Unit = {},
+    /** 한마디에 답하러 대화 화면으로 갑니다. */
+    onReplyCoach: () -> Unit = {},
     /**
      * 한마디 칸을 열어 보여 달라는 요청. 알림이나 "새 한마디 · 보기"를 눌러 왔을 때입니다.
      *
@@ -309,6 +313,7 @@ fun HomeScreen(
                             DailyCoachCard(
                                 state = state,
                                 loading = coachLoading,
+                                replying = coachReplying,
                                 hasRecordToday = coachHasRecordToday,
                                 nudge = coachNudge,
                                 nextAskAt = coachNextAt,
@@ -317,7 +322,8 @@ fun HomeScreen(
                                 onKeepQuote = onKeepCoachQuote,
                                 onKeepRoutine = onKeepCoachRoutine,
                                 onKeepAction = onKeepCoachAction,
-                                onSeen = onCoachSeen
+                                onSeen = onCoachSeen,
+                                onReply = onReplyCoach
                             )
                         }
 

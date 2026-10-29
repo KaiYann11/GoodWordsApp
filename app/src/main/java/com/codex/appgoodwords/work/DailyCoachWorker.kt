@@ -20,7 +20,7 @@ import java.time.ZoneId
  *
  * **알람이 깨웁니다**([DailyCoachAlarm]). 예전에는 WorkManager에 "주기 뒤"로 미뤄 걸었는데, 휴대폰을 내려놓으면
  * 안드로이드가 몇 시간씩 늦춰서 앱을 열어야만 한마디가 왔습니다. 홈에서 묻던 중에 앱을 나가 끊긴 것도 넘겨받아
- * 이어 묻습니다([ReminderScheduler.handOverDailyCoach]).
+ * 이어 묻습니다([ReminderScheduler.handOverDailyCoach]). 내 말에 답을 기다리다 끊긴 것도 같습니다.
  *
  * 한 번 돌고 나면 다음 알람을 겁니다 — 마지막으로 물은 때부터 한 주기 뒤.
  */
@@ -35,11 +35,27 @@ class DailyCoachWorker(
         if (!aiSettings.coachRunsInBackground) return Result.success()
 
         val startedAt = System.currentTimeMillis()
+        val reminderSettings = container.settingsStore.getSettings()
+        // 답을 기다리다 화면을 떠나 끊긴 내 말이 있으면 그 답부터 받습니다. 내가 걸어 둔 말이라 주기·하루 횟수를 보지 않습니다.
+        if (container.dailyCoachCoordinator.state().replyInterrupted) {
+            val talked = container.dailyCoachCoordinator.retryReply()
+            val answer = talked.answerSince(startedAt)
+            if (answer != null && !app.mainScreenVisible) {
+                AppNotifications.showDailyCoachAnswerNotification(
+                    context = applicationContext,
+                    reply = talked.replyBefore(answer),
+                    answer = answer,
+                    soundEnabled = reminderSettings.notificationSoundEnabled,
+                    lockScreenVisible = reminderSettings.lockScreenVisible
+                )
+            }
+        }
+
+        // 방금 말을 주고받았으면 대개 물을 때가 아닙니다 — 다음 한마디는 내가 말한 때부터 한 주기 뒤입니다.
         val state = container.dailyCoachCoordinator.refresh(now = startedAt)
         val tip = state.tip
         // 이번에 받은 것만 알립니다. 홈이 묻는 동안 기다렸다 들여다본 것이면 그 한마디는 홈이 받은 것입니다.
         if (tip != null && tip.createdAt >= startedAt && !app.mainScreenVisible) {
-            val reminderSettings = container.settingsStore.getSettings()
             AppNotifications.showDailyCoachNotification(
                 context = applicationContext,
                 tip = tip,

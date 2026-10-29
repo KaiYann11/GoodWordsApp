@@ -9,7 +9,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -73,6 +76,7 @@ import com.codex.appgoodwords.data.AppUpdateInstaller
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.BookProgressCalculator
+import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DayMood
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.ContentType
@@ -93,6 +97,7 @@ import com.codex.appgoodwords.ui.screen.PrincipleScreen
 import com.codex.appgoodwords.ui.screen.RoutineTab
 import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
+import com.codex.appgoodwords.ui.screen.DailyCoachTalkScreen
 import com.codex.appgoodwords.ui.screen.DaySummaryDialog
 import com.codex.appgoodwords.ui.screen.DetailScreen
 import com.codex.appgoodwords.ui.screen.ClassifyInboxDialog
@@ -153,6 +158,11 @@ private enum class AppTab(
     GOAL_DETAIL("목표"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
+    /**
+     * 오늘의 한마디와 나눈 말(사용자가 정함, 2026-10-29). 홈 한마디 카드의 "답하기"나 코치의 답 알림에서 엽니다.
+     * 메신저처럼 입력 칸이 자판 바로 위에 붙도록 하단 바를 두지 않습니다.
+     */
+    COACH_TALK("오늘의 한마디"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
     GALLERY("모아 보기"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
@@ -189,7 +199,7 @@ private data class AppDestination(
     val goalId: Long? = null
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AppGoodWordsApp(
     viewModel: MainViewModel
@@ -226,6 +236,7 @@ fun AppGoodWordsApp(
     val dailyCoach by viewModel.dailyCoach.collectAsStateWithLifecycle()
     val coachFingerprint by viewModel.coachFingerprint.collectAsStateWithLifecycle()
     val coachLoading by viewModel.coachLoading.collectAsStateWithLifecycle()
+    val coachReplying by viewModel.coachReplying.collectAsStateWithLifecycle()
     val routineNudge by viewModel.routineNudge.collectAsStateWithLifecycle()
     val pendingGrowthPrompt by viewModel.pendingGrowthPrompt.collectAsStateWithLifecycle()
     val moodLogs by viewModel.moodLogs.collectAsStateWithLifecycle()
@@ -236,6 +247,7 @@ fun AppGoodWordsApp(
     val goalTracks by viewModel.goalTracks.collectAsStateWithLifecycle()
     val homeGoalLine by viewModel.homeGoalLine.collectAsStateWithLifecycle()
     val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
+    val openDailyCoachTalkRequest by viewModel.openDailyCoachTalkRequest.collectAsStateWithLifecycle()
     // 홈이 한마디 칸을 열어 보여 주면 거둡니다.
     var coachFocusRequested by remember { mutableStateOf(false) }
 
@@ -371,6 +383,16 @@ fun AppGoodWordsApp(
     /** 홈의 한마디 칸으로 데려갑니다. 홈만 열면 글귀 아래 "오늘" 칸이 보여 한마디는 옆 칸에 숨어 있습니다. */
     fun openDailyCoach() {
         selectTab(AppTab.HOME)
+        coachFocusRequested = true
+    }
+
+    /**
+     * 대화 화면으로 데려갑니다(코치의 답 알림·"코치가 답했습니다 · 보기"). 뒤로 가면 홈의 한마디 칸입니다 — 카드의 "답하기"로
+     * 들어온 것과 같은 자리로 돌아가야 어디서 왔는지 헷갈리지 않습니다.
+     */
+    fun openDailyCoachTalk() {
+        if (currentTab == AppTab.COACH_TALK) return
+        navStack = listOf(tabRoute(AppTab.HOME), tabRoute(AppTab.COACH_TALK))
         coachFocusRequested = true
     }
 
@@ -522,6 +544,27 @@ fun AppGoodWordsApp(
         }
     }
 
+    // 코치의 답 알림을 눌러 왔으면 그 대화로 데려갑니다. 답을 읽고 바로 이어 말할 수 있게.
+    LaunchedEffect(openDailyCoachTalkRequest) {
+        if (openDailyCoachTalkRequest) {
+            openDailyCoachTalk()
+            viewModel.consumeOpenDailyCoachTalkRequest()
+        }
+    }
+
+    /**
+     * 답을 기다리다 화면을 떠나 끊긴 말이 있으면, 앱이 화면에 돌아오는 대로 이어 받습니다.
+     *
+     * 배경 일꾼도 이어 받지만(설정의 *앱을 닫아도 받아 알림으로*를 켰을 때) 1분쯤 뒤입니다. 그 전에 돌아왔으면 기다리게 하지
+     * 않습니다 — 둘이 겹쳐도 한 번만 묻습니다(코디네이터가 하나씩, 이미 답이 왔으면 묻지 않음).
+     */
+    LaunchedEffect(lifecycleOwner, dailyCoach.replyInterrupted) {
+        if (!dailyCoach.replyInterrupted) return@LaunchedEffect
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.retryCoachReply()
+        }
+    }
+
     /**
      * 홈을 보고 있는 동안, 코치에게 다시 물을 때인지 들여다봅니다 — 오늘 한 것이 바뀔 때와,
      * 홈을 열어 둔 채로 주기가 돌아올 때.
@@ -532,14 +575,15 @@ fun AppGoodWordsApp(
      * 다시 들여다봅니다. 실제로 물을지는 [MainViewModel.refreshDailyCoach]가 가립니다 — 대부분은 들여다보고
      * 지나갑니다.
      */
-    LaunchedEffect(lifecycleOwner, currentTab, coachFingerprint, dailyCoach.lastAskedAt, aiFeedbackSettings.gapMinutes) {
+    // 내가 말을 걸었으면 그때부터 한 주기를 셉니다(lastActiveAt). 대화하는 중에 새 한마디가 끼어들지 않습니다.
+    LaunchedEffect(lifecycleOwner, currentTab, coachFingerprint, dailyCoach.lastActiveAt, aiFeedbackSettings.gapMinutes) {
         if (currentTab != AppTab.HOME || coachFingerprint.isBlank()) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.refreshDailyCoach()
             delay(
                 DailyCoachSchedule.delayMillis(
                     gapMinutes = aiFeedbackSettings.gapMinutes,
-                    lastAskedAt = dailyCoach.lastAskedAt,
+                    lastAskedAt = dailyCoach.lastActiveAt,
                     now = System.currentTimeMillis()
                 )
             )
@@ -556,7 +600,10 @@ fun AppGoodWordsApp(
     val newCoachTipAt = dailyCoach.tip?.createdAt?.takeIf { dailyCoach.hasNewTip && aiFeedbackSettings.coachEnabled }
     LaunchedEffect(newCoachTipAt) {
         // 둘 다 봅니다. 알림 요청을 거둔 뒤에 돌 수도, 거두기 전에 돌 수도 있습니다.
-        if (newCoachTipAt == null || currentTab == AppTab.HOME || openDailyCoachRequest || coachFocusRequested) {
+        // 대화 화면에 있으면 그 화면에 새 한마디가 끼어 보이므로 띄우지 않습니다.
+        if (newCoachTipAt == null || currentTab == AppTab.HOME || currentTab == AppTab.COACH_TALK ||
+            openDailyCoachRequest || coachFocusRequested
+        ) {
             return@LaunchedEffect
         }
         val result = snackbarHostState.showSnackbar(
@@ -565,6 +612,26 @@ fun AppGoodWordsApp(
             duration = SnackbarDuration.Long
         )
         if (result == SnackbarResult.ActionPerformed) openDailyCoach()
+    }
+
+    /**
+     * 답을 기다리다 대화 화면을 떠났는데 그 사이 답이 오면 아래에 알리고 데려갈 길을 줍니다(새 한마디와 같은 방식).
+     *
+     * 앱이 뜨기 전에 온 답은 알리지 않습니다 — 그때는 알림이 이미 알렸고, 앱을 열 때마다 지난 답을 다시 알리게 됩니다.
+     */
+    val latestAnswerAt = dailyCoach.talk.lastOrNull { it.kind == DailyCoachLine.Kind.ANSWER }?.at ?: 0L
+    val appearedAt = remember { System.currentTimeMillis() }
+    var announcedAnswerAt by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(latestAnswerAt) {
+        if (latestAnswerAt <= maxOf(appearedAt, announcedAnswerAt)) return@LaunchedEffect
+        announcedAnswerAt = latestAnswerAt
+        if (currentTab == AppTab.COACH_TALK || openDailyCoachTalkRequest) return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "코치가 답했습니다",
+            actionLabel = "보기",
+            duration = SnackbarDuration.Long
+        )
+        if (result == SnackbarResult.ActionPerformed) openDailyCoachTalk()
     }
 
     LaunchedEffect(openItemRequest, allItems, currentTab) {
@@ -681,8 +748,10 @@ fun AppGoodWordsApp(
                         }
                     },
                     actions = {
+                        // 대화 화면은 메신저처럼 말만 둡니다. 검색·설정은 나와서 엽니다.
+                        val talking = currentTab == AppTab.COACH_TALK
                         // 검색은 특정 탭에 매이지 않습니다. 다섯 기능을 한 번에 찾기 때문입니다.
-                        if (selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SEARCH) {
+                        if (!talking && selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SEARCH) {
                             IconButton(onClick = { pushRoute(tabRoute(AppTab.SEARCH)) }) {
                                 Icon(
                                     imageVector = Icons.Outlined.Search,
@@ -691,7 +760,7 @@ fun AppGoodWordsApp(
                             }
                         }
                         // 설정은 하단 바에서 빠졌으므로 어느 화면에서나 여기로 들어갑니다.
-                        if (selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SETTINGS) {
+                        if (!talking && selectedItem == null && destination.editingItemId == null && currentTab != AppTab.SETTINGS) {
                             IconButton(
                                 onClick = {
                                     // 설정은 늘 갈래 목록에서 엽니다. 지난번에 보던 갈래로 바로 떨어지면 어디인지 헷갈립니다.
@@ -710,7 +779,8 @@ fun AppGoodWordsApp(
             },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
-                if (selectedItem == null) {
+                // 대화 화면에는 하단 바를 두지 않습니다. 입력 칸이 자판 바로 위에 붙어야 합니다.
+                if (selectedItem == null && currentTab != AppTab.COACH_TALK) {
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp
@@ -744,7 +814,7 @@ fun AppGoodWordsApp(
                                                 AppTab.BOOK_REVIEW -> Icons.Outlined.EditNote
                                                 AppTab.BOOK_PROGRESS -> Icons.Outlined.AutoAwesome
                                                 AppTab.ROUTINE_STATS -> Icons.Outlined.CheckCircle
-                                                AppTab.GROWTH -> Icons.Outlined.AutoAwesome
+                                                AppTab.GROWTH, AppTab.COACH_TALK -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
@@ -893,14 +963,15 @@ fun AppGoodWordsApp(
                             // 세지 않지만, 오늘 어땠는지는 코치가 말을 건넬 거리입니다.
                             coachHasRecordToday = coachFingerprint.isNotBlank(),
                             coachLoading = coachLoading,
+                            coachReplying = coachReplying,
                             coachNudge = routineNudge,
                             // 앱을 닫아 두어도 알람이 깨워 받아 오는 경우에만 말합니다. 앱을 열어 둔 동안만 묻게 했으면
-                            // 그 시각에 앱이 닫혀 있을 때 오지 않으니 약속하지 않습니다.
+                            // 그 시각에 앱이 닫혀 있을 때 오지 않으니 약속하지 않습니다. 말을 주고받았으면 그때부터 셉니다.
                             coachNextAt = DailyCoachSchedule.nextAskAt(
                                 gapMinutes = aiFeedbackSettings.gapMinutes,
                                 limit = aiFeedbackSettings.askLimit,
                                 askCount = dailyCoach.askCount,
-                                lastAskedAt = dailyCoach.lastAskedAt
+                                lastAskedAt = dailyCoach.lastActiveAt
                             ).takeIf { aiFeedbackSettings.coachRunsInBackground && coachFingerprint.isNotBlank() },
                             onOpenRoutines = { selectTab(AppTab.ROUTINE) },
                             onRefreshCoach = { viewModel.refreshDailyCoach(force = true) },
@@ -932,6 +1003,7 @@ fun AppGoodWordsApp(
                                 }
                             },
                             onCoachSeen = { viewModel.markDailyCoachSeen() },
+                            onReplyCoach = { pushRoute(tabRoute(AppTab.COACH_TALK)) },
                             coachFocusRequested = coachFocusRequested,
                             onCoachFocused = { coachFocusRequested = false },
                             // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
@@ -1552,6 +1624,59 @@ fun AppGoodWordsApp(
                                 settingsSection = SettingsSection.AI
                                 pushRoute(tabRoute(AppTab.SETTINGS))
                             }
+                        )
+
+                        AppTab.COACH_TALK -> DailyCoachTalkScreen(
+                            // 가장자리까지 그리는 창이라 자판이 올라와도 창이 줄지 않습니다(Android 15에서 확인, 2026-10-29) —
+                            // 그대로 두면 맨 아래 입력 칸과 보내기가 자판에 깔립니다. 자판만큼 비키되, 아래 시스템 막대 몫은
+                            // Scaffold가 이미 비켰으니 겹쳐 세지 않습니다(겹치면 입력 칸과 자판 사이에 빈 줄이 생깁니다).
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .consumeWindowInsets(innerPadding)
+                                .imePadding(),
+                            state = dailyCoach,
+                            replying = coachReplying,
+                            canReply = aiFeedbackSettings.coachEnabled,
+                            onSend = { text -> viewModel.replyToCoach(text) },
+                            onRetry = { viewModel.retryCoachReply() },
+                            onKeepAnswerAction = { at ->
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachAnswerAction(at)
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "오늘 할 일에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
+                            // 지금 한마디의 담기는 카드와 같은 길입니다. 한쪽에서 담으면 다른 쪽 버튼도 거둡니다.
+                            onKeepQuote = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachQuote()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "보관함에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
+                            onKeepRoutine = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachRoutine()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "루틴에 추가했습니다."
+                                        else result.exceptionOrNull()?.message ?: "추가하지 못했습니다."
+                                    )
+                                }
+                            },
+                            onKeepAction = {
+                                coroutineScope.launch {
+                                    val result = viewModel.keepCoachAction()
+                                    snackbarHostState.showSnackbar(
+                                        if (result.isSuccess) "오늘 할 일에 담았습니다."
+                                        else result.exceptionOrNull()?.message ?: "담지 못했습니다."
+                                    )
+                                }
+                            },
+                            onSeen = { viewModel.markDailyCoachSeen() }
                         )
 
                         AppTab.GALLERY -> AttachmentGalleryScreen(

@@ -14,6 +14,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.codex.appgoodwords.MainActivity
 import com.codex.appgoodwords.R
 import com.codex.appgoodwords.data.ContentItemEntity
+import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DailyCoachTip
 import com.codex.appgoodwords.data.DailySummary
 import com.codex.appgoodwords.data.GrowthReportEntity
@@ -40,6 +41,8 @@ object AppNotifications {
     const val extraCaptureIdea = "extra_capture_idea"
     /** 오늘의 한마디 알림. 홈의 한마디 칸까지 데려갑니다. */
     const val extraOpenDailyCoach = "extra_open_daily_coach"
+    /** 내 말에 코치가 답한 알림. 그 대화 화면까지 데려갑니다. */
+    const val extraOpenDailyCoachTalk = "extra_open_daily_coach_talk"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -164,8 +167,66 @@ object AppNotifications {
             .setPublicVersion(publicVersion)
             .build()
 
-        NotificationManagerCompat.from(context).notify(9_008, notification)
+        NotificationManagerCompat.from(context).notify(coachNotificationId, notification)
     }
+
+    /**
+     * 앱 밖에 있는 동안 내 말에 코치가 답했다고 알립니다 — 답을 기다리다 앱을 나갔거나, 끊긴 것을 배경 일꾼이 이어 받았을 때.
+     *
+     * **한마디 알림과 같은 자리에 띄웁니다.** 같은 대화의 다음 말이라, 알림이 두 개로 갈라지면 무엇이 최근 것인지 헷갈립니다.
+     * 누르면 대화 화면으로 갑니다(한마디 알림은 홈 카드로). 잠금 화면 규칙은 한마디 알림과 같습니다.
+     */
+    fun showDailyCoachAnswerNotification(
+        context: Context,
+        reply: String,
+        answer: DailyCoachLine,
+        soundEnabled: Boolean,
+        lockScreenVisible: Boolean
+    ) {
+        if (!hasNotificationPermission(context)) return
+
+        val openTalkIntent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(extraOpenDailyCoachTalk, true)
+        // 한마디 알림과 요청 번호를 나눕니다. 같으면 FLAG_UPDATE_CURRENT가 앞서 띄운 알림의 갈 곳까지 바꿉니다.
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            9_010,
+            openTalkIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val body = buildString {
+            if (reply.isNotBlank()) append("나: ").append(reply).append("\n\n")
+            append(answer.text)
+            if (answer.action.isNotBlank()) append("\n\n해 볼 만한 한 가지: ").append(answer.action)
+        }
+        val publicVersion = NotificationCompat.Builder(context, coachChannelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("오늘의 한마디")
+            .setContentText("코치가 답했습니다")
+            .build()
+
+        val notification = NotificationCompat.Builder(context, coachChannelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("코치의 답")
+            .setContentText(answer.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setSilent(!soundEnabled)
+            .setVisibility(
+                if (lockScreenVisible) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE
+            )
+            .setPublicVersion(publicVersion)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(coachNotificationId, notification)
+    }
+
+    /** 한마디와 코치의 답이 함께 쓰는 알림 자리. */
+    private const val coachNotificationId = 9_008
 
     fun showTodoNotification(
         context: Context,

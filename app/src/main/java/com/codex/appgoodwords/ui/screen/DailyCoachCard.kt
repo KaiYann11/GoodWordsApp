@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -45,7 +46,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.RoutineNudge
 import com.codex.appgoodwords.ui.theme.Amber
@@ -74,6 +77,12 @@ internal const val dailyCoachNewBadgeTag = "home_daily_coach_new"
 /** "다음 한마디 15:20쯤". */
 internal const val dailyCoachNextTag = "home_daily_coach_next"
 
+/** 대화 화면으로 가는 "답하기". */
+internal const val dailyCoachReplyTag = "home_daily_coach_reply"
+
+/** 지금 한마디 뒤로 마지막으로 주고받은 한 쌍. */
+internal const val dailyCoachExchangeTag = "home_daily_coach_exchange"
+
 /** 새 한마디가 다 써진 뒤 본 것으로 적기까지 보여 두는 시간. 다 읽기 전에 반짝임이 꺼지면 무엇이 새 것이었는지 놓칩니다. */
 private const val SEEN_AFTER_MS = 2_500L
 
@@ -99,12 +108,18 @@ private const val REVEAL_MS = 1_400L
  * 색 그림자, 깜빡이는 "새 한마디" 점, 용수철로 얹히는 등장, 글자가 써지듯 나타나는 본문(채팅 앱의 답처럼).
  * 다 보여 준 뒤 본 것으로 적고([onSeen]) 거둡니다 — 늘 반짝이면 무엇이 새 것인지 알 수 없습니다.
  * 진동은 넣지 않습니다. 진동은 사용자가 한 동작에만 답합니다(`Feedback.kt`).
+ *
+ * **받은 한마디에 답할 수 있습니다**(사용자가 정함, 2026-10-29 — 카드 + 대화 화면). 주고받는 말은 대화 화면
+ * ([DailyCoachTalkScreen])에서 하고, 카드에는 마지막 한 쌍만 두 줄씩 보입니다. 홈은 훑는 자리라 대화가 길어져도
+ * 카드가 늘어나지 않습니다.
  */
 @Composable
 fun DailyCoachCard(
     state: DailyCoachState,
     /** 물어보는 중. 기다리는 표시를 띄웁니다. */
     loading: Boolean = false,
+    /** 내 말에 답을 받는 중. 마지막 한 쌍 자리에 "답을 쓰는 중"을 적습니다. */
+    replying: Boolean = false,
     /** 오늘 한 것이 있는지. 없으면 물을 거리가 없다고 적어 둡니다. */
     hasRecordToday: Boolean = true,
     /**
@@ -126,7 +141,9 @@ fun DailyCoachCard(
     onKeepRoutine: () -> Unit = {},
     onKeepAction: () -> Unit = {},
     /** 새로 온 한마디를 다 보여 주었습니다. 반짝임과 홈 탭의 점을 거둡니다. */
-    onSeen: () -> Unit = {}
+    onSeen: () -> Unit = {},
+    /** 대화 화면을 엽니다. 받은 한마디가 있을 때만 버튼이 있습니다. */
+    onReply: () -> Unit = {}
 ) {
     val tip = state.tip
     val isNew = state.hasNewTip
@@ -305,6 +322,19 @@ fun DailyCoachCard(
                 )
             }
 
+            // 무엇에 답하는지가 있어야 대화가 됩니다. 받은 한마디가 없으면 버튼을 두지 않습니다.
+            if (tip != null) {
+                LastExchange(state = state, replying = replying)
+                FilledTonalButton(
+                    onClick = onReply,
+                    modifier = Modifier.testTag(dailyCoachReplyTag)
+                ) {
+                    Text(
+                        if (state.exchangeCount == 0) "답하기" else "답하기 · 주고받은 말 ${state.exchangeCount}"
+                    )
+                }
+            }
+
             // AI가 써 준 것 아래에 둡니다. 읽고 나서 바로 할 수 있는 것이 마지막에 오도록.
             nudge?.let { line ->
                 Row(
@@ -370,6 +400,49 @@ fun DailyCoachCard(
     }
 }
 
+/**
+ * 지금 한마디 뒤로 마지막으로 주고받은 한 쌍 — 내 말 하나와 그 답. 주고받은 것이 없으면 아무것도 두지 않습니다.
+ *
+ * 두세 줄에서 자릅니다. 나머지는 대화 화면에서 봅니다.
+ */
+@Composable
+private fun LastExchange(state: DailyCoachState, replying: Boolean) {
+    val since = state.talkSinceTip
+    val replyIndex = since.indexOfLast { it.kind == DailyCoachLine.Kind.REPLY }
+    if (replyIndex < 0) return
+    val reply = since[replyIndex]
+    val answer = since.drop(replyIndex + 1).firstOrNull { it.kind == DailyCoachLine.Kind.ANSWER }
+    val failed = answer == null && !replying && state.replyError.isNotBlank()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag(dailyCoachExchangeTag),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "나: ${reply.text}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "코치: " + when {
+                answer != null -> answer.text
+                replying -> "답을 쓰는 중…"
+                failed -> "답을 받지 못했습니다. 대화에서 다시 받을 수 있습니다."
+                else -> "답을 기다리고 있습니다."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 /** "새 한마디" 표시. 점이 숨 쉬듯 깜빡여 아직 안 본 것이 있다고 알립니다. */
 @Composable
 private fun NewTipBadge(pulse: Float) {
@@ -420,8 +493,9 @@ private fun Modifier.glowBorder(progress: Float, alpha: Float, shape: Shape): Mo
         )
     }
 
+/** 권해 받은 것 한 줄과 담기 버튼. 대화 화면의 한마디·답도 같은 꼴을 씁니다. */
 @Composable
-private fun SuggestionRow(
+internal fun SuggestionRow(
     title: String,
     body: String,
     label: String,
@@ -443,7 +517,7 @@ private fun SuggestionRow(
 
 /** 담은 뒤에는 버튼을 거두고 담았다고만 적습니다. 두 번 눌러 두 벌이 생기지 않게 합니다. */
 @Composable
-private fun KeepRow(
+internal fun KeepRow(
     label: String,
     kept: Boolean,
     keptLabel: String,

@@ -19,7 +19,7 @@ import org.junit.Test
  * 운영 서버가 아니라 **CLI가 깔린 PC에서 띄운 별도 HTTPS 테스트 서버**를 가리켜야 합니다.
  *
  * 여기서 보려는 것은 **일러 준 형식이 실제로 지켜지는지**입니다. 형식이 어긋나면 카드에는
- * 아무것도 안 뜨는데, 그 사실은 사람이 켜 보기 전에는 드러나지 않습니다.
+ * 아무것도 안 뜨는데, 그 사실은 사람이 켜 보기 전에는 드러나지 않습니다. 한마디에 내가 답한 말의 답도 같은 길로 봅니다.
  */
 class DailyCoachAiIntegrationTest {
     private val syncSettings = ServerSyncSettings(
@@ -39,6 +39,45 @@ class DailyCoachAiIntegrationTest {
 
     @Test fun codexCliWithItsDefaultModelAnswers() = runBlocking {
         askWith(AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = AiProvider.CLI_DEFAULT_MODEL))
+    }
+
+    @Test fun claudeCliAnswersWhatISaid() = runBlocking {
+        replyWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
+    }
+
+    @Test fun codexCliAnswersWhatISaid() = runBlocking {
+        replyWith(AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = AiProvider.CLI_DEFAULT_MODEL))
+    }
+
+    /**
+     * 한마디에 내가 답한 말에 코치가 이어 답하는지(사용자가 정함, 2026-10-29). 답 형식이 어긋나도 글로는 받지만, 그러면
+     * 해 볼 일을 담을 수 없어 형식까지 봅니다.
+     */
+    private suspend fun replyWith(aiSettings: AiFeedbackSettings) {
+        val now = System.currentTimeMillis()
+        val talk = listOf(
+            DailyCoachLine(
+                kind = DailyCoachLine.Kind.TIP,
+                text = "물 한 컵으로 하루를 여셨네요. 저녁에는 잠깐 걸어 보세요.",
+                action = "저녁 산책 10분",
+                at = now - 30 * 60_000L
+            ),
+            DailyCoachLine(kind = DailyCoachLine.Kind.REPLY, text = "오늘은 다리가 아파서 걷기는 어려울 것 같아요.", at = now)
+        )
+        val rawAnswer = AiFeedbackClient().ask(
+            system = DailyCoachPrompt.replySystemPrompt(),
+            user = DailyCoachPrompt.replyUserPrompt(digest(talk)),
+            model = aiSettings.effectiveModel,
+            aiSettings = aiSettings,
+            syncSettings = syncSettings
+        )
+
+        val answer = DailyCoachParser.parseAnswer(rawAnswer, model = aiSettings.reportModel)
+        assertNotNull("답이 오지 않았습니다: $rawAnswer", answer)
+        assertTrue(rawAnswer, answer!!.text.isNotBlank())
+        assertTrue("일러 준 형식이 아닙니다: $rawAnswer", rawAnswer.contains("\"message\""))
+        // 대화 화면의 말풍선에 들어가야 합니다. 길게 오면 해석에서 잘립니다.
+        assertTrue(answer.text, answer.text.length <= 241)
     }
 
     private suspend fun askWith(aiSettings: AiFeedbackSettings) {
@@ -61,7 +100,7 @@ class DailyCoachAiIntegrationTest {
     }
 
     /** 오늘 한 것이 조금 있는 하루. 빈 하루로는 묻지 않습니다. */
-    private fun digest(): DailyCoachDigest {
+    private fun digest(talk: List<DailyCoachLine> = emptyList()): DailyCoachDigest {
         val checks = listOf(
             RoutineCheckEntity(
                 syncId = "c1",
@@ -109,7 +148,8 @@ class DailyCoachAiIntegrationTest {
             todayChecks = checks,
             diaries = diaries,
             items = emptyList(),
-            includeDiaryBody = false
+            includeDiaryBody = false,
+            talk = talk
         )
     }
 }
