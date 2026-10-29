@@ -185,7 +185,8 @@ class ReminderScheduler(
         val delay = if (state.askCount >= settings.askLimit) {
             DailyCoachSchedule.untilTomorrowMillis(now, ZoneId.systemDefault())
         } else {
-            DailyCoachSchedule.delayMillis(settings.gapMinutes, state.lastAskedAt, now)
+            // 내가 말을 걸었으면 그때부터 셉니다([DailyCoachState.lastActiveAt]). 대화하는 중에 알람이 끼어들지 않습니다.
+            DailyCoachSchedule.delayMillis(settings.gapMinutes, state.lastActiveAt, now)
         }
         dailyCoachAlarm.set(now + delay)
     }
@@ -205,7 +206,7 @@ class ReminderScheduler(
         val delay = if (state.askCount >= settings.askLimit) {
             DailyCoachSchedule.untilTomorrowMillis(now, ZoneId.systemDefault())
         } else {
-            DailyCoachSchedule.nextDelayMillis(settings.gapMinutes, state.lastAskedAt, now)
+            DailyCoachSchedule.nextDelayMillis(settings.gapMinutes, state.lastActiveAt, now)
         }
         dailyCoachAlarm.set(now + delay)
     }

@@ -93,6 +93,10 @@ class MainActivity : FragmentActivity() {
             intent?.removeExtra(AppNotifications.extraOpenDailyCoach)
             viewModel.handleOpenDailyCoachRequest()
         }
+        if (intent?.getBooleanExtra(AppNotifications.extraOpenDailyCoachTalk, false) == true) {
+            intent?.removeExtra(AppNotifications.extraOpenDailyCoachTalk)
+            viewModel.handleOpenDailyCoachTalkRequest()
+        }
         if (contentId > 0L) {
             viewModel.handleOpenItemRequest(
                 itemId = contentId,

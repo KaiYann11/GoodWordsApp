@@ -213,6 +213,108 @@ class DailyCoachPromptTest {
         )
     }
 
+    @Test
+    fun whatWeSaidGoesOutOnlyOnceISpoke() {
+        // 코치 혼자 건넨 한마디들은 대화가 아닙니다. 답하지 않는 사람의 물음은 예전 그대로입니다.
+        val silent = digest(checks = listOf(check("물 한 컵")), talk = listOf(tipLine("물 한 컵으로 여셨네요.", "09:12")))
+        assertEquals(emptyList<String>(), silent.talkLines)
+        assertFalse(DailyCoachPrompt.userPrompt(silent).contains("오늘 나눈 말"))
+
+        // 내가 한 말이 있으면 다음 한마디도 압니다(사용자가 정함, 2026-10-29).
+        val talked = digest(
+            checks = listOf(check("물 한 컵")),
+            talk = listOf(
+                tipLine("물 한 컵으로 여셨네요. 저녁엔 걸어 보세요.", "09:12", action = "저녁 산책 10분"),
+                line(DailyCoachLine.Kind.REPLY, "다리가 아파서 걷기는 어려워요", "09:20"),
+                line(DailyCoachLine.Kind.ANSWER, "그럼 앉아서 발목을 돌려 보세요.", "09:21")
+            )
+        )
+        val prompt = DailyCoachPrompt.userPrompt(talked)
+        assertTrue(prompt, prompt.contains("[오늘 나눈 말]"))
+        assertTrue(prompt, prompt.contains("- 09:12 코치(한마디): 물 한 컵으로 여셨네요. 저녁엔 걸어 보세요. / 해 볼 일: 저녁 산책 10분"))
+        assertTrue(prompt, prompt.contains("- 09:20 나: 다리가 아파서 걷기는 어려워요"))
+        assertTrue(prompt, prompt.contains("- 09:21 코치: 그럼 앉아서 발목을 돌려 보세요."))
+        // 마다한 것을 다시 권하지 말라는 말이 함께 나갑니다.
+        assertTrue(DailyCoachPrompt.systemPrompt().contains("[오늘 나눈 말]이 있으면 그 흐름을 잇습니다"))
+    }
+
+    @Test
+    fun talkingIsNotANewRecordForToday() {
+        // 말을 주고받은 것은 오늘 한 일이 아닙니다. 지문이 바뀌면 답할 때마다 "기록이 바뀌었다"가 됩니다.
+        val quiet = digest(checks = listOf(check("물 한 컵")))
+        val talked = digest(
+            checks = listOf(check("물 한 컵")),
+            talk = listOf(tipLine("한마디", "09:12"), line(DailyCoachLine.Kind.REPLY, "피곤해요", "09:20"))
+        )
+
+        assertEquals(quiet.fingerprint, talked.fingerprint)
+    }
+
+    @Test
+    fun theReplyPromptEndsWithWhatIJustSaid() {
+        val digest = digest(
+            checks = listOf(check("물 한 컵")),
+            items = listOf(ContentItemEntity(id = 1, syncId = "i1", type = ContentType.QUOTE, title = "이미 가진 글귀", body = "")),
+            talk = listOf(tipLine("한마디", "09:12"), line(DailyCoachLine.Kind.REPLY, "오늘은 좀 피곤해요", "09:20"))
+        )
+        val prompt = DailyCoachPrompt.replyUserPrompt(digest)
+
+        assertTrue(prompt, prompt.contains("[오늘 한 것]"))
+        assertEquals("- 09:20 나: 오늘은 좀 피곤해요", digest.talkLines.last().let { "- $it" })
+        assertTrue(prompt, prompt.trimEnd().endsWith("방금 들은 말에 이어 형식에 맞는 JSON으로만 답해 주세요."))
+        // 답할 때는 글귀를 권하지 않습니다. 빼 달라는 목록을 보낼 일이 없습니다.
+        assertFalse(prompt, prompt.contains("이미 가진 글귀"))
+    }
+
+    @Test
+    fun theReplyKeepsTheSameDiaryRule() {
+        // 무엇이 나가는지는 한마디와 같은 설정이 정합니다. 답할 때라고 일기 본문이 따라가지 않습니다.
+        val digest = digest(
+            diaries = listOf(diary),
+            includeDiaryBody = false,
+            talk = listOf(tipLine("한마디", "09:12"), line(DailyCoachLine.Kind.REPLY, "피곤해요", "09:20"))
+        )
+        val prompt = DailyCoachPrompt.replyUserPrompt(digest)
+
+        assertFalse(prompt, prompt.contains("마음이 무거웠다"))
+        assertFalse(prompt, prompt.contains("아무에게도 못 한 말"))
+    }
+
+    @Test
+    fun theReplyAsksForAShortAnswerAndOneThingToTry() {
+        val system = DailyCoachPrompt.replySystemPrompt()
+
+        assertTrue(system, system.contains("""{"message":"...","action":"..."}"""))
+        assertTrue(system, system.contains("방금 들은 말에 먼저 답합니다"))
+        assertTrue(system, system.contains("세 문장을 넘기지 않습니다"))
+        // 힘든 말을 들었을 때 할 일보다 마음을 먼저 받고, 위험하면 기댈 곳을 알려 줍니다.
+        assertTrue(system, system.contains("109"))
+    }
+
+    @Test
+    fun aLongDayOfTalkSendsOnlyTheEnd() {
+        // 하루 내내 이어진 대화를 다 보내면 물을 때마다 값이 커집니다. 지금 무슨 이야기인지는 끝쪽에 있습니다.
+        val talk = (0 until 30).map { index ->
+            line(if (index % 2 == 0) DailyCoachLine.Kind.REPLY else DailyCoachLine.Kind.ANSWER, "말 $index", "10:%02d".format(index))
+        }
+        val lines = DailyCoachPrompt.talkLines(talk, zone)
+
+        assertEquals(16, lines.size)
+        assertEquals("10:29 코치: 말 29", lines.last())
+        assertEquals("10:14 나: 말 14", lines.first())
+    }
+
+    @Test
+    fun myLineBreaksDoNotSplitALine() {
+        // 줄이 갈리면 어디까지가 한 사람의 말인지 흐려집니다.
+        val lines = DailyCoachPrompt.talkLines(
+            listOf(line(DailyCoachLine.Kind.REPLY, "피곤해요\n\n그래도 걷고 싶어요  \n", "09:20")),
+            zone
+        )
+
+        assertEquals(listOf("09:20 나: 피곤해요 그래도 걷고 싶어요"), lines)
+    }
+
     private fun digest(
         routines: List<RoutineEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList(),
@@ -222,7 +324,8 @@ class DailyCoachPromptTest {
         items: List<ContentItemEntity> = emptyList(),
         includeDiaryBody: Boolean = false,
         at: LocalTime = this.at,
-        includeGoals: Boolean = false
+        includeGoals: Boolean = false,
+        talk: List<DailyCoachLine> = emptyList()
     ): DailyCoachDigest = DailyCoachPrompt.digest(
         today = today,
         at = at,
@@ -233,8 +336,19 @@ class DailyCoachPromptTest {
         diaries = diaries,
         items = items,
         includeDiaryBody = includeDiaryBody,
-        includeGoals = includeGoals
+        includeGoals = includeGoals,
+        talk = talk,
+        zoneId = zone
     )
+
+    private fun line(kind: DailyCoachLine.Kind, text: String, time: String, action: String = "") = DailyCoachLine(
+        kind = kind,
+        text = text,
+        action = action,
+        at = at(today, LocalTime.parse(time))
+    )
+
+    private fun tipLine(text: String, time: String, action: String = "") = line(DailyCoachLine.Kind.TIP, text, time, action)
 
     private fun dayDigest(
         checks: List<RoutineCheckEntity> = emptyList(),

@@ -182,6 +182,21 @@ class SettingsStore(
         }
     }
 
+    /**
+     * 받아 둔 한마디를 읽고 고쳐 쓰는 것을 한 번에 합니다.
+     *
+     * 따로 읽고 쓰면 그 사이에 다른 쪽이 써 둔 것을 덮습니다 — 한마디를 묻는 몇 분 사이에 보낸 내 말이나 눌러 둔 담기가
+     * 묻기 전의 상태로 사라집니다.
+     */
+    suspend fun updateDailyCoachState(transform: (DailyCoachState) -> DailyCoachState): DailyCoachState {
+        var updated = DailyCoachState()
+        context.dataStore.edit { preferences ->
+            updated = transform(DailyCoachJson.decode(preferences[Keys.aiCoachState].orEmpty()))
+            preferences[Keys.aiCoachState] = DailyCoachJson.encode(updated)
+        }
+        return updated
+    }
+
     val dailyStepsFlow: Flow<List<DailyStep>> = context.dataStore.data.map { preferences ->
         DailyStep.parse(preferences[Keys.dailySteps].orEmpty())
     }

@@ -113,8 +113,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
 | 담기 전 다듬기 · 읽음으로 세지 않는 종류 · AI 추천 글귀의 갈래 | `ContentNormalizer` · `ContentType.personalTypes` · `AI_CATEGORY` |
 | AI에 일기·목표가 어디까지 나가는지 | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
+| 오늘 나눈 말이 AI에 어디까지 나가는지 | `DailyCoachPrompt.talkLines` (한마디·답 공용) |
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
-| 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` |
+| 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |
 
 ## 함께 고쳐야 하는 것
@@ -155,10 +156,14 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - **오늘의 한마디의 배경은 알람이 깨웁니다**(`DailyCoachAlarm` → 곧바로 도는 일꾼). WorkManager에 "주기 뒤"로 미루면 휴대폰을
   내려놓은 동안 몇 시간씩 밀려 앱을 열 때만 왔습니다. 알람은 재부팅·업데이트로 사라지니 `DailyCoachAlarmReceiver`가 다시 겁니다.
   홈의 물음은 앱이 화면에 있을 때만 나갑니다(Android 15는 화면 밖 앱의 통신을 끊습니다).
+- **오늘의 한마디 상태는 `SettingsStore.updateDailyCoachState`로만 고칩니다**(읽고 고치고 쓰기를 한 번에). 따로 읽고 쓰면
+  묻는 몇 분 사이에 보낸 내 말·담기 표시를 묻기 전 상태로 덮습니다. 코치의 말은 물은 때의 차례에 끼웁니다(`withCoachLine`).
 - **목록 화면에서 다른 경로로 넘어갈 때 대화상자를 먼저 닫습니다** — 열린 채로 넘어가면 그 경로의 상태와 함께 저장되어,
   돌아왔을 때 창이 다시 뜨고 앞서 친 글이 다음 창에 남습니다(`GoalTabsScreen`).
 - 앱 업데이트는 서버가 준 파일 이름을 그대로 믿지 않고, 해시가 다르면 지우고, 접속 키를 보내지 않습니다(`AppUpdateJson`).
-- 자판이 오르면 창을 줄입니다(`adjustResize`) — 화면에서 `imePadding()`을 또 붙이지 않고, 긴 글 화면의 버튼은 글 위에 둡니다.
+- **자판이 올라와도 창은 줄지 않습니다**(가장자리까지 그리는 창 — Android 15 에뮬레이터에서 확인, `adjustResize`는 자판 높이만
+  알려 줍니다). 맨 아래에 붙은 입력 칸은 `consumeWindowInsets(innerPadding).imePadding()`으로 비킵니다(대화 화면) —
+  `consumeWindowInsets` 없이 붙이면 아래 시스템 막대 몫이 겹쳐 입력 칸과 자판 사이에 빈 줄이 생깁니다. 긴 글 화면의 버튼은 글 위에 둡니다.
 
 ## 이 앱이 지키는 원칙
 

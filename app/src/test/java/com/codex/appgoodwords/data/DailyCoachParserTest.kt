@@ -90,5 +90,50 @@ class DailyCoachParserTest {
         assertNull(parse("{망가진 글"))
     }
 
+    @Test
+    fun anAnswerReadsTheWordAndOneThingToTry() {
+        val answer = answer("""{"message":"그럼 5분만 창가에서 숨을 고르세요.","action":"창문 열기"}""")!!
+
+        assertEquals(DailyCoachLine.Kind.ANSWER, answer.kind)
+        assertEquals("그럼 5분만 창가에서 숨을 고르세요.", answer.text)
+        assertEquals("창문 열기", answer.action)
+        assertEquals("claude-opus-5", answer.model)
+        assertEquals(now, answer.at)
+    }
+
+    @Test
+    fun anAnswerThatForgotTheFormatIsStillAnAnswer() {
+        // 대화의 답은 말 자체가 전부입니다. JSON을 잊었다고 버리면 내 말이 답 없이 남습니다.
+        val answer = answer("  쉬는 것도 하루의 일입니다. 오늘은 일찍 누워 보세요.  ")
+
+        assertEquals("쉬는 것도 하루의 일입니다. 오늘은 일찍 누워 보세요.", answer?.text)
+        assertEquals("", answer?.action)
+    }
+
+    @Test
+    fun aCutOffAnswerIsNotShownAsIs() {
+        // 잘린 JSON을 글자 그대로 띄우면 말풍선에 `{"message":"그럼` 같은 조각이 뜹니다.
+        assertNull(answer("""{"message":"그럼 5분만"""))
+        assertNull(answer(""))
+        assertNull(answer("""{"message":"","action":"창문 열기"}"""))
+    }
+
+    @Test
+    fun aNullActionIsNoAction() {
+        // 비워 두라는 자리에 null을 적어 보내는 모델이 있습니다. "null"이 할 일로 뜨면 안 됩니다.
+        assertEquals("", answer("""{"message":"좋습니다.","action":null}""")?.action)
+    }
+
+    @Test
+    fun aLongAnswerIsCutToThreeSentencesWorth() {
+        val answer = answer("""{"message":"${"가".repeat(600)}","action":"${"나".repeat(100)}"}""")!!
+
+        assertTrue(answer.text.length <= 241)
+        assertTrue(answer.text.endsWith("…"))
+        assertTrue(answer.action.length <= 41)
+    }
+
     private fun parse(rawText: String) = DailyCoachParser.parse(rawText, model = "claude-opus-5", now = now)
+
+    private fun answer(rawText: String) = DailyCoachParser.parseAnswer(rawText, model = "claude-opus-5", now = now)
 }

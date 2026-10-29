@@ -1,10 +1,14 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyCoachTip
 import com.codex.appgoodwords.data.RoutineNudge
@@ -244,6 +248,58 @@ class DailyCoachCardTest {
         val clock = java.time.Instant.ofEpochMilli(next).atZone(java.time.ZoneId.systemDefault())
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
         compose.onNodeWithText("다음 한마디 ${clock}쯤").assertIsDisplayed()
+    }
+
+    @Test
+    fun aWordCanBeAnswered() {
+        // 받은 한마디에 답하고 다시 답을 받습니다(사용자가 정함, 2026-10-29). 주고받는 것은 대화 화면에서 합니다.
+        var opened = false
+        compose.setContent { DailyCoachCard(state = state(tip = tip()), onReply = { opened = true }) }
+
+        compose.onNodeWithText("답하기").assertIsDisplayed()
+        // 주고받은 것이 없으면 마지막 한 쌍 자리를 두지 않습니다.
+        compose.onNodeWithTag(dailyCoachExchangeTag).assertDoesNotExist()
+        compose.onNodeWithTag(dailyCoachReplyTag).performClick()
+
+        assertTrue(opened)
+    }
+
+    @Test
+    fun withoutAWordThereIsNothingToAnswer() {
+        compose.setContent { DailyCoachCard(state = state()) }
+
+        compose.onNodeWithTag(dailyCoachReplyTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun theLastExchangeShowsOnTheCard() {
+        val now = System.currentTimeMillis()
+        val talked = state(tip = tip())
+            .replied("오늘은 좀 피곤해요", now)
+            .answered(
+                DailyCoachLine(kind = DailyCoachLine.Kind.ANSWER, text = "그럼 5분만 쉬어 가세요.", at = now + 1),
+                askedAt = now
+            )
+        compose.setContent { DailyCoachCard(state = talked) }
+
+        compose.onNodeWithTag(dailyCoachExchangeTag).assertIsDisplayed()
+        compose.onNodeWithText("나: 오늘은 좀 피곤해요").assertIsDisplayed()
+        compose.onNodeWithText("코치: 그럼 5분만 쉬어 가세요.").assertIsDisplayed()
+        compose.onNodeWithText("답하기 · 주고받은 말 2").assertIsDisplayed()
+    }
+
+    @Test
+    fun theCardSaysWhileTheCoachIsWritingAndWhenItFailed() {
+        val said = state(tip = tip()).replied("오늘은 좀 피곤해요", System.currentTimeMillis())
+        var current by mutableStateOf(said)
+        var replying by mutableStateOf(true)
+        compose.setContent { DailyCoachCard(state = current, replying = replying) }
+
+        compose.onNodeWithText("코치: 답을 쓰는 중…").assertIsDisplayed()
+
+        current = said.withReplyError("AI 요청이 실패했습니다(502).")
+        replying = false
+        compose.onNodeWithText("코치: 답을 받지 못했습니다. 대화에서 다시 받을 수 있습니다.").assertIsDisplayed()
     }
 
     @Test

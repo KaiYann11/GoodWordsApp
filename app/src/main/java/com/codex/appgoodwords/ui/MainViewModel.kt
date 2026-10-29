@@ -366,6 +366,11 @@ class MainViewModel(
     /** 코치에게 물어보는 중인지. 홈 카드가 기다리는 표시를 띄웁니다. */
     val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
 
+    private val _coachReplying = MutableStateFlow(false)
+
+    /** 내 말에 코치의 답을 받는 중인지. 대화 화면이 "답을 쓰는 중"을 띄우고 보내기를 잠급니다. */
+    val coachReplying: StateFlow<Boolean> = _coachReplying.asStateFlow()
+
     /** 펼쳐 보고 있는 하루. null이면 닫힌 상태입니다. */
     private val _openedDay = MutableStateFlow<LocalDate?>(null)
 
@@ -576,6 +581,18 @@ class MainViewModel(
 
     fun consumeOpenDailyCoachRequest() {
         _openDailyCoachRequest.value = false
+    }
+
+    /** 코치의 답 알림을 눌러 들어왔는지. 그 대화 화면까지 데려갑니다 — 답을 읽고 바로 이어 말할 수 있게. */
+    private val _openDailyCoachTalkRequest = MutableStateFlow(false)
+    val openDailyCoachTalkRequest: StateFlow<Boolean> = _openDailyCoachTalkRequest.asStateFlow()
+
+    fun handleOpenDailyCoachTalkRequest() {
+        _openDailyCoachTalkRequest.value = true
+    }
+
+    fun consumeOpenDailyCoachTalkRequest() {
+        _openDailyCoachTalkRequest.value = false
     }
 
     private val _confirmedTodayIds = MutableStateFlow<Set<Long>>(emptySet())
@@ -1134,6 +1151,61 @@ class MainViewModel(
     /** 해 볼 한 가지를 오늘 할 일로 담습니다. */
     suspend fun keepCoachAction(): Result<Unit> = runCatching {
         container.dailyCoachCoordinator.keepAction()
+    }
+
+    /** 코치의 답에 딸린 해 볼 일을 오늘 할 일로 담습니다. [at]은 그 답이 온 때입니다. */
+    suspend fun keepCoachAnswerAction(at: Long): Result<Unit> = runCatching {
+        container.dailyCoachCoordinator.keepAnswerAction(at)
+    }
+
+    /**
+     * 받은 한마디에 내가 한 말을 보내고 코치의 답을 받습니다(사용자가 정함, 2026-10-29).
+     *
+     * 보낸 말은 곧바로 적히고, 답은 받는 대로 대화에 붙습니다([com.codex.appgoodwords.data.DailyCoachCoordinator.reply]).
+     */
+    fun replyToCoach(text: String) {
+        talkToCoach { interrupted -> container.dailyCoachCoordinator.reply(text, interrupted = interrupted) }
+    }
+
+    /** 답을 받지 못한 마지막 말에 다시 답을 받습니다 — "다시 받기", 그리고 끊긴 것을 앱으로 돌아와 이어 받을 때. */
+    fun retryCoachReply() {
+        talkToCoach { interrupted -> container.dailyCoachCoordinator.retryReply(interrupted = interrupted) }
+    }
+
+    /** 답을 기다리는 말의 수. 모두 답을 받아야 "답을 쓰는 중"을 거둡니다. */
+    private var talksInFlight = 0
+
+    /**
+     * 답을 받는 길은 한마디와 같습니다([refreshDailyCoach]) — 그 사이 앱을 나가 끊긴 것은 세지 않고 배경 일꾼에게 넘기고,
+     * 끊기지 않고 앱 밖에서 답이 왔으면 알립니다.
+     *
+     * 답을 기다리는 동안 대화 화면은 보내기를 잠그지만, 여기서 **보낸 말을 버리지는 않습니다.** 차례는 코디네이터가 하나씩
+     * 지키므로([com.codex.appgoodwords.data.DailyCoachCoordinator.reply]) 겹쳐 와도 모두 답을 받습니다.
+     */
+    private fun talkToCoach(ask: suspend (interrupted: () -> Boolean) -> DailyCoachState) {
+        viewModelScope.launch {
+            talksInFlight += 1
+            _coachReplying.value = true
+            val leavesAtStart = screenLeaves
+            val startedAt = System.currentTimeMillis()
+            try {
+                val state = ask { screenLeaves != leavesAtStart }
+                val answer = state.answerSince(startedAt)
+                if (answer != null && leftAtMillis != 0L) {
+                    val reminderSettings = container.settingsStore.getSettings()
+                    AppNotifications.showDailyCoachAnswerNotification(
+                        context = container.appContext,
+                        reply = state.replyBefore(answer),
+                        answer = answer,
+                        soundEnabled = reminderSettings.notificationSoundEnabled,
+                        lockScreenVisible = reminderSettings.lockScreenVisible
+                    )
+                }
+            } finally {
+                talksInFlight -= 1
+                _coachReplying.value = talksInFlight > 0
+            }
+        }
     }
 
     /** 코치에게 무엇이 나가는지 보여 줍니다. 실제로 보내는 글과 같은 함수로 만듭니다. */

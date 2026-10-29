@@ -151,6 +151,80 @@ class DailyCoachInterruptTest {
         assertTrue(state.lastError, state.lastError.contains("연결하지 못했습니다"))
         assertEquals(1, database.contentItemDao().getAll().size)
     }
+
+    @Test fun aReplyCutOffByLeavingStaysAndIsHandedOver() = runBlocking {
+        // 답을 기다리다 앱을 나가 끊긴 말은 그대로 남고, 사유 없이 배경 일꾼에게 넘어갑니다(한마디와 같은 사정).
+        settingsStore.setDailyCoachState(withWord())
+
+        val state = coordinator.reply("오늘은 좀 피곤해요", interrupted = { true })
+
+        assertEquals(1, server.accepted.get())
+        assertEquals("오늘은 좀 피곤해요", state.unanswered?.text)
+        assertTrue(state.replyInterrupted)
+        assertEquals("", state.replyError)
+        assertEquals(1, handedOver)
+        // 내가 말을 건 것은 하루 횟수에 세지 않습니다.
+        assertEquals(0, state.askCount)
+        assertEquals(state, settingsStore.getDailyCoachState())
+    }
+
+    @Test fun aReplyFailingOnScreenSaysWhyAndCanBeAskedAgain() = runBlocking {
+        settingsStore.setDailyCoachState(withWord())
+
+        val failed = coordinator.reply("오늘은 좀 피곤해요")
+        assertTrue(failed.replyError, failed.replyError.contains("연결하지 못했습니다"))
+        assertFalse(failed.replyInterrupted)
+        assertEquals(0, handedOver)
+
+        // 다시 받기는 같은 말에 한 번 더 묻습니다. 말이 두 번 쌓이지 않습니다.
+        val again = coordinator.retryReply()
+        assertEquals(2, server.accepted.get())
+        assertEquals(1, again.talk.count { it.kind == DailyCoachLine.Kind.REPLY })
+        assertEquals("오늘은 좀 피곤해요", again.unanswered?.text)
+    }
+
+    @Test fun nothingIsSentWithoutAWordToAnswer() = runBlocking {
+        // 받은 한마디가 없으면 무엇에 답하는지가 없습니다.
+        val state = coordinator.reply("오늘은 좀 피곤해요")
+
+        assertEquals(0, server.accepted.get())
+        assertEquals(emptyList<DailyCoachLine>(), state.talk)
+    }
+
+    @Test fun whatISayWhileAWordIsBeingAskedIsKeptAndAnsweredAfter() = runBlocking {
+        // 한마디를 묻는 사이에 보낸 말은 곧바로 적히고(화면에 바로 보이게), 그 물음이 끝난 뒤 차례대로 답을 받으러 갑니다.
+        settingsStore.setDailyCoachState(withWord())
+
+        val asking = async { coordinator.refresh(force = true) }
+        while (server.accepted.get() == 0) delay(20)
+        val replying = async { coordinator.reply("오늘은 좀 피곤해요") }
+        while (settingsStore.getDailyCoachState().unanswered == null) delay(20)
+        // 한마디의 물음은 아직 끝나지 않았습니다. 답을 받으러 가는 것은 그 뒤입니다.
+        assertEquals(1, server.accepted.get())
+
+        asking.await()
+        val state = replying.await()
+        assertEquals(2, server.accepted.get())
+        assertEquals("오늘은 좀 피곤해요", state.unanswered?.text)
+        assertTrue(state.replyError, state.replyError.contains("연결하지 못했습니다"))
+    }
+
+    @Test fun talkingPushesTheNextWordAway() = runBlocking {
+        // 말을 주고받은 참에 새 한마디가 끼어들지 않습니다. 하루 첫 물음이어도 주기가 돌아올 때까지 기다립니다.
+        settingsStore.setDailyCoachState(withWord())
+        coordinator.reply("오늘은 좀 피곤해요")
+        val accepted = server.accepted.get()
+
+        val state = coordinator.refresh()
+
+        assertEquals(accepted, server.accepted.get())
+        assertEquals(0, state.askCount)
+    }
+
+    private fun withWord() = DailyCoachState(
+        date = today,
+        tip = DailyCoachTip(message = "앞서 받은 한마디", createdAt = 1L)
+    )
 }
 
 /** 받기만 하고 답하지 않다가 [holdMillis] 뒤에 끊는 자리. 물음이 몇 번 나갔는지 셉니다. */
