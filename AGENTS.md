@@ -25,7 +25,8 @@
   - **이 폴더에서 브랜치를 바꾸거나 서버 코드를 고친 채로 두지 마세요.** launchd가 서버를 다시 띄우는 순간 그 코드가
     운영에 올라갑니다. 서버를 고칠 때는 `git worktree`로 옆 폴더에서 합니다.
   - 스키마를 바꿔 게시했으면 서버를 새 코드로 다시 띄웁니다: `launchctl kickstart -k gui/$(id -u)/com.appgoodwords.server`.
-    `schemaVersion`이 다르면 앱이 동기화를 막습니다.
+    `schemaVersion`이 다르면 앱이 동기화를 막습니다. 띄우기 전에 DB를 같은 폴더 `backups/`(700)에
+    `app-good-words.db.json.before-<판>-<시각>`으로 떠 두고, 뒤에 `/api/health`의 `schemaVersion`과 종류별 레코드 수를 대조합니다.
 - **빌드와 에뮬레이터는 윈도우 데스크톱입니다.** 맥에는 JDK·Android SDK와 디버그 서명 열쇠가 없습니다(맥에서 빌드한
   APK는 덮어 설치되지 않습니다). worktree `C:/coding/ChatGPT/AppGoodWords-ollama`, AVD `AppGoodWords_API_35`.
   - 원격 실행은 Orca(`orca terminal create --environment win-desktop`), 보낼 파일은 `tailscale file cp … <윈도우 기기 이름>:`
@@ -61,6 +62,11 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   실패하고 망을 조건으로 건 일꾼이 영영 돌지 않으니, `settings put global captive_portal_mode 0`·`captive_portal_detection_enabled 0`
   뒤 와이파이·데이터를 껐다 켭니다. 인증서 검증을 끄거나 평문·시험 CA 예외를 넣지 않습니다.
 - 자판으로 한글을 칠 수 없습니다(`adb shell input text`). 눌러 보기에서 적는 내용은 영어로 씁니다.
+- 눌러 보기 스크립트는 **누르기 전마다 좌표를 다시 읽습니다.** 하나를 고르면 안내 줄이 사라지는 식으로 화면이 움직여, 옛 좌표는
+  빈 곳을 누르고 화면은 그대로입니다. 밀어 넘긴 직후의 누름은 넘김만 멈추니 2~3초 기다립니다. 보내기·저장은 누른 뒤 칸이 비었는지나
+  저장된 상태로 확인합니다(자판에 깔린 단추를 누르면 자판이 받습니다).
+- `*AiIntegrationTest`는 시험 서버를 거쳐 그 PC의 진짜 `claude`·`codex`를 부릅니다. 사용 한도에 걸리면 "usage limit"으로
+  떨어집니다(계정 전체라 모든 모델이 막힙니다) — 코드 탓이 아니니 커밋 메시지에 그대로 적고, 풀린 뒤 그 클래스만 다시 돌립니다.
 
 ## 게시
 
@@ -131,7 +137,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 첨부 주소 형식 | 앱 `AttachmentUris.SCHEME` · 서버·웹 `attachmentScheme` |
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
-| 같은 내용 합치기(기분 `moodLogFingerprint` 포함) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다) |
+| 같은 내용 합치기(기분 `moodLogFingerprint` 포함) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
@@ -185,5 +191,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 
 1. 유닛·서버 시험(필요하면 계측)의 **실패·건너뜀이 0**인지 봅니다. 화면이 바뀌었으면 **에뮬레이터에서 실제로 눌러 봅니다.**
 2. 커밋 메시지에 **무엇을 왜 바꿨는지와 검증 결과**를 적습니다. 다음 세션이 보는 것은 이것입니다.
-3. 맞지 않게 된 문서는 함께 고칩니다. 문서를 새로 늘리지 않습니다.
+3. **시키지 않아도 매번**, 새 세션·다른 도구가 저장소만 읽고 이어받을 수 있는지 봅니다(사용자가 정함, 2026-10-30). 겪은 함정·새
+   제약·바뀐 명령은 이 파일에, 들어간 것·남긴 일·사용자와 일하는 방식은 `BACKLOG.md` "이어서 할 사람에게"에, 쓰는 법은
+   `MANUAL.md`·`server/README.md`에 **그 작업의 커밋과 함께** 넣습니다. 맞지 않게 된 문서도 고치고, 문서를 새로 늘리지 않습니다.
 4. 게시·배포·푸시는 **사용자가 말했을 때만** 합니다.
