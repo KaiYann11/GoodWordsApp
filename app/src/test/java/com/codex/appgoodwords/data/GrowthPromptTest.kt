@@ -30,6 +30,24 @@ class GrowthPromptTest {
     )
 
     @Test
+    fun theDirectionIsSentOnlyWhenTurnedOnAndNeverTheReflections() {
+        val model = ContentItemEntity(id = 60, syncId = "m-1", type = ContentType.ROLE_MODEL, title = "James Clear", body = "작은 습관을 쌓는 꾸준함")
+        val goal = ContentItemEntity(id = 61, syncId = "g-1", type = ContentType.GOAL, title = "하프 마라톤 완주", body = "")
+        val routines = listOf(RoutineEntity(id = 1, syncId = "r1", title = "아침 달리기"))
+        val checks = listOf(check(1, today))
+
+        val off = GrowthPrompt.userPrompt(digest(routines = routines, checks = checks, items = listOf(model, goal), includeDiaryBody = false))
+        val on = digest(routines = routines, checks = checks, items = listOf(model, goal), includeDiaryBody = false, includeGoals = true)
+
+        assertFalse(off.contains("내가 가려는 방향"))
+        // 이상향·목표·롤모델 차례이고, 설명이 없으면 제목만입니다.
+        assertEquals(listOf("목표: 하프 마라톤 완주", "롤모델: James Clear — 작은 습관을 쌓는 꾸준함"), on.directionLines)
+        assertTrue(GrowthPrompt.userPrompt(on).contains("[내가 가려는 방향]"))
+        // 방향만 있고 이 기간에 한 일이 없으면 돌아볼 것이 없습니다.
+        assertTrue(digest(items = listOf(goal), includeDiaryBody = false, includeGoals = true).isEmpty)
+    }
+
+    @Test
     fun theDiaryBodyStaysOnThisDeviceUnlessAsked() {
         val digest = digest(diaries = listOf(diary), includeDiaryBody = false)
         val prompt = GrowthPrompt.userPrompt(digest)
@@ -271,7 +289,8 @@ class GrowthPromptTest {
         moodLogs: List<MoodLogEntity> = emptyList(),
         items: List<ContentItemEntity> = emptyList(),
         previous: GrowthReportEntity? = null,
-        includeDiaryBody: Boolean
+        includeDiaryBody: Boolean,
+        includeGoals: Boolean = false
     ) = GrowthPrompt.digest(
         period = period,
         today = today,
@@ -285,6 +304,7 @@ class GrowthPromptTest {
         moodLogs = moodLogs,
         includeDiaryBody = includeDiaryBody,
         previousReport = previous,
+        includeGoals = includeGoals,
         zoneId = zone
     )
 

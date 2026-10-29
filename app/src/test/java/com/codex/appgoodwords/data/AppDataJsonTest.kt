@@ -27,6 +27,31 @@ class AppDataJsonTest {
     }
 
     @Test
+    fun aGoalKeepsItsKindAndLinkedRoutines() {
+        // 이어 둔 루틴이 오가며 빠지면 목표 카드의 실천이 다른 기기에서 통째로 사라집니다.
+        val goal = ContentItemEntity(
+            id = 12L, syncId = "goal-sync-1", updatedAt = 1_700_000_600_000L, type = ContentType.GOAL,
+            title = "올해 마라톤 완주", body = "몸이 먼저 지치지 않게", linkedRoutineSyncIds = listOf("routine-a", "routine-b"),
+            createdAt = 1_700_000_100_000L
+        )
+        val snapshot = fullSnapshot().let { it.copy(items = it.items + goal) }
+
+        val restored = AppDataJson.fromJsonText(AppDataJson.toJson(snapshot).toString())
+
+        assertEquals(goal, restored.items.single { it.syncId == "goal-sync-1" })
+    }
+
+    @Test
+    fun anOlderFileWithoutLinkedRoutinesReadsAsNone() {
+        val restored = AppDataJson.fromJsonText(
+            """{"schemaVersion":22,"items":[{"id":1,"syncId":"v-1","type":"VISION","title":"아침을 지배하는 사람","body":""}]}"""
+        )
+
+        assertEquals(ContentType.VISION, restored.items.single().type)
+        assertEquals(emptyList<String>(), restored.items.single().linkedRoutineSyncIds)
+    }
+
+    @Test
     fun roundTrip_keepsNullLastShownAtNull() {
         val snapshot = fullSnapshot().let { base ->
             base.copy(items = listOf(base.items.first().copy(lastShownAt = null)))

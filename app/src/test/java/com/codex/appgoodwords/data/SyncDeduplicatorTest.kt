@@ -105,6 +105,28 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun aGoalsLinkedRoutineFollowsTheSurvivingRoutine() {
+        // 두 기기에서 같은 루틴을 만들어 하나로 합쳐지면, 목표가 사라진 쪽을 가리켜 실천이 끊기지 않게 옮깁니다.
+        // 둘 다 이어 두었으면 한 번만 남습니다. 서버 deduplicate()와 같은 규칙입니다.
+        val goal = ContentItemEntity(
+            id = 5L, syncId = "goal-1", updatedAt = 1_000L, type = ContentType.GOAL, title = "마라톤", body = "",
+            linkedRoutineSyncIds = listOf("r-old", "r-new", "r-other")
+        )
+        val merged = snapshotOf(
+            items = listOf(goal),
+            routines = listOf(
+                routine("r-new", "아침 달리기", updatedAt = 2_000L),
+                routine("r-old", "아침 달리기", updatedAt = 1_000L),
+                routine("r-other", "스트레칭", updatedAt = 1_000L)
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(listOf("r-new", "r-other"), result.items.single().linkedRoutineSyncIds)
+    }
+
+    @Test
     fun aRoutineMadeByHandKeepsAnEmptySource() {
         // 빈 값을 승자 표에서 찾으면 엉뚱한 글귀가 붙습니다.
         val merged = snapshotOf(

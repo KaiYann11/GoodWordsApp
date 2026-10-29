@@ -28,7 +28,22 @@ enum class ContentType {
      * 지킨 날을 세기 시작하면 원칙이 또 하나의 할 일이 되어, 못 지킨 날 목록만 쌓입니다.
      * 그래서 수행 버튼이 없습니다 — 그냥 거기 있고, 흔들릴 때 다시 읽는 것입니다.
      */
-    PRINCIPLE;
+    PRINCIPLE,
+
+    /**
+     * 되고 싶은 나 — 목표 탭의 첫 칸(사용자가 정함, 2026-10-29).
+     *
+     * 할 일이나 메모와 다릅니다. 끝내는 것도, 적어 두고 마는 것도 아니라 **자꾸 마주치고 되새기는 것**입니다.
+     * 되새긴 기록은 덧메모([ContentMemoEntity])로 쌓이고, 이 모습을 위해 하는 루틴을 이어 둡니다
+     * ([ContentItemEntity.linkedRoutineSyncIds]). 목표·롤모델도 같습니다.
+     */
+    VISION,
+
+    /** 이루고 싶은 것. 기한이나 숫자로 재지 않습니다 — 되새긴 기록과 이어 둔 루틴의 실천으로 봅니다. */
+    GOAL,
+
+    /** 닮고 싶은 사람. 제목이 이름이고, 보관함에서 저자가 같은 글귀를 모아 보여 줍니다. */
+    ROLE_MODEL;
 
     /** 글귀 목록과 알림에서 다시 보여 줄 종류. 미분류 글과 개인 메모는 따로 둡니다. */
     val isReadingContent: Boolean
@@ -37,6 +52,10 @@ enum class ContentType {
     /** 읽음·알림·위젯·AI 추천 원문에서 빼는 종류. 남의 좋은 말이 아니라 내가 적어 둔 것입니다. */
     val isPersonalRecord: Boolean
         get() = this in personalTypes
+
+    /** 목표 탭에 모이는 종류(이상향·목표·롤모델). */
+    val isGoal: Boolean
+        get() = this in goalTypes
 
     companion object {
         val readingTypes = listOf(QUOTE, LINK, VIDEO)
@@ -47,6 +66,9 @@ enum class ContentType {
          * 한곳에 모아 둡니다. 예전에는 이 목록이 여러 군데에 따로 적혀 있어서, 종류를 늘릴 때
          * 한 곳만 빠뜨리면 그 종류가 "오늘의 글귀"라며 알림에 뜨거나 읽음 횟수로 세어졌습니다.
          */
-        val personalTypes = listOf(INBOX, MEMO, NOT_TO_DO, CONCEPT, PRINCIPLE)
+        val personalTypes = listOf(INBOX, MEMO, NOT_TO_DO, CONCEPT, PRINCIPLE, VISION, GOAL, ROLE_MODEL)
+
+        /** 목표 탭의 칸. 적어 둔 차례가 칸의 차례입니다. */
+        val goalTypes = listOf(VISION, GOAL, ROLE_MODEL)
     }
 }

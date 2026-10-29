@@ -38,24 +38,25 @@ enum class AiProvider(
     OPENAI(
         label = "OpenAI",
         keyHint = "sk-로 시작합니다",
-        models = listOf("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini")
+        models = listOf("gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra")
     ),
     ANTHROPIC(
         label = "Claude",
         keyHint = "sk-ant-로 시작합니다",
-        // 기록을 읽고 맥락을 짚어 주는 일이라 Opus를 앞에 둡니다.
-        models = listOf("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5")
+        // 기록을 읽고 맥락을 짚어 주는 일이라 Opus를 앞에 둡니다. 그 위 급인 Fable은 값이 훨씬 높아 고를 수 있게만 둡니다.
+        models = listOf("claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5")
     ),
     CLAUDE_CLI(
         label = "Claude CLI",
         keyHint = "",
-        models = listOf(CLI_DEFAULT, "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"),
+        // Fable은 구독에서 사용 크레딧을 따로 켜야 돌고, 그 전에는 CLI가 거절합니다. 그래서 여기에는 두지 않습니다.
+        models = listOf(CLI_DEFAULT, "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"),
         serverOnly = true
     ),
     CODEX_CLI(
         label = "Codex CLI",
         keyHint = "",
-        models = listOf(CLI_DEFAULT, "gpt-6-astra", "gpt-5.6-sol", "gpt-5.5"),
+        models = listOf(CLI_DEFAULT, "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-luna"),
         serverOnly = true
     ),
     OLLAMA(

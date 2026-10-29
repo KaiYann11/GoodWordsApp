@@ -133,6 +133,8 @@ app.addEventListener("submit", async (event) => {
       await submitNotToDo(form);
     } else if (form.dataset.form === "principle") {
       await submitPrinciple(form);
+    } else if (form.dataset.form === "goal") {
+      await submitGoal(form);
     } else if (form.dataset.form === "routine") {
       await submitRoutine(form);
     } else if (form.dataset.form === "memo") {
@@ -196,6 +198,13 @@ app.addEventListener("click", async (event) => {
         body: { body: selected, page: Number(book?.currentPage || 0) },
       });
       showToast("보관함에 글귀를 넣었습니다.");
+      await loadSnapshot(false);
+    } else if (action === "delete-goal") {
+      const item = findById(state.snapshot.items, id);
+      if (!window.confirm(`'${item?.title || "이 목표"}'와 되새긴 기록을 함께 지울까요?`)) return;
+      await api(`/api/content/${id}`, { method: "DELETE" });
+      if (state.editingContentId === id) state.editingContentId = null;
+      showToast("지웠습니다.");
       await loadSnapshot(false);
     } else if (action === "delete-principle") {
       const item = findById(state.snapshot.items, id);
@@ -363,10 +372,16 @@ snapshotFile.addEventListener("change", async () => {
 loadSnapshot();
 
 /** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`·서버 `personalContentTypes`와 같아야 합니다. */
-const personalTypes = ["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"];
+const personalTypes = ["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL"];
 
 /** 제 탭에서만 보는 기준. 보관함·홈의 목록에 섞이면 담아 둔 글귀가 밀려납니다. */
 const ruleTypes = ["NOT_TO_DO", "PRINCIPLE"];
+
+/** 목표 탭의 기록(이상향·목표·롤모델). 앱 `ContentType.goalTypes`와 같은 차례입니다. */
+const goalTypes = ["VISION", "GOAL", "ROLE_MODEL"];
+
+/** 보관함·홈 목록에 섞지 않고 제 탭에서만 보는 종류. */
+const ownTabTypes = [...ruleTypes, ...goalTypes];
 
 function emptySnapshot() {
   return {
@@ -489,6 +504,7 @@ function render() {
   if (state.activeTab === "routines") renderRoutines();
   if (state.activeTab === "not-to-do") renderNotToDo();
   if (state.activeTab === "principles") renderPrinciples();
+  if (state.activeTab === "goals") renderGoals();
   if (state.activeTab === "todos") renderTodos();
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
@@ -507,7 +523,7 @@ function syncTabs() {
 function renderHome() {
   const summary = todaySummary();
   const recent = [...state.snapshot.items]
-    .filter(item => !ruleTypes.includes(item.type))
+    .filter(item => !ownTabTypes.includes(item.type))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 8);
   app.innerHTML = `
@@ -714,6 +730,84 @@ function renderNotToDo() {
               </div>
             </article>`).join("") : empty("아직 기록한 항목이 없습니다. 피하고 싶은 행동부터 하나 적어 보세요.")}
         </div>
+      </section>
+    </section>
+  `;
+}
+
+/**
+ * 목표 탭 — 이상향·목표·롤모델. 앱의 목표 탭과 같은 기록입니다.
+ *
+ * 되새긴 기록은 앱처럼 덧메모로 남깁니다. 이어 둔 루틴은 이름만 보여 주고 고치는 것은 앱에서 합니다 —
+ * 루틴을 고르는 칸까지 두면 웹이 앱의 화면을 하나 더 따라 만들어야 합니다.
+ */
+function renderGoals() {
+  const items = state.snapshot.items.filter((item) => goalTypes.includes(item.type));
+  const editing = findById(items, state.editingContentId) || {};
+  const routineTitles = new Map(state.snapshot.routines.map((routine) => [routine.syncId, routine.title]));
+  const memosOf = (item) => state.snapshot.contentMemos
+    .filter((memo) => (memo.contentItemSyncId ? memo.contentItemSyncId === item.syncId : memo.contentItemId === item.id))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const section = (type) => {
+    const records = items.filter((item) => item.type === type)
+      .sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite) || a.createdAt - b.createdAt);
+    return `
+      <h2 class="sectionTitle">${typeLabel(type)} ${records.length}개</h2>
+      <div class="itemList">
+        ${records.length ? records.map((item) => {
+          const memos = memosOf(item);
+          const linked = (item.linkedRoutineSyncIds || []).map((syncId) => routineTitles.get(syncId)).filter(Boolean);
+          return `
+          <article class="item">
+            <h3>${item.isFavorite ? "📌 " : ""}${escapeHtml(item.title)}</h3>
+            ${item.body ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.body)}</p>` : ""}
+            ${linked.length ? `<p class="muted">이어 둔 루틴: ${linked.map(escapeHtml).join(", ")}</p>` : ""}
+            ${memos.length ? `<ul class="muted">${memos.slice(0, 5).map((memo) => `<li>${escapeHtml(formatDate(memo.createdAt))} — ${escapeHtml(memo.body)}</li>`).join("")}</ul>` : ""}
+            ${memos.length > 5 ? `<p class="muted">되새긴 기록 ${memos.length - 5}개 더</p>` : ""}
+            <form class="formGrid" data-form="contentMemo">
+              <input type="hidden" name="contentItemId" value="${item.id}">
+              <div class="field full">
+                <label for="goalMemo-${item.id}">되새기기</label>
+                <textarea id="goalMemo-${item.id}" name="body" required placeholder="한 줄이면 충분합니다"></textarea>
+              </div>
+              <div class="actions field full">
+                <button type="submit">남기기</button>
+                <button type="button" data-action="edit-content" data-id="${item.id}">고치기</button>
+                <button type="button" data-action="delete-goal" data-id="${item.id}">지우기</button>
+              </div>
+            </form>
+          </article>`;
+        }).join("") : empty(`아직 적어 둔 ${typeLabel(type)}이(가) 없습니다.`)}
+      </div>`;
+  };
+  app.innerHTML = `
+    <section class="grid two">
+      <form class="panel" data-form="goal">
+        <h2>${editing.id ? "고치기" : "적기"}</h2>
+        <p class="muted">되고 싶은 나, 이루고 싶은 것, 닮고 싶은 사람. 기한이나 숫자로 재지 않고 되새기며 따라갑니다.</p>
+        <div class="formGrid">
+          <div class="field full">
+            <label for="goalType">종류</label>
+            <select id="goalType" name="type">
+              ${goalTypes.map((type) => `<option value="${type}" ${(editing.type || "VISION") === type ? "selected" : ""}>${typeLabel(type)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field full">
+            <label for="goalTitle">제목</label>
+            <input id="goalTitle" name="title" value="${attr(editing.title)}" placeholder="예: 아침을 지배하는 사람" required>
+          </div>
+          <div class="field full">
+            <label for="goalBody">설명 (선택)</label>
+            <textarea id="goalBody" name="body" placeholder="그 모습은 어떤지, 왜 이루고 싶은지, 닮고 싶은 점">${escapeHtml(editing.body)}</textarea>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:14px">
+          <button class="primary" type="submit">저장</button>
+          ${editing.id ? `<button type="button" data-action="cancel-content">취소</button>` : ""}
+        </div>
+      </form>
+      <section>
+        ${goalTypes.map(section).join("")}
       </section>
     </section>
   `;
@@ -1422,6 +1516,27 @@ async function submitPrinciple(form) {
   await loadSnapshot(false);
 }
 
+/**
+ * 이상향·목표·롤모델을 적거나 고칩니다.
+ *
+ * 서버가 `{...있던 것, ...보낸 것}`으로 합치므로, 기기에서 이어 둔 루틴(linkedRoutineSyncIds)과 홈에 두기는
+ * 보내지 않아도 그대로 남습니다.
+ */
+async function submitGoal(form) {
+  const data = new FormData(form);
+  const type = goalTypes.includes(String(data.get("type"))) ? String(data.get("type")) : "GOAL";
+  const title = String(data.get("title") || "").trim();
+  if (!title) throw new Error("제목을 입력해 주세요.");
+  const id = state.editingContentId;
+  await api(id ? `/api/content/${id}` : "/api/content", {
+    method: id ? "PUT" : "POST",
+    body: { type, title, body: data.get("body") },
+  });
+  state.editingContentId = null;
+  showToast(id ? "고쳤습니다." : "적었습니다.");
+  await loadSnapshot(false);
+}
+
 async function submitRoutine(form) {
   const data = new FormData(form);
   const payload = {
@@ -1768,7 +1883,7 @@ function summaryLine(line) {
 function filteredItems() {
   const query = state.query.trim().toLowerCase();
   return [...state.snapshot.items]
-    .filter((item) => !ruleTypes.includes(item.type))
+    .filter((item) => !ownTabTypes.includes(item.type))
     .filter((item) => state.typeFilter === "ALL" || item.type === state.typeFilter)
     .filter((item) => !state.categoryFilter || item.category === state.categoryFilter)
     .filter((item) => {
@@ -1890,7 +2005,7 @@ function formatDate(timestamp) {
 }
 
 function labelForType(type) {
-  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념", PRINCIPLE: "원칙" }[type] || type || "";
+  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념", PRINCIPLE: "원칙", VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델" }[type] || type || "";
 }
 
 function labelForEvent(type) {

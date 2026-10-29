@@ -29,6 +29,7 @@ import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.FeedbackWriter
+import com.codex.appgoodwords.data.GoalTracking
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.MoodPractice
@@ -37,6 +38,7 @@ import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineNudgeCalculator
+import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
 import com.codex.appgoodwords.data.ServerSyncSettings
@@ -142,6 +144,29 @@ class MainViewModel(
     /** 글귀 옆에 덧붙여 둔 메모. 상세 화면이 자기 글귀 것만 골라 씁니다. */
     val contentMemos = container.repository.observeContentMemos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 목표 탭 — 이상향·목표·롤모델마다 되새긴 기록, 이어 둔 루틴을 최근에 밟은 날, 롤모델의 글귀.
+     *
+     * 저장하지 않고 그때그때 셉니다([GoalTracking]). 루틴 하나의 날수는 루틴 기록 화면과 같은 셈
+     * ([RoutineStatsCalculator])이라 두 화면이 다른 숫자를 말하지 않습니다.
+     */
+    val goalTracks = combine(allItems, contentMemos, routines, routineChecks) { items, memos, routineList, checks ->
+        val today = LocalDate.now()
+        GoalTracking.build(
+            goals = items.filter { it.type.isGoal },
+            memos = memos,
+            routines = routineList,
+            routineStats = RoutineStatsCalculator.buildAll(routineList, checks, today),
+            items = items,
+            today = today
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 홈 "오늘" 칸 맨 위의 한 줄. 목표 탭에 아무것도 없으면 null입니다. */
+    val homeGoalLine = allItems
+        .map { items -> GoalTracking.homeLine(items.filter { it.type.isGoal }, LocalDate.now()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // 다섯 가지를 다 봅니다. 글귀와 루틴만 세면 앱이 하는 일의 절반만 돌아보는 셈입니다.
     val stats = combine(
@@ -1272,6 +1297,21 @@ class MainViewModel(
     suspend fun deleteContent(itemId: Long): Result<Unit> = runCatching {
         container.repository.deleteContent(itemId)
         _confirmedTodayIds.value = _confirmedTodayIds.value - itemId
+    }
+
+    /** 이상향·목표·롤모델을 적거나 고칩니다. 되새긴 기록·이어 둔 루틴·홈에 두기는 그대로 둡니다. */
+    suspend fun saveGoal(id: Long, type: ContentType, title: String, body: String): Result<Long> = runCatching {
+        container.repository.saveGoal(id, type, title, body)
+    }
+
+    /** 이 이상향·목표·롤모델을 위해 하는 루틴을 바꿉니다. */
+    suspend fun setGoalRoutines(id: Long, routineSyncIds: List<String>): Result<Unit> = runCatching {
+        container.repository.setGoalRoutines(id, routineSyncIds)
+    }
+
+    /** 홈 "오늘" 칸 맨 위에 둘지. 보관함의 즐겨찾기와 같은 칸(`isFavorite`)을 씁니다. */
+    suspend fun setGoalPinned(id: Long, pinned: Boolean): Result<Unit> = runCatching {
+        container.repository.setFavorite(id, pinned)
     }
 
     suspend fun toggleContentConfirmed(itemId: Long): Result<Boolean> {

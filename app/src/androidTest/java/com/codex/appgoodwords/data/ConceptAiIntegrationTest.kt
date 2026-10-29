@@ -49,7 +49,7 @@ class ConceptAiIntegrationTest {
     }
 
     @Test fun claudeCliExplainsADirectlyWrittenConceptAndTheAnswerIsSavedShort() = runBlocking {
-        explainWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-4-5"))
+        explainWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
     }
 
     @Test fun codexCliWithItsDefaultModelExplainsAConcept() = runBlocking {

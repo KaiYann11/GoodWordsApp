@@ -34,6 +34,35 @@ class DailyCoachPromptTest {
     )
 
     @Test
+    fun theDirectionGoesOutOnlyWhenTurnedOn() {
+        // 되고 싶은 모습은 사적인 글이라 켜지 않으면 나가지 않습니다(기본 꺼짐).
+        val vision = ContentItemEntity(
+            id = 50, syncId = "v-1", type = ContentType.VISION, title = "아침을 지배하는 사람",
+            body = "일어나자마자 물 한 컵", linkedRoutineSyncIds = listOf("r1")
+        )
+        val routine = RoutineEntity(id = 1, syncId = "r1", title = "물 한 컵")
+        val off = DailyCoachPrompt.userPrompt(digest(routines = listOf(routine), checks = listOf(check("물 한 컵")), items = listOf(vision)))
+        val on = DailyCoachPrompt.userPrompt(
+            digest(routines = listOf(routine), checks = listOf(check("물 한 컵")), items = listOf(vision), includeGoals = true)
+        )
+
+        assertFalse(off.contains("내가 가려는 방향"))
+        assertFalse(off.contains("아침을 지배하는 사람"))
+        assertTrue(on.contains("[내가 가려는 방향]"))
+        assertTrue(on.contains("되고 싶은 나: 아침을 지배하는 사람 — 일어나자마자 물 한 컵 (이어 둔 루틴: 물 한 컵)"))
+    }
+
+    @Test
+    fun aChangedGoalIsNotANewRecordForToday() {
+        // 목표를 고친 것은 오늘 한 일이 아닙니다. 지문이 바뀌면 같은 하루로 또 묻습니다.
+        val goal = ContentItemEntity(id = 51, syncId = "g-1", type = ContentType.GOAL, title = "마라톤", body = "")
+        val before = digest(checks = listOf(check("물 한 컵")), items = listOf(goal), includeGoals = true)
+        val after = digest(checks = listOf(check("물 한 컵")), items = listOf(goal.copy(title = "하프 마라톤")), includeGoals = true)
+
+        assertEquals(before.fingerprint, after.fingerprint)
+    }
+
+    @Test
     fun theDiaryStaysOnThisDeviceUnlessAsked() {
         val prompt = DailyCoachPrompt.userPrompt(digest(diaries = listOf(diary), includeDiaryBody = false))
 
@@ -192,7 +221,8 @@ class DailyCoachPromptTest {
         events: List<ExposureEventEntity> = emptyList(),
         items: List<ContentItemEntity> = emptyList(),
         includeDiaryBody: Boolean = false,
-        at: LocalTime = this.at
+        at: LocalTime = this.at,
+        includeGoals: Boolean = false
     ): DailyCoachDigest = DailyCoachPrompt.digest(
         today = today,
         at = at,
@@ -202,7 +232,8 @@ class DailyCoachPromptTest {
         todayChecks = checks,
         diaries = diaries,
         items = items,
-        includeDiaryBody = includeDiaryBody
+        includeDiaryBody = includeDiaryBody,
+        includeGoals = includeGoals
     )
 
     private fun dayDigest(

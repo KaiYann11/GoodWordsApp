@@ -57,9 +57,9 @@ object OnThisDay {
         }
 
         val fromItems = items
-            // 기준(하지 않을 일·원칙)과 개념은 뺍니다. 늘 거기 있는 것이라, 담은 날을
-            // 되짚어도 "지난해 오늘"의 기억이 되지 않습니다.
-            .filter { it.type !in listOf(ContentType.NOT_TO_DO, ContentType.CONCEPT, ContentType.PRINCIPLE) }
+            // 기준(하지 않을 일·원칙)과 개념, 목표 탭의 기록(이상향·목표·롤모델)은 뺍니다. 늘 거기 있는 것이라,
+            // 담은 날을 되짚어도 "지난해 오늘"의 기억이 되지 않습니다.
+            .filter { it.type !in listOf(ContentType.NOT_TO_DO, ContentType.CONCEPT, ContentType.PRINCIPLE) && !it.type.isGoal }
             .mapNotNull { item ->
             val date = toDate(item.createdAt, zoneId)
             val yearsAgo = yearsAgoOf(date, today) ?: return@mapNotNull null

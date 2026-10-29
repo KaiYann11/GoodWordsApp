@@ -29,6 +29,13 @@ data class AiFeedbackSettings(
      * 기본은 꺼짐입니다. 일기는 앱에서 가장 사적인 기록이라, 켜는 것은 사용자가 직접 정해야 합니다.
      */
     val includeDiaryBody: Boolean = false,
+    /**
+     * 이상향·목표·롤모델을 함께 보낼지([GrowthPrompt.directionLines]).
+     *
+     * 기본은 꺼짐입니다(사용자가 정함, 2026-10-29). 되고 싶은 모습은 일기만큼 사적인 글이라, 내보낼지는 사용자가
+     * 정합니다. 켜면 한마디와 돌아보기가 오늘 한 것을 그 방향과 이어 봅니다.
+     */
+    val includeGoals: Boolean = false,
     /** 마지막으로 피드백을 만든 시각. 주기가 돌아왔는지 볼 때 씁니다. */
     val lastRunAt: Long = 0L,
     /** 마지막 실패 사유. 배경에서 돌다 실패하면 화면에 뜨지 않아 따로 남깁니다. */

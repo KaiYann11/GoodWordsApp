@@ -24,7 +24,7 @@ class GrowthFeedbackCoordinator(
      */
     suspend fun preview(period: ReportPeriod, today: LocalDate = LocalDate.now()): String {
         val aiSettings = settingsStore.getAiFeedbackSettings()
-        return GrowthPrompt.chatPrompt(buildDigest(period, today, aiSettings.includeDiaryBody))
+        return GrowthPrompt.chatPrompt(buildDigest(period, today, aiSettings.includeDiaryBody, aiSettings.includeGoals))
     }
 
     /**
@@ -95,7 +95,7 @@ class GrowthFeedbackCoordinator(
     ): GrowthReportEntity {
         val aiSettings = settingsStore.getAiFeedbackSettings()
         val syncSettings = settingsStore.getServerSyncSettings()
-        val digest = buildDigest(period, today, aiSettings.includeDiaryBody)
+        val digest = buildDigest(period, today, aiSettings.includeDiaryBody, aiSettings.includeGoals)
         check(!digest.isEmpty) {
             "돌아볼 기록이 아직 없습니다. 루틴을 밟거나 일기를 남긴 뒤에 다시 눌러 주세요."
         }
@@ -145,7 +145,8 @@ class GrowthFeedbackCoordinator(
     private suspend fun buildDigest(
         period: ReportPeriod,
         today: LocalDate,
-        includeDiaryBody: Boolean
+        includeDiaryBody: Boolean,
+        includeGoals: Boolean
     ): GrowthDigest = GrowthPrompt.digest(
         period = period,
         today = today,
@@ -160,7 +161,8 @@ class GrowthFeedbackCoordinator(
         includeDiaryBody = includeDiaryBody,
         // 지난번에 권한 것을 함께 실어야 고리가 닫힙니다. 이것이 없으면 매번 처음 만난 사람처럼
         // 말하고, 사용자는 같은 조언을 몇 번이고 다시 받습니다.
-        previousReport = database.growthReportDao().getLatest()
+        previousReport = database.growthReportDao().getLatest(),
+        includeGoals = includeGoals
     )
 
     companion object {

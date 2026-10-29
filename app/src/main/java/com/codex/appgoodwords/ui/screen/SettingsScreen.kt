@@ -112,6 +112,8 @@ internal fun aiCoachGapTag(minutes: Int): String = "ai_coach_gap_$minutes"
 internal const val aiCoachBackgroundSwitchTag = "ai_coach_background_switch"
 /** 정확한 알람 권한이 없을 때 그 설정 화면으로 데려가는 단추. */
 internal const val aiCoachExactAlarmTag = "ai_coach_exact_alarm"
+/** 목표 탭에 적은 것을 AI에 함께 보낼지. */
+internal const val aiIncludeGoalsSwitchTag = "ai_include_goals_switch"
 internal const val aiCoachShortDayTag = "ai_coach_short_day"
 
 /** 이보다 짧은 동안 하루 몫을 다 쓰면 알려 줍니다(6시간). 그 뒤 하루가 길게 조용합니다. */
@@ -1325,6 +1327,24 @@ private fun AiFeedbackSection(
                     "일기 본문이 그대로 AI에 전달됩니다. 피드백은 구체적이지만, 가장 사적인 글이 밖으로 나갑니다."
                 } else {
                     "일기는 날짜·기분·날씨·글자 수만 보냅니다. 본문은 이 기기를 떠나지 않습니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // 일기 본문과 같은 결의 스위치입니다. 되고 싶은 모습은 사적인 글이라 내보낼지는 사용자가 정합니다.
+            SettingSwitchRow(
+                title = "목표·이상향·롤모델도 보내기",
+                checked = settings.includeGoals,
+                onCheckedChange = { onChanged(settings.copy(includeGoals = it)) },
+                modifier = Modifier.testTag(aiIncludeGoalsSwitchTag)
+            )
+            Text(
+                text = if (settings.includeGoals) {
+                    "목표 탭에 적은 것의 제목·설명·이어 둔 루틴 이름이 함께 나가, 돌아보기와 한마디가 오늘 한 것을 " +
+                        "그 방향과 이어 봅니다. 되새긴 기록은 보내지 않습니다."
+                } else {
+                    "목표 탭에 적은 것은 보내지 않습니다. 켜면 돌아보기와 한마디가 그 방향을 알고 말합니다."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

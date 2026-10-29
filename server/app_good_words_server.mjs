@@ -9,7 +9,7 @@ import { delimiter, dirname, extname, join, normalize, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 22;
+const schemaVersion = 23;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -62,9 +62,14 @@ for (const [mime, ext] of attachmentExtensions) {
 }
 
 /** 보관함에 담기는 종류. 앱 `ContentType`과 같은 이름이어야 한다. */
-const contentTypes = new Set(["QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"]);
+// 이상향·목표·롤모델(VISION·GOAL·ROLE_MODEL)은 목표 탭의 기록입니다. 23부터 들어왔습니다.
+const contentTypes = new Set([
+  "QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL",
+]);
 /** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`와 같아야 한다. */
-const personalContentTypes = new Set(["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE"]);
+const personalContentTypes = new Set(["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL"]);
+/** 목표 탭의 기록. 제목만 있으면 되고, 이어 둔 루틴(linkedRoutineSyncIds)을 들고 다닙니다. */
+const goalContentTypes = new Set(["VISION", "GOAL", "ROLE_MODEL"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
 const triggers = new Set([
   "APP_LAUNCH",
@@ -772,7 +777,7 @@ const aiProviders = {
     url: "https://api.openai.com/v1/chat/completions",
     headers: (key) => ({ Authorization: `Bearer ${key}` }),
     body: (system, user, model) => ({
-      model: model || "gpt-4o-mini",
+      model: model || "gpt-6-luna",
       messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user }],
       response_format: { type: "json_object" },
     }),
@@ -790,7 +795,7 @@ const aiProviders = {
       "anthropic-beta": "server-side-fallback-2026-07-01",
     }),
     body: (system, user, model) => ({
-      model: model || "claude-opus-5",
+      model: model || "claude-opus-5-5",
       // 없으면 안 되는 값입니다. 생각하는 데 쓰는 몫까지 여기서 셉니다.
       max_tokens: 16000,
       // 일러 주는 말은 messages가 아니라 이 자리에 따로 싣습니다.
@@ -1563,9 +1568,15 @@ function deduplicate(db) {
   const readingLogs = resolveDuplicates(db.bookReadingLogs, readingLogFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
-  db.items = items.kept.map((item) =>
-    item.bookSyncId ? { ...item, bookSyncId: books.movedTo.get(item.bookSyncId) || item.bookSyncId } : item,
-  );
+  // 목표에 이어 둔 루틴도 남은 루틴으로 옮긴다. 둘이 하나로 합쳐졌으면 한 번만 남긴다(앱 SyncDeduplicator와 같게).
+  db.items = items.kept.map((item) => {
+    const withBook = item.bookSyncId
+      ? { ...item, bookSyncId: books.movedTo.get(item.bookSyncId) || item.bookSyncId }
+      : item;
+    const linked = withBook.linkedRoutineSyncIds || [];
+    if (linked.length === 0) return withBook;
+    return { ...withBook, linkedRoutineSyncIds: [...new Set(linked.map((id) => routines.movedTo.get(id) || id))] };
+  });
   // 사라진 글귀를 가리키던 루틴도 남은 글귀로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   db.routines = routines.kept.map((routine) =>
     routine.sourceContentSyncId
@@ -1966,6 +1977,9 @@ function saveContent(db, payload, itemId = null) {
   } else if (normalized.type === "PRINCIPLE") {
     // 기준은 제목 한 줄이면 충분하다. 이유는 안 적어도 된다.
     if (!normalized.title) throw new HttpError(400, "원칙을 입력해 주세요.");
+  } else if (goalContentTypes.has(normalized.type)) {
+    // 되고 싶은 모습·목표·이름 한 줄이면 된다. 설명은 안 적어도 된다.
+    if (!normalized.title) throw new HttpError(400, "제목을 입력해 주세요.");
   } else if (!normalized.body && !normalized.sourceUrl && normalized.imageUris.length === 0 && normalized.videoUris.length === 0) {
     throw new HttpError(400, "본문, 링크, 사진, 영상 중 하나는 필요합니다.");
   }
@@ -2411,6 +2425,9 @@ function normalizeContent(item) {
     // 어느 책 몇 쪽에서 뽑았는지. 책은 숫자 id가 아니라 syncId로 가리킨다.
     bookSyncId: text(item.bookSyncId),
     bookPage: Math.max(0, positiveInt(item.bookPage)),
+    // 이상향·목표·롤모델을 위해 하는 루틴. 루틴의 syncId로 가리킨다(앱 ContentItemEntity.linkedRoutineSyncIds).
+    // 여기서 빠뜨리면 병합을 한 번 거칠 때마다 이어 둔 루틴이 조용히 사라진다.
+    linkedRoutineSyncIds: [...new Set(stringList(item.linkedRoutineSyncIds))],
     createdAt: integer(item.createdAt, nowMs()),
     lastShownAt: nullableInteger(item.lastShownAt),
     showCount: integer(item.showCount, 0),
