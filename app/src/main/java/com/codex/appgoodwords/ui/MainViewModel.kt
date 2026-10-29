@@ -60,7 +60,9 @@ import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.HomeQuote
 import com.codex.appgoodwords.widget.QuoteWidget
 import com.codex.appgoodwords.work.AppNotifications
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -450,18 +452,21 @@ class MainViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
-     * 오늘 기분을 남깁니다. 하루에 하나라, 다시 찍으면 그날 것을 고칩니다.
+     * 지금 기분을 새로 남깁니다(사용자가 정함, 2026-10-29).
      *
      * 일기를 안 쓴 날에도 남길 수 있는 것이 요점입니다. 바쁘고 힘든 날일수록 일기를 못 쓰는데,
      * 그런 날이 통째로 비면 기분 그래프도 겹쳐 보기도 정작 알고 싶은 날을 버립니다.
      */
     fun saveTodayMood(mood: DiaryMood) {
-        viewModelScope.launch { container.repository.saveMoodLog(LocalDate.now(), mood) }
+        // DB를 기다리는 사이 자정이 지나도 누른 날과 시각으로 남깁니다.
+        val now = System.currentTimeMillis()
+        val date = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        viewModelScope.launch { container.repository.saveMoodLog(date, mood, now) }
     }
 
     /** 잘못 찍었을 때. 지운 표식을 남겨야 다음 병합에서 되살아나지 않습니다. */
-    fun clearTodayMood() {
-        viewModelScope.launch { container.repository.clearMoodLog(LocalDate.now()) }
+    fun clearMoodLog(syncId: String) {
+        viewModelScope.launch { container.repository.clearMoodLog(syncId) }
     }
 
     /** 여기저기 붙여 둔 첨부를 한자리에. 파일을 옮기지 않고 주소만 모읍니다. */

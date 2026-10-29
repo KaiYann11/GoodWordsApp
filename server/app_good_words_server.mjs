@@ -9,7 +9,8 @@ import { delimiter, dirname, extname, join, normalize, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-const schemaVersion = 23;
+// 옛 앱은 같은 날 기분을 합쳐 지우므로 칸이 같아도 붙지 않게 합니다(사용자가 정함, 2026-10-29).
+const schemaVersion = 24;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /**
@@ -1703,20 +1704,6 @@ function todoFingerprint(todo) {
 }
 
 /**
- * 같은 기간을 두고 받은 피드백은 한 편만 남긴다.
- *
- * 두 기기에서 같은 주를 각각 돌리면 글은 조금씩 달라도 말하는 바는 같다.
- * 본문까지 견주면 늘 다른 것이 되어 쌓이기만 하므로 기간과 단위로만 본다.
- * 앱의 reportFingerprint와 같아야 한다.
- */
-/**
- * 오늘 기분은 하루에 하나다.
- *
- * 두 기기에서 같은 날 기분을 각각 찍으면 그날의 기분이 둘이 된다. 그러면 겹쳐 보는 자리가
- * "어느 쪽이라 할 수 없는 날"로 보고 그날을 버린다. 기분이 무엇이었는지는 견주지 않고
- * 날짜만 본다. 그래야 나중에 고친 쪽 하나가 남는다. 앱의 moodLogFingerprint와 같아야 한다.
- */
-/**
  * 하루에 책 하나당 하나다. 읽은 쪽수는 견주지 않는다.
  *
  * 두 기기에서 같은 날 같은 책을 적으면 쪽수가 서로 다르기 마련인데, 그것까지 견주면 둘 다 남아
@@ -1729,10 +1716,22 @@ function readingLogFingerprint(log) {
   return book + "|" + date;
 }
 
+/**
+ * 하루 안의 흐름을 남깁니다(사용자가 정함, 2026-10-29). 날짜·기분·생성·수정 시각까지
+ * 같은 사본만 합칩니다. 생성 시각만 보면 예전에 고쳐 찍은 기록을 잃고, 분 단위로 뭉개면
+ * 실제로 연달아 바뀐 기분을 잃습니다. 앱 moodLogFingerprint와 판정·승자가 같아야 합니다.
+ */
 function moodLogFingerprint(log) {
-  return text(log.entryDate);
+  return [text(log.entryDate), text(log.mood), log.createdAt, log.updatedAt].join("|");
 }
 
+/**
+ * 같은 기간을 두고 받은 피드백은 한 편만 남긴다.
+ *
+ * 두 기기에서 같은 주를 각각 돌리면 글은 조금씩 달라도 말하는 바는 같다.
+ * 본문까지 견주면 늘 다른 것이 되어 쌓이기만 하므로 기간과 단위로만 본다.
+ * 앱의 reportFingerprint와 같아야 한다.
+ */
 function reportFingerprint(report) {
   return [text(report.period), text(report.periodStart), text(report.periodEnd)].join("|");
 }

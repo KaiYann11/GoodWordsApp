@@ -54,7 +54,9 @@ data class DailyCoachDigest(
      *
      * **지문에는 넣지 않습니다.** 말을 주고받은 것은 오늘 한 일이 아닙니다 — 넣으면 답할 때마다 "기록이 바뀌었다"가 됩니다.
      */
-    val talkLines: List<String> = emptyList()
+    val talkLines: List<String> = emptyList(),
+    /** 받은 글귀는 오늘 한 일이 아니므로 지문에는 넣지 않습니다. 대화 유무와도 별개입니다. */
+    val givenQuoteLines: List<String> = emptyList()
 ) {
     /** 오늘 한 것이 하나도 없으면 물어볼 거리가 없습니다. */
     val isEmpty: Boolean
@@ -65,7 +67,8 @@ data class DailyCoachDigest(
      *
      * **시계는 넣지 않습니다.** 넣으면 지문이 매분 달라져 "같은 기록으로 두 번 묻지 않는다"는
      * 규칙이 통째로 무너집니다. 아직 안 밟은 루틴도 넣지 않습니다 — 루틴을 하나 새로 만든 것은
-     * 오늘 한 일이 아닙니다.
+     * 오늘 한 일이 아닙니다. 다만 기분을 찍은 시각과 흐름은 실제로 남긴 기록이라 doneLines에
+     * 넣습니다. 시간이 흐르기만 해서는 그대로이고, 새로 찍거나 지웠을 때 바뀝니다.
      */
     val fingerprint: String
         get() = if (isEmpty) "" else buildString {
@@ -128,7 +131,15 @@ object DailyCoachPrompt {
             // 일기는 제목도 본문으로 봅니다. 켜지 않으면 날짜·기분·날씨·글자 수만 나갑니다 —
             // 그 규칙은 GrowthPrompt.diaryLine 한 곳에 있습니다.
             todayDiaries.forEach { add("일기: " + GrowthPrompt.diaryLine(it, includeDiaryBody)) }
-            dayDigest.score.mood?.let { add("기분: ${it.label}") }
+            dayDigest.score.mood?.let {
+                add("기분: ${it.label}" + if (dayDigest.moodSettled) "" else " (하루 안에 달라짐)")
+            }
+            // 설정 미리 보기·실제 물음·지문 모두 이 흐름을 씁니다(사용자가 정함, 2026-10-29).
+            if (dayDigest.moodLogs.isNotEmpty()) {
+                add("기분 흐름: " + dayDigest.moodLogs.joinToString(" → ") {
+                    "${DayMood.timeLabel(it, zoneId)} ${it.moodOption?.label ?: it.mood}"
+                })
+            }
         }
 
         // 아직 안 밟은 루틴을 추리는 규칙은 한 곳에 있습니다. 화면의 가벼운 한 줄
@@ -159,9 +170,23 @@ object DailyCoachPrompt {
             ownedQuoteLines = ownedQuoteLines,
             // 무엇이 나가는지는 한 곳에서 정합니다. 돌아보기와 같은 함수입니다.
             directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList(),
-            talkLines = talkLines(talk, zoneId)
+            talkLines = talkLines(talk, zoneId),
+            givenQuoteLines = givenQuoteLines(today, talk, zoneId)
         )
     }
+
+    /**
+     * 오늘 앞서 건넨 글귀는 대답하지 않은 날에도 빼 달라고 보냅니다(사용자가 정함, 2026-10-29).
+     * talkLines의 대화 조건·최근 16줄 제한을 쓰면 조용히 듣기만 한 날과 오전 글귀가 빠집니다.
+     * 받은 한마디 중 글귀만 싣습니다. 코치의 조언이나 내 말은 이 목록으로 나가지 않습니다.
+     */
+    fun givenQuoteLines(today: LocalDate, talk: List<DailyCoachLine>, zoneId: ZoneId = ZoneId.systemDefault()): List<String> =
+        talk.filter {
+            it.kind == DailyCoachLine.Kind.TIP && it.quote.isNotBlank() &&
+                Instant.ofEpochMilli(it.at).atZone(zoneId).toLocalDate() == today
+        }.map {
+            oneLine(it.quote) + if (it.quoteAuthor.isBlank()) "" else " (${oneLine(it.quoteAuthor)})"
+        }.distinct()
 
     /**
      * 오늘 나눈 말을 물음에 실을 줄로 바꿉니다(사용자가 정함, 2026-10-29 — 다음 한마디도 대화를 압니다).
@@ -204,7 +229,8 @@ object DailyCoachPrompt {
         dayDigest: DayDigest,
         progress: DailyProgress,
         diaries: List<DiaryEntity>,
-        includeDiaryBody: Boolean
+        includeDiaryBody: Boolean,
+        zoneId: ZoneId = ZoneId.systemDefault()
     ): String = digest(
         today = today,
         at = LocalTime.MIDNIGHT,
@@ -214,7 +240,8 @@ object DailyCoachPrompt {
         todayChecks = emptyList(),
         diaries = diaries,
         items = emptyList(),
-        includeDiaryBody = includeDiaryBody
+        includeDiaryBody = includeDiaryBody,
+        zoneId = zoneId
     ).fingerprint
 
     /** 모델에게 어떤 사람으로 답하라고 일러 주는 말. */
@@ -241,12 +268,11 @@ object DailyCoachPrompt {
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
         appendLine("""{"message":"...","quote":{"text":"...","author":"..."},"routine":"...","action":"..."}""")
         appendLine("- message는 늘 적습니다. 오늘 한 것 중 하나를 짚어 주세요.")
+        // 글귀는 매번 받고 싶다는 선택입니다. 밤의 행동 권유와 구별합니다(사용자가 정함, 2026-10-29).
+        appendLine("- quote는 늘 하나 적습니다. 밤에도 지금 곁에 둘 짧은 글귀를 주고 text를 비우지 않습니다.")
+        appendLine("- routine·action은 권할 것이 있을 때만 적고, 없으면 빈 문자열로 둡니다. 둘을 매번 채우지 마세요.")
         appendLine(
-            "- quote·routine·action은 **권할 것이 있을 때만** 적고, 없으면 빈 문자열로 둡니다. " +
-                "셋을 매번 채우지 마세요."
-        )
-        appendLine(
-            "- quote는 지금 곁에 둘 만한 짧은 글귀 하나입니다. **[이미 담아 둔 것]에 있는 것은 " +
+            "- quote는 지금 곁에 둘 만한 짧은 글귀 하나입니다. **[이미 담아 둔 것]과 [오늘 앞서 건넨 글귀]에 있는 것은 " +
                 "권하지 않습니다.** 당신이 알고 있는 것에서 고르세요. 지어낸 인용이라면 " +
                 "author는 빈 문자열로 둡니다."
         )
@@ -266,6 +292,7 @@ object DailyCoachPrompt {
         section("아직 안 밟은 루틴", digest.restRoutines)
         section("오늘 나눈 말", digest.talkLines)
         section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
+        section("오늘 앞서 건넨 글귀 (추천에서 빼 주세요)", digest.givenQuoteLines)
         append("지금 건넬 한마디를 형식에 맞는 JSON으로만 답해 주세요.")
     }
 

@@ -2,17 +2,22 @@ package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
+import com.codex.appgoodwords.data.DayScoreCalculator
 import com.codex.appgoodwords.data.DiaryMood
+import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.ScorePoint
 import com.codex.appgoodwords.data.ScoreTrend
 import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -200,6 +205,7 @@ class DayScoreCardTest {
         }
 
         compose.onNodeWithText("이날은 남긴 것이 없습니다.").assertIsDisplayed()
+        compose.onNodeWithTag(moodTimelineTag).assertDoesNotExist()
     }
 
     @Test
@@ -215,6 +221,34 @@ class DayScoreCardTest {
         }
 
         compose.onNodeWithText("😢 슬픔").assertIsDisplayed()
+    }
+
+    @Test
+    fun theSummaryShowsTheFlowAndExplainsAChangingDay() {
+        val morning = today.atTime(9, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val evening = today.atTime(18, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val first = MoodLogEntity(syncId = "morning", entryDate = today.toString(), mood = "GOOD", createdAt = morning, updatedAt = morning)
+        val last = first.copy(syncId = "evening", mood = "TIRED", createdAt = evening, updatedAt = evening)
+        val digest = DayScoreCalculator.digest(
+            date = today, events = emptyList(), routineChecks = emptyList(), todos = emptyList(), diaries = emptyList(),
+            moodLogs = listOf(last, first)
+        )
+        var removed: String? = null
+        compose.setContent {
+            DaySummaryDialog(digest = digest, today = today, onMove = {}, onDismiss = {}, onDeleteMood = { removed = it })
+        }
+
+        compose.onNodeWithText("하루 안에 기분이 달라졌어요. 마지막 기분을 표시합니다.").assertIsDisplayed()
+        compose.onNodeWithText("😪 지침").assertIsDisplayed()
+        compose.onNodeWithText("09:00  🙂 좋음").assertIsDisplayed()
+        compose.onNodeWithTag(moodTimelineTag).performScrollToNode(hasTestTag(moodLogDeleteTag(last.syncId)))
+        compose.onNodeWithText("18:00  😪 지침").assertIsDisplayed()
+        // 기분만 남긴 날도 기록이 있는 날이고 점수는 올리지 않습니다.
+        compose.onNodeWithText("이날은 남긴 것이 없습니다.").assertDoesNotExist()
+        compose.onNodeWithTag(daySummaryScoreTag).assertTextEquals("0점")
+        compose.onNodeWithTag(moodLogDeleteTag(last.syncId)).performClick()
+        compose.onNodeWithTag(moodLogDeleteConfirmTag).performClick()
+        assertEquals(last.syncId, removed)
     }
 
     private fun digest(score: DayScore) = DayDigest(

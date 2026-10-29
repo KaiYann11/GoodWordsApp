@@ -7,6 +7,47 @@ import vm from "node:vm";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+/** 기분 화면의 실제 렌더링으로 날짜 묶음·시각·읽기 전용을 함께 봅니다. */
+async function renderMoods(logs) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const app = { innerHTML: "" };
+  const context = vm.createContext({ app, state: { snapshot: { moodLogs: logs } }, empty: value => value });
+  vm.runInContext(source.slice(source.indexOf("const moodOptions ="), source.indexOf("const app =")), context);
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  vm.runInContext(source.slice(source.indexOf("function renderMoods("), source.indexOf("function renderGrowth(")), context);
+  context.renderMoods();
+  return { html: app.innerHTML, days: context.moodDays(logs), time: context.moodTime };
+}
+
+test("기분은 날짜별로 묶고 하루 안은 수정 시각 순으로 읽기만 한다", async () => {
+  const at = (time) => new Date(`2026-10-29T${time}:00`).getTime();
+  const first = { syncId: "first", entryDate: "2026-10-29", mood: "GOOD", createdAt: at("09:00"), updatedAt: at("09:00") };
+  const old = { ...first, syncId: "old", mood: "TIRED", updatedAt: at("18:30") };
+  const yesterday = { ...first, syncId: "yesterday", entryDate: "2026-10-28" };
+  const { html, days, time } = await renderMoods([old, yesterday, first]);
+
+  assert.match(html, /기분 2일/);
+  assert.equal((html.match(/<h3>2026-10-29<\/h3>/g) || []).length, 1);
+  assert.ok(html.indexOf("2026-10-29") < html.indexOf("2026-10-28"));
+  assert.ok(html.indexOf("09:00") < html.indexOf("18:30"));
+  assert.match(html, /🙂 좋음/);
+  assert.match(html, /😪 지침/);
+  assert.equal(time(old), "18:30");
+  assert.equal(days[0][1].length, 2);
+  assert.doesNotMatch(html, /<button|<input|<form/);
+});
+
+test("같은 시각의 기분 차례도 앱과 같고 알 수 없는 값은 HTML로 실행되지 않는다", async () => {
+  const first = { syncId: "a", entryDate: "2026-10-29", mood: "<script>bad</script>", createdAt: 1_000, updatedAt: 2_000 };
+  const last = { ...first, syncId: "z", mood: "GOOD" };
+  const { html, days } = await renderMoods([last, first]);
+  assert.equal(days[0][1][0].syncId, "a");
+  assert.equal(days[0][1][1].syncId, "z");
+  assert.match(html, /&lt;script&gt;bad&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match((await renderMoods([])).html, /아직 찍어 둔 기분이 없습니다/);
+});
+
 /**
  * 웹의 루틴 셈을 떼어 와 그대로 돌려 봅니다.
  *

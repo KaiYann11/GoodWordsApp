@@ -266,7 +266,7 @@ fun AppGoodWordsApp(
     // 그날의 기분은 DayMood가 정합니다. 찍어 둔 것이 먼저고, 없으면 일기에서 봅니다.
     // 여기서 따로 셈하면 화면과 통계가 다른 기분을 말하게 됩니다.
     val today = LocalDate.now()
-    val todayMoodLog = remember(moodLogs, today) { DayMood.logOn(moodLogs, today) }
+    val todayMoodLogs = remember(moodLogs, today) { DayMood.logsOn(moodLogs, today) }
     val todayMood = remember(moodLogs, diaries, today) {
         DayMood.byDate(logs = moodLogs, diaries = diaries)[today]
     }
@@ -669,6 +669,7 @@ fun AppGoodWordsApp(
                     diaryTitles = if (digest.diaryTitles.isEmpty()) emptyList() else listOf("잠긴 일기 ${digest.diaryTitles.size}개")
                 ) else digest,
                 onMove = { date -> viewModel.openDay(date) },
+                onDeleteMood = viewModel::clearMoodLog,
                 onDismiss = { viewModel.closeDay() }
             )
         }
@@ -1013,10 +1014,11 @@ fun AppGoodWordsApp(
                             memories = if (diaryLocked) onThisDay.filter { it.kind != SearchKind.DIARY } else onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,
+                            todayMoodLogs = todayMoodLogs,
                             onOpenCapture = { capturingIdea = true },
                             onPickMood = { mood -> viewModel.saveTodayMood(mood) },
                             // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
-                            onClearMood = todayMoodLog?.let { { viewModel.clearTodayMood() } },
+                            onClearMood = viewModel::clearMoodLog,
                             // 그때 그 글을 열어 줍니다. 알려만 주면 사용자가 다시 뒤져야 합니다.
                             onOpenMemory = { memory ->
                                 when (memory.kind) {

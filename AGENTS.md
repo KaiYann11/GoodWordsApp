@@ -13,7 +13,7 @@
 | `server/README.md` | 서버 운용, 동기화 규약, REST API |
 | `BACKLOG.md` | 남은 일과 미룬 이유 |
 
-**지금 상태는 문서가 아니라 저장소에서 봅니다** — 앱 버전은 `app/build.gradle.kts`, 동기화 형식은 `AppDatabase.version`과
+**지금 상태는 문서가 아니라 저장소에서 봅니다** — 앱 버전은 `app/build.gradle.kts`, 동기화 형식은 `AppDataJson.schemaVersion`과
 서버 `/api/health`의 `schemaVersion`, 무엇을 언제 올렸는지는 `git log`(게시 커밋 제목 `X.Y.Z / versionCode N 게시`),
 **무엇을 어떻게 검증했는지는 커밋 메시지**입니다. `captures/`는 커밋되지 않습니다.
 
@@ -107,7 +107,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 무엇 | 자리 |
 |---|---|
 | 이어 온 날수 · 하루 점수·오늘 한 것 · 하루의 걸음 | `DayStreak` · `DayScoreCalculator.digest` · `DailyLoopCalculator` |
-| 그날의 기분 | `DayMood` (그래프 `byDate`, 기분별 셈 `settledByDate`) |
+| 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴 · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
 | 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄) | `GoalTracking` |
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
@@ -131,7 +131,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 첨부 주소 형식 | 앱 `AttachmentUris.SCHEME` · 서버·웹 `attachmentScheme` |
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
-| 같은 내용 합치기 | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다) |
+| 같은 내용 합치기(기분 `moodLogFingerprint` 포함) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |

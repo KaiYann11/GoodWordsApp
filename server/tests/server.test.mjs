@@ -2237,7 +2237,6 @@ describe("AI 돌아보기", () => {
         ],
       }),
     });
-    await api("/api/deduplicate", { method: "POST" });
     const stored = await (await api("/api/snapshot")).json();
 
     assert.equal(stored.growthReports.length, 1);
@@ -2593,7 +2592,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 23);
+    assert.equal(stored.schemaVersion, 24);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2737,7 +2736,7 @@ describe("오늘 기분", () => {
     assert.equal(stored.moodLogs.length, 0);
   });
 
-  it("같은 날 두 기기에서 찍은 기분은 하나로 합친다", async () => {
+  it("같은 날 두 기기에서 찍은 기분을 모두 남긴다", async () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [moodLog()] }) });
 
     await api("/api/sync", {
@@ -2746,13 +2745,71 @@ describe("오늘 기분", () => {
         moodLogs: [moodLog({ id: 9, syncId: "mood-2", updatedAt: 2_000, createdAt: 2_000, mood: "GOOD" })],
       }),
     });
-    await api("/api/deduplicate", { method: "POST" });
     const stored = await (await api("/api/snapshot")).json();
 
-    // 그날 기분이 둘이면 겹쳐 보는 자리가 그날을 통째로 버린다.
-    assert.equal(stored.moodLogs.length, 1);
-    assert.equal(stored.moodLogs[0].mood, "GOOD");
-    assert.ok(stored.deletions.some((entry) => entry.entityType === "MOOD_LOG"));
+    assert.equal(stored.moodLogs.length, 2);
+    assert.deepEqual(new Set(stored.moodLogs.map(log => log.mood)), new Set(["GOOD", "TIRED"]));
+    assert.ok(!stored.deletions.some((entry) => entry.entityType === "MOOD_LOG"));
+  });
+
+  it("기분·생성·수정 시각이 하나라도 다르면 같은 날에도 합치지 않는다", async () => {
+    // 앱 SyncDeduplicatorTest와 같은 경계입니다. 밀리초를 분으로 뭉개지 않습니다.
+    const logs = [
+      moodLog(),
+      moodLog({ syncId: "different-mood", mood: "GOOD" }),
+      moodLog({ syncId: "later", createdAt: 1_001, updatedAt: 1_001 }),
+      moodLog({ syncId: "old-edit", updatedAt: 2_000 }),
+      moodLog({ syncId: "different-created", createdAt: 999 }),
+    ];
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: logs }) });
+    const first = await (await api("/api/sync", { method: "POST", body: emptySnapshot({ moodLogs: logs.toReversed() }) })).json();
+    assert.equal(first.moodLogs.length, logs.length);
+    assert.ok(!first.deletions.some(entry => entry.entityType === "MOOD_LOG"));
+
+    const again = await (await api(`/api/sync?since=${first.rev}`, {
+      method: "POST", body: emptySnapshot({ moodLogs: logs }),
+    })).json();
+    assert.equal(again.rev, first.rev, "같은 기록으로 계속 리비전을 만들면 안 됩니다.");
+    assert.equal(again.moodLogs.length, 0);
+  });
+
+  it("완전히 같은 기분 사본만 합치고 순서와 무관하게 같은 승자·삭제 표식을 만든다", async () => {
+    const a = moodLog({ syncId: "a" });
+    const z = moodLog({ id: 99, syncId: "z" });
+    for (const logs of [[a, z], [z, a]]) {
+      await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: logs }) });
+      // 교체는 사본을 그대로 담습니다. 같은 내용 합치기는 실제 병합 경로에서만 일어납니다.
+      const response = await api("/api/sync", { method: "POST", body: emptySnapshot() });
+      assert.equal(response.status, 200);
+      const stored = await response.json();
+      assert.deepEqual(stored.moodLogs.map(log => log.syncId), ["z"]);
+      assert.ok(stored.deletions.some(entry => entry.syncId === "a" && entry.entityType === "MOOD_LOG"));
+      const merged = await (await api("/api/sync", { method: "POST", body: emptySnapshot({ moodLogs: logs }) })).json();
+      assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["z"]);
+    }
+  });
+
+  it("흐름의 한 기록만 지우면 부분 응답에 그 표식만 오고 옛 사본도 되살아나지 않는다", async () => {
+    const firstLog = moodLog();
+    const lastLog = moodLog({ syncId: "last", createdAt: 2_000, updatedAt: 2_000, mood: "GOOD" });
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ moodLogs: [firstLog, lastLog] }) });
+    const first = await (await api("/api/snapshot")).json();
+    const delta = await (await api(`/api/sync?since=${first.rev}`, {
+      method: "POST",
+      body: emptySnapshot({ deletions: [{ syncId: firstLog.syncId, entityType: "MOOD_LOG", deletedAt: Date.now() }] }),
+    })).json();
+    assert.equal(delta.partial, true);
+    assert.equal(delta.moodLogs.length, 0);
+    assert.deepEqual(delta.deletions.map(entry => entry.syncId), [firstLog.syncId]);
+    const merged = await (await api("/api/sync", {
+      method: "POST", body: emptySnapshot({ moodLogs: [firstLog, lastLog] }),
+    })).json();
+    assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
+  });
+
+  it("날짜로 합치는 옛 앱과 구별할 형식 24를 알린다", async () => {
+    const health = await (await api("/api/health")).json();
+    assert.equal(health.schemaVersion, 24);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {
@@ -2762,7 +2819,8 @@ describe("오늘 기분", () => {
         moodLogs: [moodLog(), moodLog({ id: 2, syncId: "mood-2", entryDate: "2026-08-25", mood: "GOOD" })],
       }),
     });
-    await api("/api/deduplicate", { method: "POST" });
+    const response = await api("/api/sync", { method: "POST", body: emptySnapshot() });
+    assert.equal(response.status, 200);
 
     const stored = await (await api("/api/snapshot")).json();
 

@@ -214,22 +214,21 @@ class GrowthPromptTest {
             )
         )
 
-        assertTrue(prompt, prompt.contains("일기 없이 남긴 기분"))
+        assertTrue(prompt, prompt.contains("그날의 기분"))
         assertTrue(prompt, prompt.contains("2026-08-21 지침"))
     }
 
     @Test
-    fun aMoodIsNotSentTwiceForTheSameDay() {
-        // 일기가 있는 날은 그 줄에 기분이 이미 붙어 있습니다.
-        val prompt = GrowthPrompt.userPrompt(
-            digest(
+    fun theLastTapIsSentEvenOnADiaryDay() {
+        val first = moodLog("2026-08-21", DiaryMood.GOOD).copy(updatedAt = 1_000L)
+        val digest = digest(
                 diaries = listOf(diary.copy(entryDate = "2026-08-21", mood = "SAD")),
-                moodLogs = listOf(moodLog("2026-08-21", DiaryMood.TIRED)),
+                moodLogs = listOf(first, first.copy(syncId = "last", mood = "TIRED", updatedAt = 2_000L)),
                 includeDiaryBody = false
             )
-        )
 
-        assertFalse(prompt, prompt.contains("일기 없이 남긴 기분"))
+        assertEquals(listOf("2026-08-21 지침 (하루 안에 달라짐)"), digest.moodLines)
+        assertTrue(GrowthPrompt.userPrompt(digest).contains("그날의 기분 (찍은 것이 먼저, 마지막 기록 기준)"))
     }
 
     @Test

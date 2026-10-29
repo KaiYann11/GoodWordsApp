@@ -96,7 +96,10 @@ data class DayDigest(
     val todoTitles: List<String>,
     val diaryTitles: List<String>,
     val quoteTitles: List<String>,
-    val bookTitles: List<String> = emptyList()
+    val bookTitles: List<String> = emptyList(),
+    /** 화면과 코치가 같은 흐름을 읽습니다. 셈한 것은 저장하지 않습니다. */
+    val moodLogs: List<MoodLogEntity> = emptyList(),
+    val moodSettled: Boolean = true
 ) {
     val isEmpty: Boolean
         get() = score.isEmpty
@@ -176,6 +179,7 @@ object DayScoreCalculator {
             if (readToday.isNotEmpty()) add(DailyStep.READING)
         }
 
+        val moodEntry = DayMood.entriesByDate(logs = moodLogs, diaries = diaries)[date]
         val score = DayScore(
             date = date,
             steps = chosen,
@@ -188,7 +192,7 @@ object DayScoreCalculator {
             booksRead = readToday.size,
             pagesRead = readToday.sumOf { it.pagesRead },
             // 그날의 기분은 DayMood가 정합니다. 여기서 따로 셈하면 화면마다 다른 말을 합니다.
-            mood = DayMood.byDate(logs = moodLogs, diaries = diaries)[date]
+            mood = moodEntry?.mood
         )
 
         return DayDigest(
@@ -199,7 +203,9 @@ object DayScoreCalculator {
             diaryTitles = diariesToday.map { it.displayTitle.ifBlank { it.entryDate } },
             quoteTitles = quotesToday.map { it.contentTitle }.filter { it.isNotBlank() }.distinct(),
             // 같은 책을 하루에 여러 번 적어도 한 줄입니다(하루에 책 하나당 기록 하나).
-            bookTitles = readToday.map { it.bookTitle }.filter { it.isNotBlank() }.distinct()
+            bookTitles = readToday.map { it.bookTitle }.filter { it.isNotBlank() }.distinct(),
+            moodLogs = DayMood.logsOn(moodLogs, date),
+            moodSettled = moodEntry?.settled ?: true
         )
     }
 

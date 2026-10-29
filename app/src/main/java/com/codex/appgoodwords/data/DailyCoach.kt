@@ -17,7 +17,7 @@ import org.json.JSONObject
 data class DailyCoachTip(
     /** 오늘 한 것에서 하나를 짚어 주는 말. 늘 있습니다. */
     val message: String = "",
-    /** 지금 곁에 둘 만한 글귀. 권할 것이 없으면 빈 값입니다. */
+    /** 늘 하나 청하지만 모델이 비워 보내면 그대로 비워 둡니다(사용자가 정함, 2026-10-29). */
     val quote: String = "",
     val quoteAuthor: String = "",
     /** 새로 만들어 볼 만한 루틴 이름. 대개 비어 있습니다. */

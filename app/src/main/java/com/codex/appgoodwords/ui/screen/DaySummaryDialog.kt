@@ -56,7 +56,8 @@ fun DaySummaryDialog(
     onMove: (LocalDate) -> Unit,
     onDismiss: () -> Unit,
     /** 오늘 뒤로는 갈 수 없습니다. 오지 않은 날에 점수를 매길 수는 없습니다. */
-    today: LocalDate = LocalDate.now()
+    today: LocalDate = LocalDate.now(),
+    onDeleteMood: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val date = digest.score.date
@@ -134,6 +135,18 @@ fun DaySummaryDialog(
                     }
                 }
 
+                if (!digest.moodSettled) {
+                    Text(
+                        text = "하루 안에 기분이 달라졌어요. 마지막 기분을 표시합니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (digest.moodLogs.isNotEmpty()) {
+                    Text("기분 흐름 · 옆으로 넘겨 보세요", style = MaterialTheme.typography.labelLarge)
+                    MoodTimeline(logs = digest.moodLogs, onDelete = onDeleteMood)
+                }
+
                 Text(
                     text = "걸음 ${digest.score.doneSteps.size}/${digest.score.steps.size}" +
                         " · 한 일 ${digest.score.deedCount}가지",
@@ -141,7 +154,7 @@ fun DaySummaryDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                if (digest.isEmpty) {
+                if (digest.isEmpty && digest.score.mood == null && digest.moodLogs.isEmpty()) {
                     Text(
                         text = "이날은 남긴 것이 없습니다.",
                         style = MaterialTheme.typography.bodyMedium,

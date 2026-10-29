@@ -126,8 +126,9 @@ class DailyCoachPromptTest {
 
     @Test
     fun theClockDoesNotChangeTheFingerprint() {
-        val morning = digest(checks = listOf(check("물 한 컵")), at = LocalTime.of(7, 30))
-        val evening = digest(checks = listOf(check("물 한 컵")), at = LocalTime.of(22, 10))
+        val logs = listOf(moodLog("07:00", DiaryMood.GOOD))
+        val morning = digest(checks = listOf(check("물 한 컵")), at = LocalTime.of(7, 30), moodLogs = logs)
+        val evening = digest(checks = listOf(check("물 한 컵")), at = LocalTime.of(22, 10), moodLogs = logs)
 
         assertEquals(morning.fingerprint, evening.fingerprint)
         // 그래도 지금 몇 시인지는 나갑니다. 아침에 남은 것을 재촉하지 않으려면 알아야 합니다.
@@ -157,22 +158,25 @@ class DailyCoachPromptTest {
         // 놓치거나, 같은 기록을 두고 또 묻습니다.
         val checks = listOf(check("물 한 컵", routineId = 1, routineSyncId = "r1"))
         val diaries = listOf(diary)
+        val moodLogs = listOf(moodLog("08:00", DiaryMood.TIRED), moodLog("12:30", DiaryMood.GOOD))
         // 긴 길에만 있는 것들(루틴 목록·보관함)은 지문에 들어가지 않습니다.
         val full = digest(
             routines = listOf(routine(1, "r1", "물 한 컵"), routine(2, "r2", "산책")),
             checks = checks,
             items = listOf(ContentItemEntity(id = 1, syncId = "i1", type = ContentType.QUOTE, title = "담아 둔 글귀", body = "")),
-            diaries = diaries
+            diaries = diaries,
+            moodLogs = moodLogs
         )
 
         assertEquals(
             full.fingerprint,
             DailyCoachPrompt.fingerprint(
                 today = today,
-                dayDigest = dayDigest(checks = checks, diaries = diaries),
+                dayDigest = dayDigest(checks = checks, diaries = diaries, moodLogs = moodLogs),
                 progress = progress(checks = checks, diaries = diaries),
                 diaries = diaries,
-                includeDiaryBody = false
+                includeDiaryBody = false,
+                zoneId = zone
             )
         )
     }
@@ -205,7 +209,11 @@ class DailyCoachPromptTest {
 
     @Test
     fun thePreviewIsExactlyWhatGoesOut() {
-        val digest = digest(checks = listOf(check("물 한 컵")))
+        val digest = digest(
+            checks = listOf(check("물 한 컵")),
+            moodLogs = listOf(moodLog("09:00", DiaryMood.GOOD), moodLog("12:00", DiaryMood.TIRED)),
+            talk = listOf(tipLine("오전 한마디", "10:00").copy(quote = "앞서 건넨 글귀"))
+        )
 
         assertEquals(
             DailyCoachPrompt.systemPrompt() + "\n\n" + DailyCoachPrompt.userPrompt(digest),
@@ -215,7 +223,7 @@ class DailyCoachPromptTest {
 
     @Test
     fun whatWeSaidGoesOutOnlyOnceISpoke() {
-        // 코치 혼자 건넨 한마디들은 대화가 아닙니다. 답하지 않는 사람의 물음은 예전 그대로입니다.
+        // 코치 혼자 건넨 한마디들은 대화가 아닙니다. 글귀 제외 목록만 따로 갑니다.
         val silent = digest(checks = listOf(check("물 한 컵")), talk = listOf(tipLine("물 한 컵으로 여셨네요.", "09:12")))
         assertEquals(emptyList<String>(), silent.talkLines)
         assertFalse(DailyCoachPrompt.userPrompt(silent).contains("오늘 나눈 말"))
@@ -315,6 +323,62 @@ class DailyCoachPromptTest {
         assertEquals(listOf("09:20 나: 피곤해요 그래도 걷고 싶어요"), lines)
     }
 
+    @Test
+    fun theMoodFlowGoesOutWithTimesAndChangesTheFingerprint() {
+        val morning = moodLog("08:10", DiaryMood.TIRED)
+        val evening = moodLog("17:00", DiaryMood.GOOD)
+        val before = digest(moodLogs = listOf(morning))
+        val after = digest(moodLogs = listOf(evening, morning))
+        val withYesterday = digest(moodLogs = listOf(evening, morning, morning.copy(entryDate = today.minusDays(1).toString())))
+        val prompt = DailyCoachPrompt.userPrompt(after)
+
+        assertTrue(prompt, prompt.contains("기분 흐름: 08:10 지침 → 17:00 좋음"))
+        assertTrue(prompt, prompt.contains("기분: 좋음 (하루 안에 달라짐)"))
+        assertNotEquals(before.fingerprint, after.fingerprint)
+        assertEquals(after.fingerprint, withYesterday.fingerprint)
+        assertEquals(before.fingerprint, digest(moodLogs = listOf(morning)).fingerprint)
+        // 같은 기분을 나중에 다시 찍어도 새 기록입니다. 현재 기분만 지문에 넣으면 놓칩니다.
+        assertNotEquals(before.fingerprint, digest(moodLogs = listOf(morning, moodLog("09:00", DiaryMood.TIRED))).fingerprint)
+    }
+
+    @Test
+    fun everyTipRequestsOneQuoteEvenAtNightButActionsAreOptional() {
+        val system = DailyCoachPrompt.systemPrompt()
+        assertTrue(system, system.contains("quote는 늘 하나"))
+        assertTrue(system, system.contains("밤에도 지금 곁에 둘 짧은 글귀"))
+        assertTrue(system, system.contains("이른 아침이면 재촉하지 않고, 밤이면 새 일을 벌이게 하지 않습니다"))
+        assertTrue(system, system.contains("routine·action은 권할 것이 있을 때만"))
+        assertFalse(system, system.contains("quote·routine·action은"))
+    }
+
+    @Test
+    fun earlierQuotesAreExcludedWithoutAnyConversationAndWithoutChangingTheFingerprint() {
+        val early = tipLine("오전 조언", "08:00").copy(quote = "이미 건넨 글귀", quoteAuthor = "저자")
+        val blank = tipLine("빈 글귀", "08:30")
+        val old = early.copy(at = at(today.minusDays(1)), quote = "어제 글귀")
+        val answer = line(DailyCoachLine.Kind.ANSWER, "답", "09:00").copy(quote = "답 속 글귀")
+        // 16줄 대화 제한 바깥의 글귀도 빠지지 않습니다.
+        val talk = listOf(old, early, blank, answer) + (1..20).map { tipLine("한마디 $it", "10:00").copy(quote = "글귀 $it") }
+        val quiet = digest(checks = listOf(check("물 한 컵")))
+        val withQuotes = digest(checks = listOf(check("물 한 컵")), talk = talk + early)
+        val prompt = DailyCoachPrompt.userPrompt(withQuotes)
+
+        assertTrue(withQuotes.talkLines.isEmpty())
+        assertEquals(21, withQuotes.givenQuoteLines.size)
+        assertTrue(prompt, prompt.contains("[오늘 앞서 건넨 글귀 (추천에서 빼 주세요)]"))
+        assertTrue(prompt, prompt.contains("이미 건넨 글귀 (저자)"))
+        assertFalse(prompt, prompt.contains("오전 조언"))
+        assertFalse(prompt, prompt.contains("어제 글귀"))
+        assertFalse(prompt, prompt.contains("답 속 글귀"))
+        assertEquals(quiet.fingerprint, withQuotes.fingerprint)
+        assertEquals("", digest(talk = talk).fingerprint)
+    }
+
+    private fun moodLog(time: String, mood: DiaryMood): MoodLogEntity {
+        val timestamp = at(today, LocalTime.parse(time))
+        return MoodLogEntity(syncId = "m-$time", entryDate = today.toString(), mood = mood.name, createdAt = timestamp, updatedAt = timestamp)
+    }
+
     private fun digest(
         routines: List<RoutineEntity> = emptyList(),
         checks: List<RoutineCheckEntity> = emptyList(),
@@ -325,11 +389,12 @@ class DailyCoachPromptTest {
         includeDiaryBody: Boolean = false,
         at: LocalTime = this.at,
         includeGoals: Boolean = false,
-        talk: List<DailyCoachLine> = emptyList()
+        talk: List<DailyCoachLine> = emptyList(),
+        moodLogs: List<MoodLogEntity> = emptyList()
     ): DailyCoachDigest = DailyCoachPrompt.digest(
         today = today,
         at = at,
-        dayDigest = dayDigest(checks, todos, diaries, events),
+        dayDigest = dayDigest(checks, todos, diaries, events, moodLogs),
         progress = progress(checks, todos, diaries, events),
         routines = routines,
         todayChecks = checks,
@@ -354,13 +419,15 @@ class DailyCoachPromptTest {
         checks: List<RoutineCheckEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
-        events: List<ExposureEventEntity> = emptyList()
+        events: List<ExposureEventEntity> = emptyList(),
+        moodLogs: List<MoodLogEntity> = emptyList()
     ): DayDigest = DayScoreCalculator.digest(
         date = today,
         events = events,
         routineChecks = checks,
         todos = todos,
         diaries = diaries,
+        moodLogs = moodLogs,
         steps = steps,
         zoneId = zone
     )

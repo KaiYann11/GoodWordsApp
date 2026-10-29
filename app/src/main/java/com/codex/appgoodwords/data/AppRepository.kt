@@ -629,27 +629,27 @@ class AppRepository(
         moodLogDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
     /**
-     * 그날 기분을 남깁니다. 하루에 하나라, 이미 있으면 새로 넣지 않고 고칩니다.
-     *
-     * `syncId`를 그대로 두어야 다른 기기가 "같은 기록을 고친 것"으로 읽습니다. 새 id로 넣으면
-     * 그날 기분이 둘이 되고, 겹쳐 보는 자리가 "어느 쪽이라 할 수 없는 날"로 그날을 버립니다.
+     * 누른 때마다 새 기분을 남깁니다(사용자가 정함, 2026-10-29). 바로 이어 같은 것을 잘못
+     * 누른 때만 거릅니다. 읽기와 쓰기를 한 거래로 묶어 동시에 들어온 두 누름도 한 번만 남깁니다.
      */
-    suspend fun saveMoodLog(date: LocalDate, mood: DiaryMood): MoodLogEntity? {
+    suspend fun saveMoodLog(date: LocalDate, mood: DiaryMood, now: Long = System.currentTimeMillis()): MoodLogEntity? {
         val dao = moodLogDao ?: return null
-        val entryDate = date.toString()
-        val existing = dao.getByDate(entryDate)
-        val saved = existing?.copy(mood = mood.name, updatedAt = System.currentTimeMillis())
-            ?: MoodLogEntity(entryDate = entryDate, mood = mood.name)
-        val id = dao.insert(saved)
-        return saved.copy(id = if (saved.id == 0L) id else saved.id)
+        return database.withTransaction {
+            val last = DayMood.logOn(dao.getOnDate(date.toString()), date)
+            if (DayMood.isImmediateRepeat(last, mood, now)) return@withTransaction last
+            val saved = MoodLogEntity(entryDate = date.toString(), mood = mood.name, createdAt = now, updatedAt = now)
+            saved.copy(id = dao.insert(saved))
+        }
     }
 
     /** 잘못 찍었을 때. 지운 표식을 남기지 않으면 다음 병합에서 되살아납니다. */
-    suspend fun clearMoodLog(date: LocalDate) {
+    suspend fun clearMoodLog(syncId: String) {
         val dao = moodLogDao ?: return
-        val existing = dao.getByDate(date.toString()) ?: return
-        dao.deleteById(existing.id)
-        recordDeletion(existing.syncId, SyncEntityType.MOOD_LOG)
+        database.withTransaction {
+            val existing = dao.getBySyncId(syncId) ?: return@withTransaction
+            dao.deleteBySyncIds(listOf(existing.syncId))
+            recordDeletion(existing.syncId, SyncEntityType.MOOD_LOG)
+        }
     }
 
     fun observeBooks(): Flow<List<BookEntity>> =
