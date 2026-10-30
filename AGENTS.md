@@ -119,7 +119,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
 | 담기 전 다듬기 · 읽음으로 세지 않는 종류 · AI 추천 글귀의 갈래 | `ContentNormalizer` · `ContentType.personalTypes` · `AI_CATEGORY` |
 | AI에 일기·목표가 어디까지 나가는지 | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
-| 오늘 나눈 말이 AI에 어디까지 나가는지 | `DailyCoachPrompt.talkLines` (한마디·답 공용) |
+| 오늘 나눈 말·앞서 받은 말을 AI에 다시 싣는 범위 | `DailyCoachPrompt.talkLines`·`givenTipLines`·`givenQuoteLines` (공통 `sharedTalk`·`DailyCoachSharing` — 받을 때 허용했던 범위를 지금 끄면 제외) |
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |

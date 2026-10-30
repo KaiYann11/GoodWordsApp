@@ -18,7 +18,7 @@ enum class DailyStep(val label: String, val hint: String) {
     ROUTINE("루틴", "하기로 한 것을 하나 체크해 보세요"),
     TODO("할 일", "오늘 할 일을 하나 끝내 보세요"),
     /**
-     * 읽은 쪽을 남긴 날이 독서한 날입니다.
+     * 진도나 다 읽음을 남긴 날이 독서한 날입니다.
      *
      * 책에는 마지막 쪽만 남아서 그것만으로는 언제 읽었는지 알 수 없습니다.
      * 날짜는 [BookReadingLogEntity]에 쌓입니다.
@@ -139,7 +139,7 @@ object DailyLoopCalculator {
                 todo.doneAt?.takeIf { it > 0L }?.let { toDate(it, zoneId) }
             },
             DailyStep.DIARY to diaries.mapNotNullTo(mutableSetOf()) { parseDate(it.entryDate) },
-            // 읽은 쪽을 남긴 날입니다. 쪽수가 늘지 않은 날(되돌려 적은 날)도 책을 펴 본 것으로 셉니다.
+            // 진도나 다 읽음을 남긴 날입니다. 쪽수가 늘지 않은 날도 책을 펴 본 것으로 셉니다.
             DailyStep.READING to readingLogs.mapNotNullTo(mutableSetOf()) { parseDate(it.readDate) }
         )
 

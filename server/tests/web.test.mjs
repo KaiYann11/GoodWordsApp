@@ -179,3 +179,72 @@ test("루틴 카드에 연속 날수와 으뜸 요일이 붙는다", async () =>
   // 1·8·15일 전은 같은 요일입니다. 셋이면 으뜸이 유일합니다.
   assert.match(html, /요일에 많이/);
 });
+
+/** 책 화면 전체를 그려, 날짜별 줄뿐 아니라 카드의 읽은 날·완료 표시도 함께 봅니다. */
+async function renderBooks(book, logs) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const app = { innerHTML: "" };
+  const context = vm.createContext({
+    app,
+    state: { snapshot: { books: [book], items: [], bookReadingLogs: logs } },
+    findById: (items, id) => items.find((item) => item.id === id),
+    todayIso: () => "2026-10-30",
+    empty: value => value,
+  });
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function renderMoods(")), context);
+  const start = source.indexOf("function renderBooks(");
+  const end = source.indexOf("function renderHistory(");
+  assert.ok(start >= 0 && end > start, "책 화면 토막을 찾지 못했습니다.");
+  vm.runInContext(source.slice(start, end), context);
+  context.renderBooks();
+  return app.innerHTML;
+}
+
+const finishedBook = { id: 1, syncId: "book", title: "다 읽은 책", status: "FINISHED", totalPages: 0, currentPage: 0 };
+const readingDay = { bookSyncId: "book", readDate: "2026-10-30", startPage: 0, endPage: 0, updatedAt: 1_000 };
+
+test("쪽수 없는 완료는 책 카드와 날짜별 보기에 읽은 날로 표시한다", async () => {
+  const html = await renderBooks(finishedBook, [readingDay]);
+  assert.match(html, /다 읽음 · 쪽수 모름/);
+  assert.match(html, /읽은 날 1일/);
+  assert.match(html, /<strong>오늘<\/strong>/);
+  assert.match(html, /읽은 날로 남겼습니다/);
+  assert.doesNotMatch(html, /0쪽|0%|하루 평균|앞으로 돌아갔습니다/);
+  assert.match(html, /data-action="toggle-book-finished"[\s\S]*?다시 읽는 중/);
+});
+
+test("마지막 쪽에서 완료한 날은 진도 되돌림으로 보이지 않는다", async () => {
+  const html = await renderBooks(
+    { ...finishedBook, totalPages: 200, currentPage: 200 },
+    [{ ...readingDay, startPage: 200, endPage: 200 }],
+  );
+  assert.match(html, /200쪽 \(100%\)/);
+  assert.match(html, /읽은 날 1일/);
+  assert.match(html, /읽은 날로 남겼습니다/);
+  assert.doesNotMatch(html, /앞으로 돌아갔습니다|200 → 200|하루 평균/);
+});
+
+test("쪽수가 없는 날도 하루로 세고 같은 날짜의 사본은 겹쳐 세지 않는다", async () => {
+  const html = await renderBooks(finishedBook, [
+    { ...readingDay, endPage: 30 },
+    { ...readingDay, updatedAt: 2_000 },
+    { ...readingDay, readDate: "2026-10-29" },
+  ]);
+  assert.match(html, /읽은 날 2일/);
+  assert.match(html, /<strong>어제<\/strong>/);
+  assert.equal((html.match(/읽은 날로 남겼습니다/g) || []).length, 2);
+  assert.doesNotMatch(html, /30쪽|0쪽|하루 평균/);
+});
+
+test("진도를 올리거나 되돌려 적은 날짜의 기존 설명은 지킨다", async () => {
+  const html = await renderBooks(
+    { ...finishedBook, totalPages: 200, currentPage: 150, status: "READING" },
+    [
+      { ...readingDay, readDate: "2026-10-29", startPage: 50, endPage: 200 },
+      { ...readingDay, startPage: 200, endPage: 150 },
+    ],
+  );
+  assert.match(html, /50 → 200쪽 · 150쪽 읽음/);
+  assert.match(html, /200 → 150쪽 · 앞으로 돌아갔습니다/);
+  assert.match(html, /읽은 날 2일 · 하루 평균 75쪽/);
+});

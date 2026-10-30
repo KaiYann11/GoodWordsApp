@@ -7,8 +7,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.BookReadingLogEntity
 import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
@@ -206,6 +208,23 @@ class DayScoreCardTest {
 
         compose.onNodeWithText("이날은 남긴 것이 없습니다.").assertIsDisplayed()
         compose.onNodeWithTag(moodTimelineTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun theSummaryNamesABookEvenWhenNoPagesWereAdded() {
+        val digest = DayScoreCalculator.digest(
+            date = today, events = emptyList(), routineChecks = emptyList(), todos = emptyList(), diaries = emptyList(),
+            steps = listOf(DailyStep.READING),
+            readingLogs = listOf(BookReadingLogEntity(bookSyncId = "book", bookTitle = "완료한 책", readDate = today.toString()))
+        )
+        compose.setContent {
+            DaySummaryDialog(digest = digest, today = today, onMove = {}, onDismiss = {})
+        }
+        compose.onNodeWithTag(daySummaryScoreTag).assertTextEquals("80점")
+        // 이름표에는 권수가 붙습니다("읽은 책 1"). 본문은 작은 창에서 넘어가므로 찾아 펼쳐 봅니다.
+        compose.onNodeWithText("읽은 책 1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("· 완료한 책").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("0쪽", substring = true).assertDoesNotExist()
     }
 
     @Test

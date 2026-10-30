@@ -56,6 +56,19 @@ class BookScreenTest {
     }
 
     @Test
+    fun finishingWithoutPagesShowsTheReadingDayOnTheCard() {
+        compose.setContent {
+            bookScreen(
+                books = listOf(book(id = 1, title = "쪽수 없는 완독", status = BookStatus.FINISHED)),
+                readingDaysBySyncId = mapOf("book-1" to 1)
+            )
+        }
+        compose.onNodeWithText("다 읽음 · 쪽수 모름").assertIsDisplayed()
+        compose.onNodeWithText("읽은 날 1일").assertIsDisplayed()
+        compose.onNodeWithText("0쪽", substring = true).assertDoesNotExist()
+    }
+
+    @Test
     fun addingABookNeedsATitle() {
         compose.setContent { bookScreen(books = emptyList()) }
 
@@ -144,6 +157,7 @@ class BookScreenTest {
     private fun bookScreen(
         books: List<BookEntity>,
         quoteCountBySyncId: Map<String, Int> = emptyMap(),
+        readingDaysBySyncId: Map<String, Int> = emptyMap(),
         onSaveBook: (BookDraft) -> Unit = {},
         onUpdateProgress: (Long, Int) -> Unit = { _, _ -> },
         onExtractQuote: (Long, String, Int) -> Unit = { _, _, _ -> }
@@ -151,6 +165,7 @@ class BookScreenTest {
         BookScreen(
             books = books,
             quoteCountBySyncId = quoteCountBySyncId,
+            readingDaysBySyncId = readingDaysBySyncId,
             onSaveBook = onSaveBook,
             onUpdateProgress = onUpdateProgress,
             onToggleFinished = {},

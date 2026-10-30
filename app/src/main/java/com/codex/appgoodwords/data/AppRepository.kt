@@ -693,9 +693,9 @@ class AppRepository(
         id: Long,
         currentPage: Int,
         today: LocalDate = LocalDate.now()
-    ): BookEntity? {
-        val dao = bookDao ?: return null
-        val existing = dao.getById(id) ?: return null
+    ): BookEntity? = database.withTransaction {
+        val dao = bookDao ?: return@withTransaction null
+        val existing = dao.getById(id) ?: return@withTransaction null
         val page = currentPage.coerceAtLeast(0).let { value ->
             if (existing.totalPages > 0) value.coerceAtMost(existing.totalPages) else value
         }
@@ -709,7 +709,7 @@ class AppRepository(
         )
         dao.insert(updated)
         recordReading(book = updated, previousPage = existing.currentPage, today = today)
-        return updated
+        updated
     }
 
     /**
@@ -723,18 +723,12 @@ class AppRepository(
         val dao = bookReadingLogDao ?: return
         val readDate = today.toString()
         val existing = dao.getByBookAndDate(bookId = book.id, readDate = readDate)
-        val saved = existing?.copy(
-            updatedAt = System.currentTimeMillis(),
-            bookSyncId = book.syncId,
-            bookTitle = book.title,
-            endPage = book.currentPage
-        ) ?: BookReadingLogEntity(
-            bookId = book.id,
-            bookSyncId = book.syncId,
-            bookTitle = book.title,
-            readDate = readDate,
-            startPage = previousPage.coerceAtLeast(0),
-            endPage = book.currentPage
+        val saved = BookReading.record(
+            book = book,
+            previousPage = previousPage,
+            today = today,
+            existing = existing,
+            now = System.currentTimeMillis()
         )
         dao.insert(saved)
     }
@@ -758,19 +752,16 @@ class AppRepository(
     }
 
     /** 다 읽음/다시 읽는 중을 오갑니다. */
-    suspend fun toggleBookFinished(id: Long): BookEntity? {
-        val dao = bookDao ?: return null
-        val existing = dao.getById(id) ?: return null
-        val nowFinished = !existing.isFinished
-        val updated = existing.copy(
-            updatedAt = System.currentTimeMillis(),
-            status = if (nowFinished) BookStatus.FINISHED.name else BookStatus.READING.name,
-            // 다 읽었다고 하면 마지막 쪽까지 읽은 것으로 맞춰 줍니다.
-            currentPage = if (nowFinished && existing.totalPages > 0) existing.totalPages else existing.currentPage,
-            finishedAt = if (nowFinished) System.currentTimeMillis() else null
-        )
+    suspend fun toggleBookFinished(id: Long, today: LocalDate = LocalDate.now()): BookEntity? = database.withTransaction {
+        val dao = bookDao ?: return@withTransaction null
+        val existing = dao.getById(id) ?: return@withTransaction null
+        val updated = BookReading.toggleFinished(existing, System.currentTimeMillis())
         dao.insert(updated)
-        return updated
+        // 상태만 저장되고 독서가 빠지지 않도록 한 트랜잭션에서 남깁니다. 진도 기록과 겹쳐도 하루 한 줄입니다.
+        if (BookReading.becameFinished(existing, updated)) {
+            recordReading(book = updated, previousPage = existing.currentPage, today = today)
+        }
+        updated
     }
 
     suspend fun deleteBook(id: Long) {
@@ -807,8 +798,11 @@ class AppRepository(
         )
         val id = contentItemDao.insert(quote)
 
-        if (page > book.currentPage) {
-            updateBookProgress(bookId, page)
+        // 전체 쪽수로 다듬은 뒤에도 진도가 나아갈 때만 읽은 날을 남깁니다. 마지막 쪽을 넘겨 적은
+        // 글귀가 진도 없는 독서로 잡히면 서버 saveBook과 다른 날을 셉니다.
+        val nextPage = if (book.totalPages > 0) page.coerceAtMost(book.totalPages) else page
+        if (nextPage > book.currentPage) {
+            updateBookProgress(bookId, nextPage)
         }
         return quote.copy(id = id)
     }

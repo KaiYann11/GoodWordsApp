@@ -165,6 +165,8 @@ fun DaySummaryDialog(
                     DigestSection(label = "끝낸 할 일", items = digest.todoTitles)
                     DigestSection(label = "쓴 일기", items = digest.diaryTitles)
                     DigestSection(label = "읽은 글귀", items = digest.quoteTitles)
+                    // 쪽수를 몰라도 읽은 책은 한 일입니다. 홈의 독서 걸음과 같은 기록을 보여 줍니다.
+                    DigestSection(label = "읽은 책", items = digest.bookTitles)
                 }
             }
         },

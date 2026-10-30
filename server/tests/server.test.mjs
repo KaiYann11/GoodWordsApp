@@ -2935,6 +2935,136 @@ describe("독서 기록", () => {
 
     assert.equal(stored.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId).length, 0);
   });
+
+  describe("다 읽음으로 남기는 독서", () => {
+    function localDate() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    async function storedBook(overrides = {}, logs = []) {
+      // 예전에 담아 둔 책입니다. POST의 기존 '새 책에 읽은 쪽 입력' 규칙과 완료 전환을 구별합니다.
+      const book = {
+        id: 1, syncId: "finish-book", title: "다 읽을 책", status: "READING",
+        totalPages: 200, currentPage: 50, createdAt: 1_000, updatedAt: 1_000,
+        ...overrides,
+      };
+      const response = await api("/api/snapshot", {
+        method: "PUT", body: emptySnapshot({ books: [book], bookReadingLogs: logs }),
+      });
+      assert.equal(response.status, 200);
+      return (await (await api("/api/snapshot")).json()).books[0];
+    }
+
+    async function changeStatus(book, status) {
+      // 웹의 다 읽음 단추가 보내는 요청과 같습니다. 진도는 함께 보내지 않습니다.
+      const response = await api(`/api/books/${book.id}`, { method: "PUT", body: { status } });
+      assert.equal(response.status, 200);
+      return response.json();
+    }
+
+    async function logsFor(book) {
+      const snapshot = await (await api("/api/snapshot")).json();
+      return snapshot.bookReadingLogs.filter((log) => log.bookSyncId === book.syncId);
+    }
+
+    it("웹에서 다 읽음만 눌러도 오늘 기록과 남은 쪽수가 남는다", async () => {
+      const book = await storedBook();
+      const before = localDate();
+      const finished = await changeStatus(book, "FINISHED");
+      const logs = await logsFor(book);
+      assert.equal(finished.currentPage, 200);
+      assert.equal(logs.length, 1);
+      assert.ok([before, localDate()].includes(logs[0].readDate));
+      assert.equal(logs[0].bookSyncId, book.syncId);
+      assert.equal(logs[0].bookTitle, book.title);
+      assert.equal(logs[0].startPage, 50);
+      assert.equal(logs[0].endPage, 200);
+      assert.equal(logs[0].endPage - logs[0].startPage, 150);
+    });
+
+    it("이미 마지막 쪽인 책도 다 읽음으로 바꾸면 0쪽인 읽은 날이 남는다", async () => {
+      const book = await storedBook({ currentPage: 200 });
+      await changeStatus(book, "FINISHED");
+      const logs = await logsFor(book);
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0].readDate, localDate());
+      assert.equal(logs[0].startPage, 200);
+      assert.equal(logs[0].endPage, 200);
+    });
+
+    it("전체 쪽을 모르면 현재 쪽을 지키고 읽은 날만 남긴다", async () => {
+      for (const currentPage of [0, 50]) {
+        const book = await storedBook({ totalPages: 0, currentPage });
+        const finished = await changeStatus(book, "FINISHED");
+        const logs = await logsFor(book);
+        assert.equal(finished.currentPage, currentPage);
+        assert.equal(logs.length, 1);
+        assert.equal(logs[0].readDate, localDate());
+        assert.equal(logs[0].startPage, currentPage);
+        assert.equal(logs[0].endPage, currentPage);
+      }
+    });
+
+    it("다시 읽는 중은 있는 기록을 고치거나 지우지 않고 없는 기록도 만들지 않는다", async () => {
+      const book = await storedBook();
+      await changeStatus(book, "FINISHED");
+      const before = await logsFor(book);
+      const reopened = await changeStatus(book, "READING");
+      assert.equal(reopened.status, "READING");
+      assert.equal(reopened.finishedAt, null);
+      assert.equal(reopened.currentPage, 200);
+      assert.deepEqual(await logsFor(book), before);
+
+      // 다른 날이나 예전 판에서 완료한 책에 오늘 기록이 없어도 새로 만들지 않습니다.
+      const old = await storedBook({ status: "FINISHED", currentPage: 200, finishedAt: 1_000 });
+      await changeStatus(old, "READING");
+      assert.deepEqual(await logsFor(old), []);
+    });
+
+    it("같은 날 두 번 다 읽어도 한 줄이고 진도를 남길 때의 첫 쪽을 지킨다", async () => {
+      const book = await storedBook();
+      const progress = await api(`/api/books/${book.id}`, { method: "PUT", body: { currentPage: 100 } });
+      assert.equal(progress.status, 200);
+      const [first] = await logsFor(book);
+      await changeStatus(book, "FINISHED");
+      await changeStatus(book, "READING");
+      await changeStatus(book, "FINISHED");
+      const logs = await logsFor(book);
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0].syncId, first.syncId);
+      assert.equal(logs[0].createdAt, first.createdAt);
+      assert.equal(logs[0].startPage, 50);
+      assert.equal(logs[0].endPage, 200);
+      assert.equal(logs[0].endPage - logs[0].startPage, 150);
+      // 이미 완료인 채 같은 요청을 보내거나 제목만 고쳐도 새 독서는 아닙니다.
+      await changeStatus(book, "FINISHED");
+      await api(`/api/books/${book.id}`, { method: "PUT", body: { title: "제목만 고침" } });
+      assert.deepEqual(await logsFor(book), logs);
+    });
+
+    it("처음부터 다 읽은 새 책은 쪽 진도 없이 오늘 읽은 날을 만들지 않는다", async () => {
+      await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+      const response = await api("/api/books", {
+        method: "POST", body: { title: "예전에 읽은 책", status: "FINISHED" },
+      });
+      assert.equal(response.status, 201);
+      const book = await response.json();
+      assert.equal(book.status, "FINISHED");
+      assert.deepEqual(await logsFor(book), []);
+    });
+
+    it("글귀를 뽑아도 다듬은 진도가 그대로면 읽은 날을 만들지 않는다", async () => {
+      const book = await storedBook({ totalPages: 100, currentPage: 100 });
+      for (const page of [0, 30, 100, 999]) {
+        const response = await api(`/api/books/${book.id}/quotes`, {
+          method: "POST", body: { body: `다시 뽑은 문장 ${page}`, page },
+        });
+        assert.equal(response.status, 201);
+      }
+      assert.deepEqual(await logsFor(book), []);
+    });
+  });
 });
 
 describe("원칙", () => {

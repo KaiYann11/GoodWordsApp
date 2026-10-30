@@ -49,7 +49,7 @@ class DailyCoachCoordinator(
     ): String {
         val aiSettings = settingsStore.getAiFeedbackSettings()
         return DailyCoachPrompt.chatPrompt(
-            buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, state(today).conversation)
+            buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, state(today))
         )
     }
 
@@ -102,7 +102,7 @@ class DailyCoachCoordinator(
         if (!aiSettings.coachEnabled) return stored
 
         // 오늘 나눈 말도 함께 갑니다(사용자가 정함, 2026-10-29). 내가 어렵다고 한 것을 다음 한마디가 다시 권하지 않습니다.
-        val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, stored.conversation)
+        val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, stored)
         if (digest.isEmpty) {
             // 눌러서 부른 것이면 왜 아무 일도 없는지 말해 주어야 합니다. 저절로 도는 길에서는
             // 아직 아무것도 안 한 아침마다 사유를 띄울 일이 아니라 조용히 지나갑니다.
@@ -145,7 +145,9 @@ class DailyCoachCoordinator(
 
         val tip = DailyCoachParser.parse(rawText, model = aiSettings.reportModel, now = now)
             ?: return update(today) { it.withError("코치가 보낸 답을 읽지 못했습니다.") }
-        return update(today) { it.withTip(tip, digest.fingerprint) }
+        // 받는 사이 설정을 껐어도 물을 때 허용했던 범위로 표시해야 다음 물음으로 새지 않습니다.
+        val sharedTip = tip.copy(sharing = DailyCoachSharing(aiSettings.includeDiaryBody, aiSettings.includeGoals))
+        return update(today) { it.withTip(sharedTip, digest.fingerprint) }
     }
 
     /**
@@ -204,7 +206,7 @@ class DailyCoachCoordinator(
         }
 
         // 한마디와 같은 기록에 오늘 나눈 말을 얹습니다. 무엇이 나가는지는 같은 설정(일기 본문·목표)이 정합니다.
-        val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, stored.conversation)
+        val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, stored)
         val rawText = try {
             client.ask(
                 system = DailyCoachPrompt.replySystemPrompt(),
@@ -225,7 +227,8 @@ class DailyCoachCoordinator(
         // 답이 온 때를 적습니다. 대화 화면은 이 시각을 말풍선 아래에 적고, 화면을 연 뒤에 온 답만 써지듯 보여 줍니다.
         val answer = DailyCoachParser.parseAnswer(rawText, model = aiSettings.reportModel, now = System.currentTimeMillis())
             ?: return update(today) { it.withReplyError("코치가 보낸 답을 읽지 못했습니다.") }
-        return update(today) { it.answered(answer, askedAt) }
+        val sharedAnswer = answer.copy(sharing = DailyCoachSharing(aiSettings.includeDiaryBody, aiSettings.includeGoals))
+        return update(today) { it.answered(sharedAnswer, askedAt) }
     }
 
     /**
@@ -292,7 +295,7 @@ class DailyCoachCoordinator(
         at: LocalTime,
         includeDiaryBody: Boolean,
         includeGoals: Boolean,
-        talk: List<DailyCoachLine>,
+        state: DailyCoachState,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): DailyCoachDigest {
         val events = database.exposureEventDao().getAll()
@@ -335,7 +338,8 @@ class DailyCoachCoordinator(
             items = database.contentItemDao().getAll(),
             includeDiaryBody = includeDiaryBody,
             includeGoals = includeGoals,
-            talk = talk,
+            talk = state.conversation,
+            askCount = state.askCount,
             zoneId = zoneId
         )
     }

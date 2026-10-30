@@ -111,7 +111,7 @@ class BookProgressScreenTest {
         }
 
         compose.onNodeWithText("아직 날짜별 기록이 없습니다.").assertIsDisplayed()
-        compose.onNodeWithText("진도 기록을 누르면 그날부터 쌓입니다", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("진도 기록이나 다 읽음을 누르면 그날부터 쌓입니다", substring = true).assertIsDisplayed()
         // 기록이 없어도 지금 어디까지 왔는지는 책이 알고 있습니다.
         compose.onNodeWithText("177쪽").assertIsDisplayed()
     }
@@ -128,5 +128,39 @@ class BookProgressScreenTest {
         }
 
         compose.onNodeWithText("177 → 150쪽 · 앞으로 돌아갔습니다").assertIsDisplayed()
+    }
+
+    @Test fun finishingWithoutPageNumbersShowsAReadingDay() {
+        val unknown = book.copy(totalPages = 0, currentPage = 0, status = "FINISHED")
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookProgressScreen(
+                    book = unknown,
+                    report = BookProgressCalculator.build(unknown, listOf(log(today.toString(), 0, 0))),
+                    today = today
+                )
+            }
+        }
+        compose.onNodeWithText("다 읽음").assertIsDisplayed()
+        compose.onNodeWithText("읽은 날 1일").assertIsDisplayed()
+        compose.onNodeWithText("읽은 날로 남겼습니다").assertIsDisplayed()
+        compose.onNodeWithText("0쪽", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("앞으로 돌아갔습니다", substring = true).assertDoesNotExist()
+    }
+
+    @Test fun finishingAtTheLastPageIsNotShownAsGoingBackwards() {
+        val finished = book.copy(currentPage = 400, status = "FINISHED")
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookProgressScreen(
+                    book = finished,
+                    report = BookProgressCalculator.build(finished, listOf(log(today.toString(), 400, 400))),
+                    today = today
+                )
+            }
+        }
+        compose.onNodeWithText("400쪽까지").assertIsDisplayed()
+        compose.onNodeWithText("읽은 날로 남겼습니다").assertIsDisplayed()
+        compose.onNodeWithText("앞으로 돌아갔습니다", substring = true).assertDoesNotExist()
     }
 }

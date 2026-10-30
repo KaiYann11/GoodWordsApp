@@ -2148,9 +2148,12 @@ function saveBook(db, payload, bookId = null) {
     normalized.finishedAt = null;
   }
   upsert(db.books, normalized);
-  // 읽은 쪽이 앞으로 갔으면 그날 읽은 것으로 남깁니다. 웹에서 올린 진도도 독서 걸음에 들어가야
-  // 앱과 웹이 같은 날을 셉니다. 제목만 고친 경우에는 남기지 않습니다.
-  if (normalized.currentPage > (existing?.currentPage || 0)) {
+  // 다 읽음은 진도가 그대로여도 읽은 날입니다(사용자가 정함, 2026-10-30).
+  // 앱 BookReading.becameFinished와 같습니다. 이미 읽은 책을 새로 담는 것은 오늘 읽었다는 뜻이
+  // 아니므로 있던 책의 전환만 봅니다. 다시 읽는 중이나 제목 수정도 기록을 만들거나 지우지 않습니다.
+  // 하루 한 줄은 recordReading이 지킵니다.
+  const becameFinished = existing && existing.status !== "FINISHED" && normalized.status === "FINISHED";
+  if (normalized.currentPage > (existing?.currentPage || 0) || becameFinished) {
     recordReading(db, normalized, existing?.currentPage || 0);
   }
   return normalized;
