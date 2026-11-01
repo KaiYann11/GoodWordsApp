@@ -3,6 +3,7 @@ package com.codex.appgoodwords.data
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.codex.appgoodwords.AppGoodWordsApplication
+import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -23,10 +24,58 @@ class BookRepositoryTest {
     private val repository = container.repository
 
     @Before
-    fun setUp() = runBlocking { container.database.bookDao().clearAll() }
+    fun setUp() = runBlocking {
+        container.database.bookDao().clearAll()
+        container.database.bookReadingLogDao().clearAll()
+    }
 
     @After
-    fun tearDown() = runBlocking { container.database.bookDao().clearAll() }
+    fun tearDown() = runBlocking {
+        container.database.bookDao().clearAll()
+        container.database.bookReadingLogDao().clearAll()
+    }
+
+    @Test
+    fun finishingRecordsADayWithRemainingPagesNoPagesOrAnUnknownTotal() = runBlocking {
+        val today = LocalDate.of(2026, 10, 30)
+        for ((current, total) in listOf(50 to 200, 200 to 200, 0 to 0, 50 to 0)) {
+            val book = repository.saveBook(BookDraft(title = "완료 $current $total", currentPageText = "$current", totalPagesText = "$total"))
+            repository.toggleBookFinished(book.id, today)
+            val log = container.database.bookReadingLogDao().getAll().single { it.bookSyncId == book.syncId }
+            assertEquals(today.toString(), log.readDate)
+            assertEquals(current, log.startPage)
+            assertEquals(if (total > 0) total - current else 0, log.pagesRead)
+        }
+    }
+
+    @Test
+    fun reopeningLeavesTheRecordAloneAndFinishingTwiceKeepsOneDay() = runBlocking {
+        val today = LocalDate.of(2026, 10, 30)
+        val book = repository.saveBook(BookDraft(title = "완료와 되돌리기", totalPagesText = "200", currentPageText = "50"))
+        repository.updateBookProgress(book.id, 100, today)
+        repository.toggleBookFinished(book.id, today)
+        val first = container.database.bookReadingLogDao().getAll().single()
+        assertEquals(150, first.pagesRead)
+        repository.toggleBookFinished(book.id, today)
+        assertEquals(listOf(first), container.database.bookReadingLogDao().getAll())
+        repository.toggleBookFinished(book.id, today)
+        val repeated = container.database.bookReadingLogDao().getAll().single()
+        assertEquals(first.syncId, repeated.syncId)
+        assertEquals(50, repeated.startPage)
+        assertEquals(150, repeated.pagesRead)
+        repository.toggleBookFinished(book.id, today.plusDays(1))
+        assertEquals(listOf(repeated), container.database.bookReadingLogDao().getAll())
+    }
+
+    @Test
+    fun extractingWithoutActualProgressDoesNotCreateAReadingDay() = runBlocking {
+        val book = repository.saveBook(BookDraft(title = "이미 마지막 쪽", totalPagesText = "100", currentPageText = "100"))
+        for (page in listOf(0, 30, 100, 999)) {
+            repository.extractQuoteFromBook(book.id, "다시 뽑은 문장 $page", page)
+        }
+        assertTrue(container.database.bookReadingLogDao().getAll().isEmpty())
+        assertEquals(100, repository.getBookById(book.id)?.currentPage)
+    }
 
     @Test
     fun aSavedBookStartsAsReading() = runBlocking {

@@ -93,6 +93,16 @@ class BookProgressTest {
         assertEquals(150, report.days.first().endPage)
     }
 
+    @Test fun aDayWithoutNewPagesCountsAlongsideDaysWithPages() {
+        val report = BookProgressCalculator.build(
+            book,
+            listOf(log("2026-10-05", 120, 177), log("2026-10-06", 177, 177))
+        )
+        assertEquals(2, report.readingDays)
+        assertEquals(0, report.days.first().pagesRead)
+        assertEquals(57, report.totalPagesRead)
+    }
+
     @Test fun twoDevicesWritingTheSameDayCountAsOneDay() {
         val report = BookProgressCalculator.build(
             book,

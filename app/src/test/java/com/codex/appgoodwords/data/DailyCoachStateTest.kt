@@ -339,6 +339,27 @@ class DailyCoachStateTest {
     }
 
     @Test
+    fun generationScopesSurviveSavingAndLegacyWordsAreConservative() {
+        val scopedTip = tip().copy(sharing = DailyCoachSharing(true, false))
+        val scopedAnswer = answer("목표를 보고 쓴 답", at = noon + 2 * minute)
+            .copy(sharing = DailyCoachSharing(false, true))
+        val state = asked().withTip(scopedTip, "abc")
+            .replied("내 말", noon + minute).answered(scopedAnswer, noon + minute)
+        val restored = DailyCoachJson.decode(DailyCoachJson.encode(state))
+        assertEquals(state, restored)
+        assertEquals(scopedTip.sharing, restored.conversation.first().sharing)
+        assertEquals(scopedAnswer.sharing, restored.talk.last().sharing)
+
+        val legacy = DailyCoachJson.decode(
+            """{"tip":{"message":"옛 한마디"},"talk":[{"kind":"ANSWER","text":"옛 답"}]}"""
+        )
+        assertFalse(legacy.tip!!.sharing.allows(false, true))
+        assertFalse(legacy.tip!!.sharing.allows(true, false))
+        assertFalse(legacy.talk.single().sharing.allows(false, false))
+        assertTrue(legacy.talk.single().sharing.allows(true, true))
+    }
+
+    @Test
     fun aBrokenLineDoesNotLoseTheWholeDay() {
         val stored = """{"date":"2026-10-17","talk":[{"kind":"ODD","text":"모르는 종류"},{"kind":"REPLY","text":"  "},""" +
             """{"kind":"REPLY","text":"피곤해요","at":5}]}"""

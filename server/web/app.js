@@ -1188,7 +1188,7 @@ function renderBooks() {
     if (!item.bookSyncId) continue;
     quoteCounts.set(item.bookSyncId, (quoteCounts.get(item.bookSyncId) || 0) + 1);
   }
-  // 책마다 읽은 날이 며칠인지. 읽은 쪽을 올린 날만 셉니다(앱의 독서 걸음과 같은 기준).
+  // 진도나 다 읽음을 남긴 날을 셉니다. 쪽수가 그대로인 완료도 앱의 독서 걸음과 같이 셉니다.
   const readingDays = new Map();
   for (const log of state.snapshot.bookReadingLogs || []) {
     if (!log.bookSyncId || !log.readDate) continue;
@@ -1335,8 +1335,10 @@ function bookProgressList(book) {
       (day) => `
         <li>
           <strong>${escapeHtml(readingDayLabel(day.date))}</strong>
-          <span>${day.end}쪽${day.percent === null ? "" : ` (${day.percent}%)`}</span>
-          <span class="muted">${day.start} → ${day.end}쪽 · ${day.pagesRead > 0 ? `${day.pagesRead}쪽 읽음` : "앞으로 돌아갔습니다"}</span>
+          <span>${day.end > 0 ? `${day.end}쪽${day.percent === null ? "" : ` (${day.percent}%)`}` : "읽은 날"}</span>
+          <span class="muted">${day.pagesRead > 0
+            ? `${day.start} → ${day.end}쪽 · ${day.pagesRead}쪽 읽음`
+            : day.end < day.start ? `${day.start} → ${day.end}쪽 · 앞으로 돌아갔습니다` : "읽은 날로 남겼습니다"}</span>
         </li>`,
     )
     .join("");
@@ -1344,7 +1346,7 @@ function bookProgressList(book) {
   const average = Math.round(total / days.length);
   return `
     <details class="bookProgress">
-      <summary>날짜별 보기 · 읽은 날 ${days.length}일 · 하루 평균 ${average}쪽</summary>
+      <summary>날짜별 보기 · 읽은 날 ${days.length}일${total > 0 ? ` · 하루 평균 ${average}쪽` : ""}</summary>
       <ul class="readingDays">${rows}</ul>
       ${days.length > 14 ? `<p class="muted">최근 14일만 보여 줍니다.</p>` : ""}
     </details>`;
@@ -1357,7 +1359,7 @@ function bookCard(book, quoteCount, readingDayCount) {
   const progressText =
     book.totalPages > 0
       ? `${book.currentPage} / ${book.totalPages}쪽 · ${Math.round(ratio * 100)}%`
-      : `${book.currentPage}쪽까지`;
+      : book.currentPage > 0 ? `${book.currentPage}쪽까지` : finished ? "다 읽음 · 쪽수 모름" : "쪽수 기록 전";
 
   return `
     <article class="item">

@@ -223,7 +223,7 @@ class DailyCoachPromptTest {
 
     @Test
     fun whatWeSaidGoesOutOnlyOnceISpoke() {
-        // 코치 혼자 건넨 한마디들은 대화가 아닙니다. 글귀 제외 목록만 따로 갑니다.
+        // 코치 혼자 건넨 한마디들은 대화가 아닙니다. 앞선 짚음은 별도 목록으로 갑니다.
         val silent = digest(checks = listOf(check("물 한 컵")), talk = listOf(tipLine("물 한 컵으로 여셨네요.", "09:12")))
         assertEquals(emptyList<String>(), silent.talkLines)
         assertFalse(DailyCoachPrompt.userPrompt(silent).contains("오늘 나눈 말"))
@@ -374,6 +374,99 @@ class DailyCoachPromptTest {
         assertEquals("", digest(talk = talk).fingerprint)
     }
 
+    @Test
+    fun earlierTipsGoOutEvenOnASilentDayWithoutBecomingDeeds() {
+        val tip = tipLine("작은 선택을 짚었던 말", "09:00", action = "창문 열기")
+            .copy(routine = "아침 숨 고르기", quote = "곁에 둔 문장")
+        val before = digest(checks = listOf(check("물 한 컵")))
+        val after = digest(checks = listOf(check("물 한 컵")), talk = listOf(tip), askCount = 1)
+        val prompt = DailyCoachPrompt.userPrompt(after)
+
+        assertTrue(after.talkLines.isEmpty())
+        assertEquals(listOf("09:00 작은 선택을 짚었던 말 / 해 볼 일: 창문 열기 / 새 루틴: 아침 숨 고르기"), after.givenTipLines)
+        assertTrue(prompt.contains("[오늘 앞서 건넨 한마디]"))
+        assertEquals(before.fingerprint, after.fingerprint)
+        assertEquals("", digest(talk = listOf(tip)).fingerprint)
+        assertNotEquals(before.angleLine, after.angleLine)
+        val system = DailyCoachPrompt.systemPrompt()
+        assertTrue(system.contains("다른 각도와 다른 말로"))
+        assertTrue(system.contains("기록에 있는 사실만"))
+        assertTrue(system.contains("두 문장을 넘기지 않습니다"))
+    }
+
+    @Test
+    fun onlySixRecentTipsFromTodayGoOut() {
+        val tips = (0..9).map { tipLine("앞선 말 $it", "09:%02d".format(it)) }
+        val old = tipLine("어제의 짚음", "09:00").copy(at = at(today.minusDays(1)))
+        val future = old.copy(at = at(today.plusDays(1)))
+        val after = digest(talk = listOf(old) + tips + future + tips.last())
+
+        assertEquals(6, after.givenTipLines.size)
+        assertEquals("09:04 앞선 말 4", after.givenTipLines.first())
+        assertEquals("09:09 앞선 말 9", after.givenTipLines.last())
+        assertFalse(after.givenTipLines.any { it.contains("어제의 짚음") })
+    }
+
+    @Test
+    fun tipsAlreadyInTheConversationAreNotSentTwice() {
+        val early = tipLine("대화 바깥의 오전 짚음", "08:00")
+        val latest = tipLine("대화 안의 오후 짚음", "15:00", action = "오후 해 볼 일").copy(routine = "새 루틴 이름")
+        val talk = listOf(early) + (0..19).map { line(DailyCoachLine.Kind.REPLY, "내 말 $it", "10:%02d".format(it)) } + latest
+        val result = digest(talk = talk)
+        val prompt = DailyCoachPrompt.userPrompt(result)
+
+        assertEquals(listOf("08:00 대화 바깥의 오전 짚음"), result.givenTipLines)
+        for (text in listOf(early.text, latest.text, latest.action, latest.routine)) {
+            assertEquals(text, 1, Regex(Regex.escape(text)).findAll(prompt).count())
+        }
+        assertEquals(16, result.talkLines.size)
+    }
+
+    @Test
+    fun switchingOffEitherScopeFiltersAllPlacesThatCouldRepeatIt() {
+        val safe = tipLine("안전한 말", "08:00").copy(quote = "안전한 글귀")
+        val diaryTip = tipLine("일기 비밀", "09:00", action = "일기 행동").copy(
+            routine = "일기 루틴", quote = "일기 인용", quoteAuthor = "일기 저자", sharing = DailyCoachSharing(true, false)
+        )
+        val goalTip = tipLine("목표 비밀", "10:00").copy(quote = "목표 인용", sharing = DailyCoachSharing(false, true))
+        val unknown = tipLine("옛 비밀", "10:10").copy(quote = "옛 인용", sharing = DailyCoachSharing())
+        val answer = line(DailyCoachLine.Kind.ANSWER, "답 속 비밀", "10:20", action = "답 속 행동")
+            .copy(sharing = DailyCoachSharing(true, true))
+        for (diaryOn in listOf(false, true)) for (goalsOn in listOf(false, true)) {
+            for (hasReply in listOf(false, true)) {
+                val talk = listOf(safe, diaryTip, goalTip, unknown, answer) +
+                    if (hasReply) listOf(line(DailyCoachLine.Kind.REPLY, "내가 직접 보낸 말", "10:30")) else emptyList()
+                val result = digest(talk = talk, includeDiaryBody = diaryOn, includeGoals = goalsOn)
+                val prompt = DailyCoachPrompt.userPrompt(result)
+                for (text in listOf("일기 비밀", "일기 행동", "일기 루틴", "일기 인용", "일기 저자")) {
+                    assertEquals(text, diaryOn, prompt.contains(text))
+                }
+                assertEquals(goalsOn, prompt.contains("목표 비밀"))
+                assertEquals(goalsOn, prompt.contains("목표 인용"))
+                assertEquals(diaryOn && goalsOn, prompt.contains("옛 비밀"))
+                assertEquals(diaryOn && goalsOn, prompt.contains("옛 인용"))
+                val replyPrompt = DailyCoachPrompt.replyUserPrompt(result)
+                assertEquals(hasReply && diaryOn && goalsOn, replyPrompt.contains("답 속 비밀"))
+                assertEquals(hasReply && diaryOn, replyPrompt.contains("일기 비밀"))
+                assertEquals(hasReply && goalsOn, replyPrompt.contains("목표 비밀"))
+                assertTrue(prompt.contains("안전한 말"))
+                assertEquals(hasReply, replyPrompt.contains("내가 직접 보낸 말"))
+            }
+        }
+    }
+
+    @Test
+    fun theFirstAngleChangesAfterMidnightWithoutKeepingYesterdaysWords() {
+        val first = DailyCoachPrompt.angleFor(today, 0)
+        assertNotEquals(first, DailyCoachPrompt.angleFor(today.plusDays(1), 0))
+        assertEquals(4, (0..3).map { DailyCoachPrompt.angleFor(today, it) }.distinct().size)
+        assertEquals(first, DailyCoachPrompt.angleFor(today, 4))
+        val stored = DailyCoachState(date = today).withTip(DailyCoachTip(message = "어제 한마디"), "same")
+        val nextDay = DailyCoachJson.decode(DailyCoachJson.encode(stored)).forDate(today.plusDays(1))
+        assertTrue(nextDay.conversation.isEmpty())
+        assertEquals(0, nextDay.askCount)
+    }
+
     private fun moodLog(time: String, mood: DiaryMood): MoodLogEntity {
         val timestamp = at(today, LocalTime.parse(time))
         return MoodLogEntity(syncId = "m-$time", entryDate = today.toString(), mood = mood.name, createdAt = timestamp, updatedAt = timestamp)
@@ -390,7 +483,8 @@ class DailyCoachPromptTest {
         at: LocalTime = this.at,
         includeGoals: Boolean = false,
         talk: List<DailyCoachLine> = emptyList(),
-        moodLogs: List<MoodLogEntity> = emptyList()
+        moodLogs: List<MoodLogEntity> = emptyList(),
+        askCount: Int = 0
     ): DailyCoachDigest = DailyCoachPrompt.digest(
         today = today,
         at = at,
@@ -403,14 +497,16 @@ class DailyCoachPromptTest {
         includeDiaryBody = includeDiaryBody,
         includeGoals = includeGoals,
         talk = talk,
-        zoneId = zone
+        zoneId = zone,
+        askCount = askCount
     )
 
     private fun line(kind: DailyCoachLine.Kind, text: String, time: String, action: String = "") = DailyCoachLine(
         kind = kind,
         text = text,
         action = action,
-        at = at(today, LocalTime.parse(time))
+        at = at(today, LocalTime.parse(time)),
+        sharing = DailyCoachSharing(false, false)
     )
 
     private fun tipLine(text: String, time: String, action: String = "") = line(DailyCoachLine.Kind.TIP, text, time, action)

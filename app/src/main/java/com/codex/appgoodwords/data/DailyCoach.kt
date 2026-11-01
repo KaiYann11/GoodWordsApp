@@ -5,6 +5,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
+ * 이 말을 만들 때 허용했던 범위. 답이 일기·목표를 바꾸어 말했을 수도 있어 문장 일부만 지워서는 막을 수 없습니다.
+ * 스위치를 끄면 그 범위로 받은 말 전체를 다음 물음에서 뺍니다(사용자가 정함, 2026-10-30).
+ * 옛 저장값은 출처를 모르므로 두 범위를 모두 쓴 것으로 읽습니다. 이 표시는 이 기기의 설정에만 남습니다.
+ */
+data class DailyCoachSharing(
+    val includeDiaryBody: Boolean = true,
+    val includeGoals: Boolean = true
+) {
+    fun allows(diaryBody: Boolean, goals: Boolean): Boolean =
+        (!includeDiaryBody || diaryBody) && (!includeGoals || goals)
+}
+
+/**
  * 오늘 하루를 보고 받은 한마디.
  *
  * 돌아보기([GrowthReportEntity])와 다릅니다. 돌아보기는 지난 기간을 정리해 **남겨 두는 글**이고,
@@ -26,7 +39,8 @@ data class DailyCoachTip(
     val action: String = "",
     /** 누가 썼는지. CLI 기본 모델이면 공급자 이름입니다([AiFeedbackSettings.reportModel]). */
     val model: String = "",
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    val sharing: DailyCoachSharing = DailyCoachSharing()
 ) {
     val hasContent: Boolean
         get() = message.isNotBlank() || quote.isNotBlank() || routine.isNotBlank() || action.isNotBlank()
@@ -57,7 +71,9 @@ data class DailyCoachLine(
      */
     val actionKept: Boolean = false,
     val model: String = "",
-    val at: Long = 0L
+    val at: Long = 0L,
+    /** 내가 직접 쓴 말에는 적용하지 않고, 코치의 한마디·답을 다시 보낼 때만 봅니다. */
+    val sharing: DailyCoachSharing = DailyCoachSharing()
 ) {
     enum class Kind {
         /** 코치가 먼저 건넨 한마디. */
@@ -82,7 +98,8 @@ data class DailyCoachLine(
             routine = tip.routine,
             action = tip.action,
             model = tip.model,
-            at = tip.createdAt
+            at = tip.createdAt,
+            sharing = tip.sharing
         )
     }
 }
@@ -378,6 +395,7 @@ object DailyCoachJson {
                     .put("action", tip.action)
                     .put("model", tip.model)
                     .put("createdAt", tip.createdAt)
+                    .put("sharing", encodeSharing(tip.sharing))
             )
         }
         return json.toString()
@@ -394,7 +412,8 @@ object DailyCoachJson {
                 routine = saved.optString("routine"),
                 action = saved.optString("action"),
                 model = saved.optString("model"),
-                createdAt = saved.optLong("createdAt")
+                createdAt = saved.optLong("createdAt"),
+                sharing = decodeSharing(saved)
             )
         }
         return DailyCoachState(
@@ -432,6 +451,19 @@ object DailyCoachJson {
         .put("actionKept", line.actionKept)
         .put("model", line.model)
         .put("at", line.at)
+        .put("sharing", encodeSharing(line.sharing))
+
+    private fun encodeSharing(sharing: DailyCoachSharing): JSONObject = JSONObject()
+        .put("includeDiaryBody", sharing.includeDiaryBody)
+        .put("includeGoals", sharing.includeGoals)
+
+    private fun decodeSharing(saved: JSONObject): DailyCoachSharing {
+        val sharing = saved.optJSONObject("sharing")
+        return DailyCoachSharing(
+            includeDiaryBody = sharing?.optBoolean("includeDiaryBody", true) ?: true,
+            includeGoals = sharing?.optBoolean("includeGoals", true) ?: true
+        )
+    }
 
     /** 모르는 종류나 빈 말은 버립니다. 한 줄이 망가졌다고 하루 대화를 통째로 잃지 않습니다. */
     private fun decodeLine(saved: JSONObject): DailyCoachLine? {
@@ -447,7 +479,8 @@ object DailyCoachJson {
             action = saved.optString("action"),
             actionKept = saved.optBoolean("actionKept"),
             model = saved.optString("model"),
-            at = saved.optLong("at")
+            at = saved.optLong("at"),
+            sharing = decodeSharing(saved)
         )
     }
 }

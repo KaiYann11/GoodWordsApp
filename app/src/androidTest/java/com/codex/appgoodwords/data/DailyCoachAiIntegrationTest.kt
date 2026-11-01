@@ -3,8 +3,11 @@ package com.codex.appgoodwords.data
 import androidx.test.platform.app.InstrumentationRegistry
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -28,6 +31,7 @@ class DailyCoachAiIntegrationTest {
     )
 
     private val today = LocalDate.now()
+    private val recordedAt = today.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     @Before fun setUp() {
         assumeTrue("CLI가 깔린 PC의 HTTPS 테스트 서버가 필요합니다.", syncSettings.serverUrl.isNotBlank())
@@ -49,6 +53,38 @@ class DailyCoachAiIntegrationTest {
         replyWith(AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = AiProvider.CLI_DEFAULT_MODEL))
     }
 
+    /** 같은 기록·같은 시각으로 다시 묻습니다. 비용 때문에 새 반복 시험은 Claude 한 공급자로만 합니다. */
+    @Test fun claudeCliVariesTheTipForTheSameRecordsWithoutAReply() = runBlocking {
+        val aiSettings = AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5")
+        val at = LocalTime.of(15, 12)
+        val firstDigest = digest(at = at)
+        suspend fun ask(digest: DailyCoachDigest, now: Long): DailyCoachTip {
+            val raw = AiFeedbackClient().ask(
+                system = DailyCoachPrompt.systemPrompt(), user = DailyCoachPrompt.userPrompt(digest),
+                model = aiSettings.effectiveModel, aiSettings = aiSettings, syncSettings = syncSettings
+            )
+            return requireNotNull(DailyCoachParser.parse(raw, aiSettings.reportModel, now)) {
+                "형식에 맞는 한마디가 오지 않았습니다: $raw"
+            }.copy(sharing = DailyCoachSharing(false, false))
+        }
+        val first = ask(firstDigest, recordedAt)
+        val state = DailyCoachState().asked(today, recordedAt).withTip(first, firstDigest.fingerprint)
+        val secondDigest = digest(talk = state.conversation, at = at, askCount = state.askCount)
+        assertEquals(firstDigest.doneLines, secondDigest.doneLines)
+        assertEquals(firstDigest.fingerprint, secondDigest.fingerprint)
+        assertEquals(firstDigest.at, secondDigest.at)
+        assertTrue(secondDigest.talkLines.isEmpty())
+        // 모델이 문장 사이를 줄 바꿔도, 물음에는 한 줄로 싣습니다(DailyCoachPrompt.oneLine과 같은 꼴).
+        val sentMessage = first.message.trim().replace(Regex("\\s*\\n\\s*"), " ")
+        assertTrue(DailyCoachPrompt.userPrompt(secondDigest).contains(sentMessage))
+
+        val second = ask(secondDigest, recordedAt + 1)
+        fun wording(text: String) = text.replace(Regex("[\\s\\p{P}]+"), "")
+        // 글귀만 바꾸고 짚는 말은 그대로인 답도 실패입니다.
+        assertNotEquals("같은 기록에서 앞선 한마디를 되풀이했습니다.", wording(first.message), wording(second.message))
+        assertTrue(second.quote.isNotBlank())
+    }
+
     /**
      * 한마디에 내가 답한 말에 코치가 이어 답하는지(사용자가 정함, 2026-10-29). 답 형식이 어긋나도 글로는 받지만, 그러면
      * 해 볼 일을 담을 수 없어 형식까지 봅니다.
@@ -60,7 +96,8 @@ class DailyCoachAiIntegrationTest {
                 kind = DailyCoachLine.Kind.TIP,
                 text = "물 한 컵으로 하루를 여셨네요. 저녁에는 잠깐 걸어 보세요.",
                 action = "저녁 산책 10분",
-                at = now - 30 * 60_000L
+                at = now - 30 * 60_000L,
+                sharing = DailyCoachSharing(false, false)
             ),
             DailyCoachLine(kind = DailyCoachLine.Kind.REPLY, text = "오늘은 다리가 아파서 걷기는 어려울 것 같아요.", at = now)
         )
@@ -102,14 +139,18 @@ class DailyCoachAiIntegrationTest {
     }
 
     /** 오늘 한 것이 조금 있는 하루. 빈 하루로는 묻지 않습니다. */
-    private fun digest(talk: List<DailyCoachLine> = emptyList()): DailyCoachDigest {
+    private fun digest(
+        talk: List<DailyCoachLine> = emptyList(),
+        at: LocalTime = LocalTime.now(),
+        askCount: Int = 0
+    ): DailyCoachDigest {
         val checks = listOf(
             RoutineCheckEntity(
                 syncId = "c1",
                 routineId = 1,
                 routineSyncId = "r1",
                 routineTitle = "물 한 컵",
-                checkedAt = System.currentTimeMillis()
+                checkedAt = recordedAt
             )
         )
         val diaries = listOf(
@@ -126,7 +167,7 @@ class DailyCoachAiIntegrationTest {
 
         return DailyCoachPrompt.digest(
             today = today,
-            at = LocalTime.now(),
+            at = at,
             dayDigest = DayScoreCalculator.digest(
                 date = today,
                 events = emptyList(),
@@ -151,7 +192,8 @@ class DailyCoachAiIntegrationTest {
             diaries = diaries,
             items = emptyList(),
             includeDiaryBody = false,
-            talk = talk
+            talk = talk,
+            askCount = askCount
         )
     }
 }

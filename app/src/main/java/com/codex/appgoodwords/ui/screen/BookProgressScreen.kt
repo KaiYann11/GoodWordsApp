@@ -59,7 +59,7 @@ fun BookProgressScreen(
                 EmptyCard(
                     title = "아직 날짜별 기록이 없습니다.",
                     // 지난 독서는 되살릴 수 없습니다. 책에 마지막 쪽만 남아 있기 때문입니다.
-                    body = "책 목록에서 진도 기록을 누르면 그날부터 쌓입니다. 지난 기록은 책에 마지막 쪽만 남아 있어 되짚을 수 없습니다."
+                    body = "책 목록에서 진도 기록이나 다 읽음을 누르면 그날부터 쌓입니다. 지난 기록은 책에 마지막 쪽만 남아 있어 되짚을 수 없습니다."
                 )
             }
         }
@@ -93,7 +93,9 @@ private fun ProgressSummaryCard(book: BookEntity, report: BookProgressReport) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "${book.currentPage}쪽",
+                    text = if (book.currentPage == 0 && book.totalPages == 0) {
+                        if (book.isFinished) "다 읽음" else "쪽수 기록 전"
+                    } else "${book.currentPage}쪽",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -121,8 +123,9 @@ private fun ProgressSummaryCard(book: BookEntity, report: BookProgressReport) {
             if (!report.isEmpty) {
                 Text(
                     // 안 읽은 날은 나누는 수에 넣지 않습니다. 쉰 날이 평균을 깎으면 꾸준함이 숫자에서 사라집니다.
-                    text = "읽은 날 ${report.readingDays}일 · 모두 ${report.totalPagesRead}쪽 · " +
-                        "읽은 날 하루 평균 ${report.averagePagesPerDay}쪽",
+                    text = "읽은 날 ${report.readingDays}일" + if (report.totalPagesRead > 0) {
+                        " · 모두 ${report.totalPagesRead}쪽 · 읽은 날 하루 평균 ${report.averagePagesPerDay}쪽"
+                    } else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -155,12 +158,12 @@ private fun ReadingDayRow(day: ReadingDayProgress, today: LocalDate) {
                 )
                 Text(
                     // 그날 닿은 자리. 요약 카드의 "지금 몇 쪽"과 글이 같아 보이지만 뜻이 다릅니다.
-                    text = "${day.endPage}쪽까지",
+                    text = if (day.endPage > 0) "${day.endPage}쪽까지" else "읽은 날",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                day.ratio?.let { ratio ->
+                day.ratio?.takeIf { day.endPage > 0 }?.let { ratio ->
                     Text(
                         text = "(${percent(ratio)}%)",
                         style = MaterialTheme.typography.bodySmall,
@@ -171,9 +174,12 @@ private fun ReadingDayRow(day: ReadingDayProgress, today: LocalDate) {
 
             Text(
                 text = buildString {
-                    append("${day.startPage} → ${day.endPage}쪽")
-                    // 되돌려 적은 날은 "0쪽 읽음"이 아니라 되돌아갔다고 말해야 덜 이상합니다.
-                    if (day.pagesRead > 0) append(" · ${day.pagesRead}쪽 읽음") else append(" · 앞으로 돌아갔습니다")
+                    // 진도 없이 완료한 날은 되돌아간 날이 아닙니다. 쪽수를 꾸미지 않고 읽었다는 사실만 말합니다.
+                    when {
+                        day.pagesRead > 0 -> append("${day.startPage} → ${day.endPage}쪽 · ${day.pagesRead}쪽 읽음")
+                        day.endPage < day.startPage -> append("${day.startPage} → ${day.endPage}쪽 · 앞으로 돌아갔습니다")
+                        else -> append("읽은 날로 남겼습니다")
+                    }
                     day.ratioGain?.let { gain -> if (day.pagesRead > 0) append(" (+${percent(gain)}%)") }
                 },
                 style = MaterialTheme.typography.bodySmall,

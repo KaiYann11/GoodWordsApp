@@ -299,6 +299,31 @@ class DailyLoopTest {
     }
 
     @Test
+    fun aCompletedBookWithoutPagesStillCompletesTheReadingStep() {
+        val logs = listOf(today.minusDays(1), today).map { date ->
+            BookReadingLogEntity(bookSyncId = "book", bookTitle = "쪽수 없는 책", readDate = date.toString())
+        }
+        val progress = DailyLoopCalculator.build(
+            events = emptyList(), routineChecks = emptyList(), todos = emptyList(), diaries = emptyList(),
+            today = today, steps = listOf(DailyStep.READING), readingLogs = logs, zoneId = zone
+        )
+        assertTrue(progress.isComplete)
+        assertEquals(2, progress.streakDays)
+        val digest = DayScoreCalculator.digest(
+            date = today, events = emptyList(), routineChecks = emptyList(), todos = emptyList(), diaries = emptyList(),
+            steps = listOf(DailyStep.READING), readingLogs = logs, zoneId = zone
+        )
+        assertEquals(1, digest.score.booksRead)
+        assertEquals(0, digest.score.pagesRead)
+        assertEquals(80, digest.score.score)
+        assertEquals(listOf("쪽수 없는 책"), digest.bookTitles)
+        assertEquals(80, DayScoreCalculator.trend(
+            today = today, events = emptyList(), routineChecks = emptyList(), todos = emptyList(), diaries = emptyList(),
+            steps = listOf(DailyStep.READING), readingLogs = logs, zoneId = zone
+        ).points.last().score)
+    }
+
+    @Test
     fun aDayWithoutAPageRecordIsNotAReadingDay() {
         // 책을 담아 두기만 한 날은 읽은 날이 아닙니다.
         val progress = build(steps = listOf(DailyStep.READING), readOn = listOf(today.minusDays(1)))

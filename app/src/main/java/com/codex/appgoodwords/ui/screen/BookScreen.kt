@@ -82,7 +82,7 @@ fun BookScreen(
     /** 책마다 그 책에서 뽑은 글귀가 몇 개인지. syncId로 셉니다. */
     quoteCountBySyncId: Map<String, Int> = emptyMap(),
     /**
-     * 책마다 읽은 쪽을 남긴 날이 며칠인지. syncId로 셉니다.
+     * 책마다 진도나 다 읽음을 남긴 날이 며칠인지. syncId로 셉니다.
      *
      * 진도만 보면 "어디까지 왔는지"만 보이고 "얼마나 자주 폈는지"는 안 보입니다.
      * 독서를 하루의 걸음으로 삼은 사람에게는 그쪽이 더 중요합니다.
@@ -396,9 +396,11 @@ private fun progressText(book: BookEntity): String {
     val percent = book.progress?.let { " · ${(it * 100).toInt()}%" }.orEmpty()
     return if (book.totalPages > 0) {
         "${book.currentPage} / ${book.totalPages}쪽$percent"
-    } else {
+    } else if (book.currentPage > 0) {
         // 전체 쪽수를 모를 때도 어디까지 읽었는지는 남길 수 있어야 합니다.
         "${book.currentPage}쪽까지"
+    } else {
+        if (book.isFinished) "다 읽음 · 쪽수 모름" else "쪽수 기록 전"
     }
 }
 

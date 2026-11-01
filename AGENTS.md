@@ -65,6 +65,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - 눌러 보기 스크립트는 **누르기 전마다 좌표를 다시 읽습니다.** 하나를 고르면 안내 줄이 사라지는 식으로 화면이 움직여, 옛 좌표는
   빈 곳을 누르고 화면은 그대로입니다. 밀어 넘긴 직후의 누름은 넘김만 멈추니 2~3초 기다립니다. 보내기·저장은 누른 뒤 칸이 비었는지나
   저장된 상태로 확인합니다(자판에 깔린 단추를 누르면 자판이 받습니다).
+- **서버와 병합**은 확인 창(**병합**)을 한 번 더 누릅니다. 누르지 않아도 스크립트는 그냥 지나가니, 병합했는지는 시험 서버의 DB로 봅니다.
+- 에뮬레이터 시간대는 UTC입니다(맥·서버는 KST). 한마디가 낮에도 "새벽"이라 말할 수 있고, 한국 시각 오전 9시 전에는 앱의 "오늘"이
+  서버의 어제라 날짜를 견주는 확인이 어긋납니다.
 - `*AiIntegrationTest`는 시험 서버를 거쳐 그 PC의 진짜 `claude`·`codex`를 부릅니다. 사용 한도에 걸리면 "usage limit"으로
   떨어집니다(계정 전체라 모든 모델이 막힙니다) — 코드 탓이 아니니 커밋 메시지에 그대로 적고, 풀린 뒤 그 클래스만 다시 돌립니다.
 
@@ -119,7 +122,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
 | 담기 전 다듬기 · 읽음으로 세지 않는 종류 · AI 추천 글귀의 갈래 | `ContentNormalizer` · `ContentType.personalTypes` · `AI_CATEGORY` |
 | AI에 일기·목표가 어디까지 나가는지 | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
-| 오늘 나눈 말이 AI에 어디까지 나가는지 | `DailyCoachPrompt.talkLines` (한마디·답 공용) |
+| 오늘 나눈 말·앞서 받은 말을 AI에 다시 싣는 범위 | `DailyCoachPrompt.talkLines`·`givenTipLines`·`givenQuoteLines` (공통 `sharedTalk`·`DailyCoachSharing` — 받을 때 허용했던 범위를 지금 끄면 제외) |
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |

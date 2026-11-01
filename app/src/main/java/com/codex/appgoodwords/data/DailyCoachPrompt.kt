@@ -56,7 +56,11 @@ data class DailyCoachDigest(
      */
     val talkLines: List<String> = emptyList(),
     /** 받은 글귀는 오늘 한 일이 아니므로 지문에는 넣지 않습니다. 대화 유무와도 별개입니다. */
-    val givenQuoteLines: List<String> = emptyList()
+    val givenQuoteLines: List<String> = emptyList(),
+    /** 대화에 이미 실린 것은 빼고, 답하지 않은 날에도 앞선 짚음을 알려 줍니다. 지문에는 넣지 않습니다. */
+    val givenTipLines: List<String> = emptyList(),
+    /** 이번에 짚을 방식. 요청을 위한 지시이지 오늘 한 일이 아닙니다. */
+    val angleLine: String = ""
 ) {
     /** 오늘 한 것이 하나도 없으면 물어볼 거리가 없습니다. */
     val isEmpty: Boolean
@@ -100,6 +104,9 @@ object DailyCoachPrompt {
      */
     private const val MAX_TALK_LINES = 16
 
+    /** 앞선 짚음을 알 만큼만 보냅니다. 대화에 실린 한마디는 이 몫을 쓰지 않습니다. */
+    private const val MAX_GIVEN_TIPS = 6
+
     private val clock = DateTimeFormatter.ofPattern("HH:mm")
 
     fun digest(
@@ -119,7 +126,9 @@ object DailyCoachPrompt {
         includeGoals: Boolean = false,
         /** 오늘 나눈 말([DailyCoachState.conversation]). 내가 한 말이 있을 때만 실립니다([talkLines]). */
         talk: List<DailyCoachLine> = emptyList(),
-        zoneId: ZoneId = ZoneId.systemDefault()
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        /** 기존 요청 횟수로 방식을 돌립니다. 별도 횟수나 지난날 답을 저장하지 않습니다. */
+        askCount: Int = 0
     ): DailyCoachDigest {
         val todayDiaries = diaries.filter { runCatching { LocalDate.parse(it.entryDate) }.getOrNull() == today }
 
@@ -170,9 +179,48 @@ object DailyCoachPrompt {
             ownedQuoteLines = ownedQuoteLines,
             // 무엇이 나가는지는 한 곳에서 정합니다. 돌아보기와 같은 함수입니다.
             directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList(),
-            talkLines = talkLines(talk, zoneId),
-            givenQuoteLines = givenQuoteLines(today, talk, zoneId)
+            talkLines = talkLines(talk, zoneId, includeDiaryBody, includeGoals),
+            givenQuoteLines = givenQuoteLines(today, talk, zoneId, includeDiaryBody, includeGoals),
+            givenTipLines = givenTipLines(today, talk, zoneId, includeDiaryBody, includeGoals),
+            angleLine = angleFor(today, askCount)
         )
+    }
+
+    /**
+     * 기록이 같아도 앞선 말과 다른 짚음을 청합니다(사용자가 정함, 2026-10-30).
+     * 지난날의 사적인 답을 더 보관하는 대신 날짜와 기존 요청 횟수로 네 방식을 순환합니다.
+     * 날짜도 더하므로 어제·오늘의 첫 요청도 다른 방식입니다. 무작위 값이나 공급자별 temperature에
+     * 기대지 않아 미리 보기와 실제 물음이 같고, 실패·중단 횟수는 원래 상태의 규칙을 그대로 따릅니다.
+     */
+    internal fun angleFor(today: LocalDate, askCount: Int): String {
+        val angles = listOf(
+            "오늘 한 것 하나의 구체적인 선택을 짚고, 그 선택의 의미를 짧게 말해 주세요.",
+            "오늘 한 것 하나를 짚고, 그 경험을 돌아볼 작은 물음 하나로 이어 주세요.",
+            "오늘 한 것 하나와 이번에 권할 글귀를 이어, 다른 각도에서 말해 주세요.",
+            "오늘 한 것 하나에서 이미 이어 가고 있는 힘을 짚어 주세요. 기록에 없는 연속이나 성과를 만들지 마세요."
+        )
+        return angles[Math.floorMod(today.toEpochDay() + askCount.toLong(), angles.size.toLong()).toInt()]
+    }
+
+    /** 대화가 없는 날에도 보냅니다. 대화에 이미 실린 한마디는 빼서 두 목록에 되풀이하지 않습니다. */
+    fun givenTipLines(
+        today: LocalDate,
+        talk: List<DailyCoachLine>,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        includeDiaryBody: Boolean = false,
+        includeGoals: Boolean = false
+    ): List<String> {
+        val allowed = sharedTalk(talk, includeDiaryBody, includeGoals)
+        val inTalk = conversationForPrompt(allowed).toSet()
+        return allowed.filter { it.isTipOn(today, zoneId) && it !in inTalk }
+            .map { line ->
+                buildString {
+                    append(Instant.ofEpochMilli(line.at).atZone(zoneId).format(clock)).append(' ')
+                    append(oneLine(line.text))
+                    if (line.action.isNotBlank()) append(" / 해 볼 일: ").append(oneLine(line.action))
+                    if (line.routine.isNotBlank()) append(" / 새 루틴: ").append(oneLine(line.routine))
+                }
+            }.distinct().takeLast(MAX_GIVEN_TIPS)
     }
 
     /**
@@ -180,13 +228,28 @@ object DailyCoachPrompt {
      * talkLines의 대화 조건·최근 16줄 제한을 쓰면 조용히 듣기만 한 날과 오전 글귀가 빠집니다.
      * 받은 한마디 중 글귀만 싣습니다. 코치의 조언이나 내 말은 이 목록으로 나가지 않습니다.
      */
-    fun givenQuoteLines(today: LocalDate, talk: List<DailyCoachLine>, zoneId: ZoneId = ZoneId.systemDefault()): List<String> =
-        talk.filter {
-            it.kind == DailyCoachLine.Kind.TIP && it.quote.isNotBlank() &&
-                Instant.ofEpochMilli(it.at).atZone(zoneId).toLocalDate() == today
+    fun givenQuoteLines(
+        today: LocalDate,
+        talk: List<DailyCoachLine>,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        includeDiaryBody: Boolean = false,
+        includeGoals: Boolean = false
+    ): List<String> =
+        sharedTalk(talk, includeDiaryBody, includeGoals).filter {
+            it.isTipOn(today, zoneId) && it.quote.isNotBlank()
         }.map {
             oneLine(it.quote) + if (it.quoteAuthor.isBlank()) "" else " (${oneLine(it.quoteAuthor)})"
-        }.distinct()
+        }.distinct().takeLast(DailyCoachState.MAX_TALK_LINES)
+
+    private fun DailyCoachLine.isTipOn(today: LocalDate, zoneId: ZoneId): Boolean =
+        kind == DailyCoachLine.Kind.TIP && Instant.ofEpochMilli(at).atZone(zoneId).toLocalDate() == today
+
+    /** 글귀·해 볼 일에도 사적인 내용이 섞일 수 있어 세 목록을 같은 범위로 거릅니다. 화면의 원문은 지우지 않습니다. */
+    private fun sharedTalk(talk: List<DailyCoachLine>, diaryBody: Boolean, goals: Boolean): List<DailyCoachLine> =
+        talk.filter { it.kind == DailyCoachLine.Kind.REPLY || it.sharing.allows(diaryBody, goals) }
+
+    private fun conversationForPrompt(talk: List<DailyCoachLine>): List<DailyCoachLine> =
+        if (talk.none { it.kind == DailyCoachLine.Kind.REPLY }) emptyList() else talk.takeLast(MAX_TALK_LINES)
 
     /**
      * 오늘 나눈 말을 물음에 실을 줄로 바꿉니다(사용자가 정함, 2026-10-29 — 다음 한마디도 대화를 압니다).
@@ -194,9 +257,13 @@ object DailyCoachPrompt {
      * **내가 한 말이 하나도 없으면 싣지 않습니다.** 코치 혼자 건넨 한마디들은 대화가 아니고, 답하지 않는 사람의 물음만
      * 길어집니다. 뒤쪽 [MAX_TALK_LINES]줄만 갑니다. 무엇이 나가는지는 이 함수 한 곳에서 정합니다 — 한마디와 답 모두 이것을 씁니다.
      */
-    fun talkLines(talk: List<DailyCoachLine>, zoneId: ZoneId = ZoneId.systemDefault()): List<String> {
-        if (talk.none { it.kind == DailyCoachLine.Kind.REPLY }) return emptyList()
-        return talk.takeLast(MAX_TALK_LINES).map { line ->
+    fun talkLines(
+        talk: List<DailyCoachLine>,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        includeDiaryBody: Boolean = false,
+        includeGoals: Boolean = false
+    ): List<String> {
+        return conversationForPrompt(sharedTalk(talk, includeDiaryBody, includeGoals)).map { line ->
             val time = Instant.ofEpochMilli(line.at).atZone(zoneId).format(clock)
             when (line.kind) {
                 DailyCoachLine.Kind.TIP -> buildString {
@@ -251,6 +318,11 @@ object DailyCoachPrompt {
         appendLine("규칙:")
         appendLine("- 기록에 있는 사실만 근거로 삼습니다. 없는 일을 지어내지 않습니다.")
         appendLine(
+            "- [오늘 앞서 건넨 한마디]와 [오늘 나눈 말]의 앞선 한마디와 다른 것을 짚거나, " +
+                "같은 것을 짚더라도 다른 각도와 다른 말로 씁니다. message·action·routine의 같은 말과 권유를 되풀이하지 않습니다."
+        )
+        appendLine("- [이번에 짚을 방식]을 따르되 오늘 기록에 맞는 만큼만 씁니다. 앞선 코치의 말은 오늘 한 일의 근거가 아닙니다.")
+        appendLine(
             "- 못 한 것을 세지 않습니다. [아직 안 밟은 루틴]은 다그치는 데 쓰지 말고, " +
                 "권할 하나를 고르는 데만 씁니다."
         )
@@ -291,6 +363,8 @@ object DailyCoachPrompt {
         section("오늘 한 것", digest.doneLines)
         section("아직 안 밟은 루틴", digest.restRoutines)
         section("오늘 나눈 말", digest.talkLines)
+        section("오늘 앞서 건넨 한마디", digest.givenTipLines)
+        section("이번에 짚을 방식", listOf(digest.angleLine).filter { it.isNotBlank() })
         section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
         section("오늘 앞서 건넨 글귀 (추천에서 빼 주세요)", digest.givenQuoteLines)
         append("지금 건넬 한마디를 형식에 맞는 JSON으로만 답해 주세요.")
