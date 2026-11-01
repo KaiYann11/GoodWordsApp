@@ -720,10 +720,12 @@ fun SettingsScreen(
                                         syncStatus.failed ->
                                             "마지막 시도: ${formatDateTime(syncStatus.lastSyncAt)} · 실패 (${syncStatus.lastError})"
 
-                                        else -> "마지막 동기화: ${formatDateTime(syncStatus.lastSyncAt)} · 성공"
+                                        else -> "마지막 동기화: ${formatDateTime(syncStatus.lastSyncAt)} · 성공" +
+                                            // 동기화는 됐어도 사진이 못 갔으면 같은 줄에 까닭까지 말합니다.
+                                            syncStatus.attachmentNote.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                                     },
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (syncStatus.failed) {
+                                    color = if (syncStatus.failed || syncStatus.attachmentNote.isNotBlank()) {
                                         MaterialTheme.colorScheme.error
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant

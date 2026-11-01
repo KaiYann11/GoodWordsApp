@@ -110,6 +110,11 @@ class SettingsStore(
          * 있어야 합니다.
          */
         val appUpdatePending = stringPreferencesKey("app_update_pending")
+        /**
+         * 지난 동기화에서 서버로 올리지 못한 첨부의 수와 까닭. 동기화는 성공해도 사진만 못 갈 수 있어 따로 둡니다.
+         * 올리지 못한 것이 없으면 빈 값입니다.
+         */
+        val attachmentNote = stringPreferencesKey("attachment_note")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -257,8 +262,14 @@ class SettingsStore(
     val syncStatusFlow: Flow<SyncStatus> = context.dataStore.data.map { preferences ->
         SyncStatus(
             lastSyncAt = preferences[Keys.lastSyncAt] ?: 0L,
-            lastError = preferences[Keys.lastSyncError].orEmpty()
+            lastError = preferences[Keys.lastSyncError].orEmpty(),
+            attachmentNote = preferences[Keys.attachmentNote].orEmpty()
         )
+    }
+
+    /** 이번 동기화에서 올리지 못한 첨부. 모두 올렸으면 빈 값으로 지웁니다. */
+    suspend fun recordAttachmentNote(note: String) {
+        context.dataStore.edit { preferences -> preferences[Keys.attachmentNote] = note }
     }
 
     suspend fun getSettings(): ReminderSettings = settingsFlow.first()
