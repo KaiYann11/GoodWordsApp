@@ -432,9 +432,17 @@ object DailyCoachPrompt {
      */
     fun chatPrompt(digest: DailyCoachDigest): String = systemPrompt() + "\n\n" + userPrompt(digest)
 
+    /**
+     * 갈래 하나의 이름들. **이름마다 「」로 감쌉니다**(쉼표 문제를 고치기로 사용자가 정함, 2026-11-01).
+     *
+     * 쉼표로만 이으면 어디까지가 한 이름인지 모릅니다. 책 둘("No Pages, Finish Test")을 한 제목으로 읽은 한마디가
+     * 실제로 있었고(1.16.0 검증), "총, 균, 쇠"처럼 쉼표가 든 제목은 거꾸로 여러 권으로 읽힙니다. 따옴표는 영어 제목의
+     * 아포스트로피와 겹쳐 「」를 씁니다. 지문도 이 줄로 만들지만, 다시 물을지는 지문이 아니라 정한 틈과 횟수가 정하므로
+     * ([DailyCoachState.needsAsk]) 꼴이 바뀌었다고 더 묻지 않습니다.
+     */
     private fun names(title: String, values: List<String>): String? {
         val kept = values.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(MAX_NAMES)
-        return if (kept.isEmpty()) null else "$title: ${kept.joinToString(", ")}"
+        return if (kept.isEmpty()) null else "$title: " + kept.joinToString(", ") { "「$it」" }
     }
 
     private fun StringBuilder.section(title: String, lines: List<String>) {
