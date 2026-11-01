@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createReadStream, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, dirname, extname, join, normalize, resolve } from "node:path";
+import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
@@ -20,7 +20,7 @@ const deletionRetentionDays = 90;
  */
 const answerSeparator = "\u001F";
 const here = dirname(fileURLToPath(import.meta.url));
-const webRoot = join(here, "web");
+const defaultWebRoot = join(here, "web");
 const defaultDbPath = join(here, "app-good-words.db.json");
 
 /**
@@ -191,7 +191,7 @@ async function route(request, response) {
     return;
   }
   if (!url.pathname.startsWith("/api")) {
-    await serveStatic(response, url.pathname);
+    await serveStatic(request, response, url.pathname);
     return;
   }
   if (!isAuthorized(request, url.pathname)) {
@@ -2843,22 +2843,105 @@ function sendNoContent(response) {
   response.end();
 }
 
-async function serveStatic(response, pathname) {
+async function serveStatic(request, response, pathname) {
+  const root = config.webRoot;
   const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  const target = resolve(webRoot, normalize(relative));
-  if (!target.startsWith(resolve(webRoot))) {
+  const target = resolve(root, normalize(relative));
+  // 구분자까지 봅니다. 그냥 앞부분만 보면 `web2/`처럼 이름이 이어지는 옆 폴더도 안으로 칩니다.
+  if (target !== root && !target.startsWith(root + sep)) {
     sendJson(response, 403, { error: "허용되지 않은 경로입니다." });
     return;
   }
   let filePath = target;
-  try {
-    const fileStat = await stat(filePath);
-    if (fileStat.isDirectory()) filePath = join(filePath, "index.html");
-  } catch {
-    filePath = join(webRoot, "index.html");
+  let fileStat = await stat(filePath).catch(() => null);
+  if (fileStat?.isDirectory()) {
+    filePath = join(filePath, "index.html");
+    fileStat = await stat(filePath).catch(() => null);
   }
-  response.writeHead(200, { "Content-Type": contentType(filePath) });
+  if (!fileStat) {
+    // 설치 파일 자리에서는 없는 것을 없다고 말합니다. 화면 주소처럼 index.html을 내주면 앱이 그것을 설치 파일로
+    // 받아 해시가 다르다는 엉뚱한 말을 합니다.
+    if (relative.startsWith("update/")) {
+      sendJson(response, 404, { error: "게시된 설치 파일이 없습니다." });
+      return;
+    }
+    filePath = join(root, "index.html");
+    fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat) {
+      sendJson(response, 404, { error: "화면 파일이 없습니다." });
+      return;
+    }
+  }
+  sendFile(request, response, filePath, fileStat);
+}
+
+/**
+ * 파일 하나를 내줍니다. 크기·ETag를 붙이고 이어 받기(`Range`)를 받습니다.
+ *
+ * 앱은 설치 파일을 안드로이드 DownloadManager로 받습니다. 받는 중에 연결이 끊기면 DownloadManager는 받은 데까지의
+ * `Range`와 처음 받은 ETag(`If-Match`)로 이어 받는데, 둘이 없으면 이어 받지 못하고 실패로 끝나 처음부터 다시 받아야
+ * 합니다. 크기가 없으면 알림의 진행 막대도 비어 있습니다. ETag는 크기와 고친 시각으로 짓습니다 — 게시는 새 이름으로
+ * 올리므로 같은 이름의 파일이 바뀌는 일이 거의 없고, 바뀌었으면 412로 이어 받기를 막아 두 파일이 섞이지 않게 합니다.
+ */
+function sendFile(request, response, filePath, fileStat) {
+  const size = fileStat.size;
+  const etag = `"${size.toString(16)}-${Math.floor(fileStat.mtimeMs).toString(16)}"`;
+  const headers = {
+    "Content-Type": contentType(filePath),
+    "Accept-Ranges": "bytes",
+    ETag: etag,
+    "Last-Modified": fileStat.mtime.toUTCString(),
+  };
+  const ifMatch = request.headers["if-match"];
+  if (ifMatch && ifMatch.trim() !== "*" && !ifMatch.split(",").map((value) => value.trim()).includes(etag)) {
+    response.writeHead(412, headers);
+    response.end();
+    return;
+  }
+  // If-Range가 지금 파일을 가리키지 않으면 조각이 아니라 통째로 줍니다(RFC 9110).
+  const ifRange = request.headers["if-range"];
+  const range = ifRange && ifRange.trim() !== etag ? null : byteRange(request.headers.range, size);
+  if (range === "unsatisfiable") {
+    response.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` });
+    response.end();
+    return;
+  }
+  if (range) {
+    response.writeHead(206, {
+      ...headers,
+      "Content-Range": `bytes ${range.start}-${range.end}/${size}`,
+      "Content-Length": range.end - range.start + 1,
+    });
+    createReadStream(filePath, { start: range.start, end: range.end }).pipe(response);
+    return;
+  }
+  response.writeHead(200, { ...headers, "Content-Length": size });
   createReadStream(filePath).pipe(response);
+}
+
+/**
+ * `bytes=시작-` · `bytes=시작-끝` · `bytes=-끝에서 몇` 하나만 읽습니다.
+ *
+ * 여러 조각을 한 번에 달라는 꼴은 DownloadManager도 브라우저의 이어 받기도 쓰지 않습니다. 모르는 꼴은 무시하고
+ * 통째로 줍니다(RFC 9110이 허락합니다). 파일 끝을 넘는 시작은 416입니다.
+ */
+function byteRange(header, size) {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
+  if (!match || (match[1] === "" && match[2] === "")) return null;
+  let start;
+  let end;
+  if (match[1] === "") {
+    const suffix = Number(match[2]);
+    if (suffix === 0) return "unsatisfiable";
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+  }
+  if (start >= size || start > end) return "unsatisfiable";
+  return { start, end };
 }
 
 function contentType(filePath) {
@@ -2901,6 +2984,7 @@ function parseArgs(args) {
     else if (arg === "--db") parsed.dbPath = args[++index];
     else if (arg === "--api-key") parsed.apiKey = args[++index];
     else if (arg === "--attachments") parsed.attachmentsDir = args[++index];
+    else if (arg === "--web-root") parsed.webRoot = args[++index];
     else if (arg === "--seed") parsed.seed = true;
   }
   if (!["127.0.0.1", "::1", "localhost"].includes(parsed.host)) {
@@ -2909,6 +2993,9 @@ function parseArgs(args) {
   parsed.dbPath = resolve(parsed.dbPath);
   // 첨부는 DB JSON 밖에 둡니다. 안에 넣으면 스냅샷을 주고받을 때마다 사진과 영상이 통째로 오갑니다.
   parsed.attachmentsDir = resolve(parsed.attachmentsDir || join(dirname(parsed.dbPath), "attachments"));
+  // 화면과 설치 파일(`update/`)을 내주는 자리. 시험은 따로 만든 폴더를 줍니다 — 이 PC에 게시해 둔 설치 파일을 건드리지
+  // 않으려는 것입니다(게시 스크립트의 --web-root와 같은 뜻).
+  parsed.webRoot = resolve(parsed.webRoot || process.env.APP_GOOD_WORDS_WEB_ROOT || defaultWebRoot);
   return parsed;
 }
 

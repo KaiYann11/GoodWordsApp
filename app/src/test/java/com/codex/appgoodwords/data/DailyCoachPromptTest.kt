@@ -105,10 +105,22 @@ class DailyCoachPromptTest {
         )
 
         assertEquals(
-            listOf("루틴: 물 한 컵, 산책", "할 일: 장보기", "읽은 글귀: 오늘의 글귀"),
+            listOf("루틴: 「물 한 컵」, 「산책」", "할 일: 「장보기」", "읽은 글귀: 「오늘의 글귀」"),
             digest.doneLines
         )
         assertFalse(digest.isEmpty)
+    }
+
+    @Test
+    fun eachNameIsWrappedSoATitleWithCommasStaysOneBook() {
+        // 쉼표로만 이으면 책 둘이 한 제목으로, 쉼표가 든 제목 하나가 여러 권으로 읽힙니다(1.16.0 검증에서 본 것).
+        val digest = digest(
+            checks = listOf(check("물 한 컵")),
+            readingLogs = listOf(readingLog("총, 균, 쇠"), readingLog("No Pages"), readingLog("총, 균, 쇠"))
+        )
+
+        assertTrue(digest.doneLines.toString(), digest.doneLines.contains("독서: 「총, 균, 쇠」, 「No Pages」"))
+        assertTrue(DailyCoachPrompt.userPrompt(digest).contains("- 독서: 「총, 균, 쇠」, 「No Pages」\n"))
     }
 
     @Test
@@ -484,11 +496,12 @@ class DailyCoachPromptTest {
         includeGoals: Boolean = false,
         talk: List<DailyCoachLine> = emptyList(),
         moodLogs: List<MoodLogEntity> = emptyList(),
-        askCount: Int = 0
+        askCount: Int = 0,
+        readingLogs: List<BookReadingLogEntity> = emptyList()
     ): DailyCoachDigest = DailyCoachPrompt.digest(
         today = today,
         at = at,
-        dayDigest = dayDigest(checks, todos, diaries, events, moodLogs),
+        dayDigest = dayDigest(checks, todos, diaries, events, moodLogs, readingLogs),
         progress = progress(checks, todos, diaries, events),
         routines = routines,
         todayChecks = checks,
@@ -516,7 +529,8 @@ class DailyCoachPromptTest {
         todos: List<TodoEntity> = emptyList(),
         diaries: List<DiaryEntity> = emptyList(),
         events: List<ExposureEventEntity> = emptyList(),
-        moodLogs: List<MoodLogEntity> = emptyList()
+        moodLogs: List<MoodLogEntity> = emptyList(),
+        readingLogs: List<BookReadingLogEntity> = emptyList()
     ): DayDigest = DayScoreCalculator.digest(
         date = today,
         events = events,
@@ -524,9 +538,13 @@ class DailyCoachPromptTest {
         todos = todos,
         diaries = diaries,
         moodLogs = moodLogs,
+        readingLogs = readingLogs,
         steps = steps,
         zoneId = zone
     )
+
+    private fun readingLog(title: String) =
+        BookReadingLogEntity(bookSyncId = "b-$title", bookTitle = title, readDate = today.toString())
 
     private fun progress(
         checks: List<RoutineCheckEntity> = emptyList(),

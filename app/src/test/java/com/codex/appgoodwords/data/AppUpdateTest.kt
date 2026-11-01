@@ -1,6 +1,12 @@
 package com.codex.appgoodwords.data
 
+import android.app.DownloadManager
+import java.io.File
+import java.security.MessageDigest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -125,4 +131,95 @@ class AppUpdateTest {
         // 서버가 알려 준 크기가 틀렸더라도 막대가 넘치지는 않게 합니다.
         assertEquals(1f, AppUpdateState.Downloading(info, 200).ratio, 0.0001f)
     }
+
+    @Test fun whatIsBeingDownloadedIsRememberedAndReadBackWhole() {
+        // 받는 동안 앱이 꺼져도 시스템은 계속 받습니다. 다시 켰을 때 맞춰 볼 해시를 잃으면 받은 것을 믿을 수 없습니다.
+        val pending = AppUpdatePending(downloadId = 42, info = AppUpdateJson.parse(json()))
+
+        assertEquals(pending, AppUpdateJson.decodePending(AppUpdateJson.encodePending(pending)))
+    }
+
+    @Test fun aBrokenOrDoubtfulRecordIsForgottenRatherThanTrusted() {
+        assertNull(AppUpdateJson.decodePending(""))
+        assertNull(AppUpdateJson.decodePending("{"))
+        // 번호가 없으면 무엇을 지켜볼지 모릅니다.
+        assertNull(AppUpdateJson.decodePending(json()))
+        // 저장된 값도 서버에서 받은 것과 같은 검사를 거칩니다. 경로를 벗어나는 이름은 믿지 않습니다.
+        val doubtful = AppUpdateJson.encodePending(AppUpdatePending(7, AppUpdateJson.parse(json())))
+            .replace("app-good-words-1.6.0-9-19adb169.apk", "../../evil.apk")
+        assertNull(AppUpdateJson.decodePending(doubtful))
+    }
+
+    @Test fun waitingForTheNetworkIsStillDownloadingNotAFailure() {
+        assertEquals(
+            AppUpdateDownloadStatus.Step.Receiving(downloadedBytes = 10, waiting = false),
+            AppUpdateDownloadStatus.step(DownloadManager.STATUS_RUNNING, 0, 10)
+        )
+        assertEquals(
+            AppUpdateDownloadStatus.Step.Receiving(downloadedBytes = 0, waiting = false),
+            AppUpdateDownloadStatus.step(DownloadManager.STATUS_PENDING, 0, 0)
+        )
+        // 끊기면 안드로이드가 기다렸다가 받은 데부터 이어 받습니다. 실패라고 하면 사용자가 처음부터 다시 누릅니다.
+        assertEquals(
+            AppUpdateDownloadStatus.Step.Receiving(downloadedBytes = 30, waiting = true),
+            AppUpdateDownloadStatus.step(DownloadManager.STATUS_PAUSED, DownloadManager.PAUSED_WAITING_FOR_NETWORK, 30)
+        )
+        assertEquals(
+            AppUpdateDownloadStatus.Step.Received,
+            AppUpdateDownloadStatus.step(DownloadManager.STATUS_SUCCESSFUL, 0, 100)
+        )
+    }
+
+    @Test fun aStoppedDownloadSaysWhyInWords() {
+        fun stopped(reason: Int) =
+            (AppUpdateDownloadStatus.step(DownloadManager.STATUS_FAILED, reason, 0) as AppUpdateDownloadStatus.Step.Stopped).message
+
+        assertTrue(stopped(404).contains("게시된 설치 파일이 없습니다"))
+        assertTrue(stopped(500).contains("HTTP 500"))
+        assertTrue(stopped(DownloadManager.ERROR_INSUFFICIENT_SPACE).contains("저장 공간"))
+        assertTrue(stopped(DownloadManager.ERROR_CANNOT_RESUME).contains("이어 받지 못했습니다"))
+        assertTrue(stopped(DownloadManager.ERROR_UNKNOWN).contains("다시 받아 주세요"))
+    }
+
+    @Test fun aDownloadedFileIsMovedInOnlyWhenItsSizeAndHashMatch() {
+        val bytes = ByteArray(5_000) { (it * 7).toByte() }
+        val info = AppUpdateJson.parse(json(sizeBytes = bytes.size.toLong(), sha256 = sha256(bytes)))
+        val source = File.createTempFile("downloaded", ".apk").apply { writeBytes(bytes) }
+        val target = File(source.parentFile, "verified-${System.nanoTime()}/app.apk")
+
+        try {
+            val verified = AppUpdateFiles.verifyInto(source, target, info)
+
+            assertEquals(target, verified)
+            assertArrayEquals(bytes, verified.readBytes())
+        } finally {
+            source.delete()
+            target.parentFile?.deleteRecursively()
+        }
+    }
+
+    @Test fun aFileThatIsNotWhatTheServerSaidIsThrownAway() {
+        val bytes = ByteArray(5_000) { (it * 7).toByte() }
+        val source = File.createTempFile("downloaded", ".apk").apply { writeBytes(bytes) }
+        val target = File(source.parentFile, "verified-${System.nanoTime()}/app.apk")
+
+        fun failure(info: AppUpdateInfo): String =
+            assertThrows(IllegalStateException::class.java) { AppUpdateFiles.verifyInto(source, target, info) }.message.orEmpty()
+
+        try {
+            // 바꿔치기와 같은 모양입니다.
+            assertTrue(failure(AppUpdateJson.parse(json(sizeBytes = 5_000, sha256 = "b".repeat(64)))).contains("다릅니다"))
+            assertFalse("못 믿을 파일이 남아 있습니다.", target.exists())
+            // 덜 받은 것과 더 받은 것도 설치하지 않습니다.
+            assertTrue(failure(AppUpdateJson.parse(json(sizeBytes = 6_000, sha256 = sha256(bytes)))).contains("끝까지"))
+            assertTrue(failure(AppUpdateJson.parse(json(sizeBytes = 4_000, sha256 = sha256(bytes)))).contains("크기보다 큽니다"))
+            assertFalse(target.exists())
+        } finally {
+            source.delete()
+            target.parentFile?.deleteRecursively()
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

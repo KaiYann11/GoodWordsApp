@@ -1,5 +1,8 @@
 package com.codex.appgoodwords.data
 
+import android.app.DownloadManager
+import java.io.File
+import java.security.MessageDigest
 import org.json.JSONObject
 
 /**
@@ -45,7 +48,16 @@ sealed interface AppUpdateState {
 
     data class Available(val info: AppUpdateInfo) : AppUpdateState
 
-    data class Downloading(val info: AppUpdateInfo, val downloadedBytes: Long) : AppUpdateState {
+    /**
+     * 안드로이드가 받는 중입니다. 다른 앱으로 가도 이어집니다([AppUpdateDownloads]).
+     *
+     * [waitingForNetwork]는 연결이 끊겨 기다리는 때입니다. 연결되면 받은 데부터 이어 받습니다.
+     */
+    data class Downloading(
+        val info: AppUpdateInfo,
+        val downloadedBytes: Long,
+        val waitingForNetwork: Boolean = false
+    ) : AppUpdateState {
         /** 0~1. 서버가 알려 준 크기로 셉니다. */
         val ratio: Float
             get() = if (info.sizeBytes <= 0) 0f else (downloadedBytes.toFloat() / info.sizeBytes).coerceIn(0f, 1f)
@@ -112,4 +124,106 @@ object AppUpdateJson {
         } else {
             AppUpdateState.UpToDate(latest.versionName)
         }
+
+    /** 받는 중인 것을 기억해 둘 글. 앱이 꺼졌다 켜져도 이어서 보이고, 다 받은 뒤 맞춰 볼 해시를 잃지 않습니다. */
+    fun encodePending(pending: AppUpdatePending): String = JSONObject()
+        .put("downloadId", pending.downloadId)
+        .put("versionName", pending.info.versionName)
+        .put("versionCode", pending.info.versionCode)
+        .put("fileName", pending.info.fileName)
+        .put("sizeBytes", pending.info.sizeBytes)
+        .put("sha256", pending.info.sha256)
+        .put("publishedAt", pending.info.publishedAt)
+        .toString()
+
+    /**
+     * 읽을 수 없으면 null입니다. 받던 것을 잊으면 다시 받으면 그만이지만, 못 믿을 값으로 맞춰 보고 설치하면 안 됩니다 —
+     * 그래서 서버에서 받은 것과 같은 검사([parse])를 다시 거칩니다.
+     */
+    fun decodePending(text: String): AppUpdatePending? {
+        if (text.isBlank()) return null
+        val downloadId = runCatching { JSONObject(text).optLong("downloadId", 0L) }.getOrDefault(0L)
+        if (downloadId <= 0L) return null
+        val info = runCatching { parse(text) }.getOrNull() ?: return null
+        return AppUpdatePending(downloadId, info)
+    }
+}
+
+/** 안드로이드에 맡겨 받는 중인 설치 파일. [downloadId]는 DownloadManager의 번호입니다. */
+data class AppUpdatePending(val downloadId: Long, val info: AppUpdateInfo)
+
+/**
+ * DownloadManager가 알려 준 한 줄을 화면의 상태로 옮깁니다.
+ *
+ * 숫자만 받아 안드로이드 없이 시험할 수 있게 둡니다. 값은 [DownloadManager]의 상수 그대로입니다.
+ */
+object AppUpdateDownloadStatus {
+    sealed interface Step {
+        /** 아직 받는 중입니다. [waiting]이면 연결을 기다리고 있습니다. */
+        data class Receiving(val downloadedBytes: Long, val waiting: Boolean) : Step
+
+        /** 다 받았습니다. 믿을지는 아직 모릅니다 — [AppUpdateFiles.verifyInto]가 정합니다. */
+        data object Received : Step
+
+        data class Stopped(val message: String) : Step
+    }
+
+    fun step(status: Int, reason: Int, downloadedBytes: Long): Step = when (status) {
+        DownloadManager.STATUS_SUCCESSFUL -> Step.Received
+        DownloadManager.STATUS_FAILED -> Step.Stopped(failureMessage(reason))
+        // 멈춘 까닭은 연결이 끊겼거나, 곧 다시 해 보거나, 와이파이를 기다리는 것입니다. 모두 기다리면 이어집니다.
+        DownloadManager.STATUS_PAUSED -> Step.Receiving(downloadedBytes, waiting = true)
+        else -> Step.Receiving(downloadedBytes, waiting = false)
+    }
+
+    /** 실패하면 까닭이 HTTP 번호이거나 DownloadManager의 오류 번호입니다. */
+    fun failureMessage(reason: Int): String = when (reason) {
+        404 -> "서버에 게시된 설치 파일이 없습니다. 서버에서 먼저 새 버전을 올려 주세요."
+        in 400..599 -> "서버가 설치 파일을 주지 않았습니다(HTTP $reason)."
+        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "저장 공간이 모자라 설치 파일을 받지 못했습니다. 공간을 비운 뒤 다시 받아 주세요."
+        DownloadManager.ERROR_CANNOT_RESUME, DownloadManager.ERROR_HTTP_DATA_ERROR ->
+            "연결이 끊겨 이어 받지 못했습니다. 다시 받아 주세요."
+        else -> "설치 파일을 받지 못했습니다. 다시 받아 주세요."
+    }
+}
+
+/** 다 받은 설치 파일을 믿을지 가립니다. */
+object AppUpdateFiles {
+    /**
+     * [source]를 [target]으로 옮겨 담으며 크기와 해시를 맞춰 봅니다. 맞지 않으면 [target]을 지우고 실패합니다.
+     *
+     * **옮겨 담는 까닭:** DownloadManager는 앱 안쪽 캐시에 쓰지 못해 앱 전용 바깥 저장소에 받습니다. 맞춰 본 것을 앱 안쪽에
+     * 두고 그것만 설치 화면으로 넘기면, 맞춰 본 뒤에 파일이 바뀔 틈이 없습니다(옛 안드로이드는 바깥 저장소를 다른 앱도
+     * 읽고 씁니다). 해시가 서버가 알려 준 것과 다르면 설치하지 않습니다 — 바꿔치기와 같은 모양이기 때문입니다.
+     */
+    fun verifyInto(source: File, target: File, info: AppUpdateInfo): File {
+        target.parentFile?.mkdirs()
+        val digest = MessageDigest.getInstance("SHA-256")
+        var copied = 0L
+        try {
+            source.inputStream().use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        copied += read
+                        if (copied > info.sizeBytes) {
+                            error("설치 파일이 서버가 알려 준 크기보다 큽니다. 설치하지 않았습니다.")
+                        }
+                        output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                    }
+                }
+            }
+            if (copied != info.sizeBytes) error("설치 파일을 끝까지 받지 못했습니다. 다시 받아 주세요.")
+            val actual = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+            if (actual != info.sha256) error("받은 설치 파일이 서버가 알려 준 것과 다릅니다. 설치하지 않았습니다.")
+            return target
+        } catch (failure: Throwable) {
+            // 반쯤 담은 파일이나 못 믿을 파일을 남겨 두지 않습니다. 다음에 그것이 설치될 수 있습니다.
+            target.delete()
+            throw failure
+        }
+    }
 }

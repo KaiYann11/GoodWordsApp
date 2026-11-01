@@ -103,6 +103,13 @@ class SettingsStore(
         val lastPushAt = longPreferencesKey("last_push_at")
         /** 서버가 통째로 교체될 때마다 오르는 세대 번호. 다르면 리비전 번호를 믿을 수 없습니다. */
         val serverEpoch = longPreferencesKey("server_epoch")
+        /**
+         * 안드로이드에 맡겨 받는 중인 설치 파일([AppUpdatePending]). 이 기기에만 둡니다.
+         *
+         * 받는 동안 앱이 꺼져도 시스템은 계속 받으므로, 다시 켰을 때 이어서 보여 주고 다 받은 것의 해시를 맞춰 볼 값이
+         * 있어야 합니다.
+         */
+        val appUpdatePending = stringPreferencesKey("app_update_pending")
     }
 
     val settingsFlow: Flow<ReminderSettings> = context.dataStore.data.map { preferences ->
@@ -175,6 +182,21 @@ class SettingsStore(
     }
 
     suspend fun getDailyCoachState(): DailyCoachState = dailyCoachStateFlow.first()
+
+    /** 안드로이드에 맡겨 받는 중인 설치 파일. 없거나 읽을 수 없으면 null입니다. */
+    suspend fun getAppUpdatePending(): AppUpdatePending? =
+        AppUpdateJson.decodePending(context.dataStore.data.first()[Keys.appUpdatePending].orEmpty())
+
+    /** null이면 지웁니다. 다 받아 맞춰 보았거나 실패했을 때입니다. */
+    suspend fun setAppUpdatePending(pending: AppUpdatePending?) {
+        context.dataStore.edit { preferences ->
+            if (pending == null) {
+                preferences.remove(Keys.appUpdatePending)
+            } else {
+                preferences[Keys.appUpdatePending] = AppUpdateJson.encodePending(pending)
+            }
+        }
+    }
 
     suspend fun setDailyCoachState(state: DailyCoachState) {
         context.dataStore.edit { preferences ->

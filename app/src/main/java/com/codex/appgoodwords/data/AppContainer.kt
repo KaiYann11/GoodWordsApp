@@ -53,6 +53,11 @@ class AppContainer(
         AppUpdateClient()
     }
 
+    /** 설치 파일 받기는 안드로이드에 맡깁니다. 다른 앱으로 가도 이어집니다. */
+    val appUpdateDownloads: AppUpdateDownloads by lazy {
+        AppUpdateDownloads(appContext)
+    }
+
     val reminderScheduler: ReminderScheduler by lazy {
         ReminderScheduler(appContext)
     }

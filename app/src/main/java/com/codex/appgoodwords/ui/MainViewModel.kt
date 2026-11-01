@@ -9,8 +9,11 @@ import com.codex.appgoodwords.data.AI_CATEGORY
 import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
+import com.codex.appgoodwords.data.AppUpdateDownloadStatus
+import com.codex.appgoodwords.data.AppUpdateFiles
 import com.codex.appgoodwords.data.AppUpdateInstaller
 import com.codex.appgoodwords.data.AppUpdateJson
+import com.codex.appgoodwords.data.AppUpdatePending
 import com.codex.appgoodwords.data.AppUpdateState
 import com.codex.appgoodwords.data.AppImportResult
 import com.codex.appgoodwords.data.AttachmentGallery
@@ -63,6 +66,9 @@ import com.codex.appgoodwords.work.AppNotifications
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +81,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 class MainViewModel(
@@ -495,11 +502,31 @@ class MainViewModel(
     /**
      * 앱 업데이트를 확인하고 받는 동안의 상태.
      *
-     * 저장하지 않습니다. 앱을 껐다 켜면 처음부터 다시 묻습니다 — 그 사이에 서버에 새 버전이
-     * 올라왔을 수 있고, 받아 둔 파일은 캐시라 시스템이 비웠을 수도 있습니다.
+     * 화면의 상태는 저장하지 않습니다. 앱을 껐다 켜면 처음부터 다시 묻습니다 — 그 사이에 서버에 새 버전이
+     * 올라왔을 수 있고, 받아 둔 파일은 캐시라 시스템이 비웠을 수도 있습니다. **안드로이드에 맡겨 받는 중인 것만은
+     * 기억합니다**([AppUpdatePending]) — 앱이 꺼져도 시스템은 계속 받으므로, 다시 켜면 이어서 보여 줍니다.
      */
     private val _appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
     val appUpdateState: StateFlow<AppUpdateState> = _appUpdateState.asStateFlow()
+
+    /** 맡겨 둔 받기를 지켜보는 일. 하나만 돕니다. */
+    private var appUpdateWatch: Job? = null
+
+    init {
+        // 받는 동안 앱이 꺼졌어도 시스템은 계속 받았습니다. 다시 켜면 이어서 지켜보고, 다 받았으면 맞춰 봅니다.
+        appUpdateWatch = viewModelScope.launch {
+            val pending = container.settingsStore.getAppUpdatePending() ?: return@launch
+            val known = runCatching {
+                withContext(Dispatchers.IO) { container.appUpdateDownloads.query(pending.downloadId) }
+            }.getOrNull()
+            if (known == null) {
+                // 그사이 알림이나 다운로드 앱에서 지웠습니다. 다시 확인하면 됩니다 — 켤 때마다 실패를 띄우지 않습니다.
+                container.settingsStore.setAppUpdatePending(null)
+                return@launch
+            }
+            watchAppUpdate(pending)
+        }
+    }
 
     /**
      * 서버에 새 버전이 있는지 묻습니다.
@@ -522,25 +549,79 @@ class MainViewModel(
     }
 
     /**
-     * 설치 파일을 받아 둡니다. 해시가 맞아야 [AppUpdateState.Ready]가 됩니다.
+     * 설치 파일 받기를 안드로이드에 맡깁니다. 다 받아 해시가 맞아야 [AppUpdateState.Ready]가 됩니다.
      *
+     * 앱이 직접 받으면 다른 앱으로 간 사이 통신이 끊겨 처음부터 다시 받아야 했습니다([AppUpdateDownloads]).
      * 설치는 여기서 하지 않습니다. 안드로이드 설치 화면을 띄우는 일이라 화면 쪽이 맡습니다.
      */
     fun downloadAppUpdate() {
         val info = (_appUpdateState.value as? AppUpdateState.Available)?.info ?: return
-        viewModelScope.launch {
-            _appUpdateState.value = AppUpdateState.Downloading(info, 0L)
+        _appUpdateState.value = AppUpdateState.Downloading(info, 0L)
+        appUpdateWatch?.cancel()
+        appUpdateWatch = viewModelScope.launch {
             val serverUrl = container.settingsStore.getServerSyncSettings().serverUrl
-            _appUpdateState.value = runCatching {
-                val target = AppUpdateInstaller.targetFile(container.appContext, info)
-                val file = container.appUpdateClient.download(serverUrl, info, target) { received ->
-                    _appUpdateState.value = AppUpdateState.Downloading(info, received)
-                }
-                AppUpdateState.Ready(info, file.absolutePath)
+            val downloadId = runCatching {
+                withContext(Dispatchers.IO) { container.appUpdateDownloads.enqueue(serverUrl, info) }
             }.getOrElse { error ->
-                AppUpdateState.Failed(error.message ?: "설치 파일을 받지 못했습니다.")
+                _appUpdateState.value = AppUpdateState.Failed(error.message ?: "설치 파일을 받지 못했습니다.")
+                return@launch
+            }
+            val pending = AppUpdatePending(downloadId, info)
+            container.settingsStore.setAppUpdatePending(pending)
+            watchAppUpdate(pending)
+        }
+    }
+
+    /**
+     * 맡겨 둔 받기를 끝날 때까지 지켜봅니다. 시스템에 묻기만 하므로 앱이 뒤에 있어도 통신은 쓰지 않습니다.
+     *
+     * 다 받으면 앱 안쪽 캐시로 옮겨 담으며 맞춰 보고([AppUpdateFiles.verifyInto]) 시스템 쪽 파일은 지웁니다.
+     */
+    private suspend fun watchAppUpdate(pending: AppUpdatePending) {
+        val downloads = container.appUpdateDownloads
+        while (true) {
+            val snapshot = withContext(Dispatchers.IO) { downloads.query(pending.downloadId) }
+            if (snapshot == null) {
+                finishAppUpdate(AppUpdateState.Failed("받기가 취소되었습니다. 다시 받아 주세요."))
+                return
+            }
+            when (val step = AppUpdateDownloadStatus.step(snapshot.status, snapshot.reason, snapshot.downloadedBytes)) {
+                is AppUpdateDownloadStatus.Step.Receiving -> {
+                    _appUpdateState.value = AppUpdateState.Downloading(pending.info, step.downloadedBytes, step.waiting)
+                    // 연결을 기다리는 동안은 자주 물을 까닭이 없습니다.
+                    delay(if (step.waiting) 3_000L else 700L)
+                }
+                is AppUpdateDownloadStatus.Step.Received -> {
+                    val verified = runCatching {
+                        withContext(Dispatchers.IO) {
+                            AppUpdateFiles.verifyInto(
+                                source = downloads.fileFor(pending.info),
+                                target = AppUpdateInstaller.targetFile(container.appContext, pending.info),
+                                info = pending.info
+                            )
+                        }
+                    }
+                    downloads.remove(pending.downloadId)
+                    finishAppUpdate(
+                        verified.fold(
+                            onSuccess = { file -> AppUpdateState.Ready(pending.info, file.absolutePath) },
+                            onFailure = { error -> AppUpdateState.Failed(error.message ?: "설치 파일을 받지 못했습니다.") }
+                        )
+                    )
+                    return
+                }
+                is AppUpdateDownloadStatus.Step.Stopped -> {
+                    downloads.remove(pending.downloadId)
+                    finishAppUpdate(AppUpdateState.Failed(step.message))
+                    return
+                }
             }
         }
+    }
+
+    private suspend fun finishAppUpdate(state: AppUpdateState) {
+        container.settingsStore.setAppUpdatePending(null)
+        _appUpdateState.value = state
     }
 
     /** 실패했거나 다 끝난 뒤 처음으로 되돌립니다. */

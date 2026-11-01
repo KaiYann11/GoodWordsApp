@@ -96,13 +96,20 @@ fun AppUpdateCard(
                 }
 
                 is AppUpdateState.Downloading -> {
+                    val percent = (state.ratio * 100).toInt()
                     Text(
-                        text = "내려받는 중… ${(state.ratio * 100).toInt()}%",
+                        text = if (state.waitingForNetwork) "연결을 기다리는 중… $percent%" else "내려받는 중… $percent%",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     LinearProgressIndicator(
                         progress = { state.ratio },
                         modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        // 받기는 안드로이드가 합니다. 기다리는 동안 다른 앱을 써도 된다는 것을 알려 둡니다.
+                        text = "다른 앱으로 가도 계속 받고, 알림에서도 볼 수 있습니다. 끊기면 받은 데부터 이어 받습니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 

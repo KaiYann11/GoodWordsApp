@@ -170,6 +170,10 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - **목록 화면에서 다른 경로로 넘어갈 때 대화상자를 먼저 닫습니다** — 열린 채로 넘어가면 그 경로의 상태와 함께 저장되어,
   돌아왔을 때 창이 다시 뜨고 앞서 친 글이 다음 창에 남습니다(`GoalTabsScreen`).
 - 앱 업데이트는 서버가 준 파일 이름을 그대로 믿지 않고, 해시가 다르면 지우고, 접속 키를 보내지 않습니다(`AppUpdateJson`).
+  **받기는 DownloadManager에 맡깁니다**(`AppUpdateDownloads` — 화면 쪽 코루틴으로 받으면 다른 앱으로 간 사이 Android 15가
+  통신을 끊습니다). 다 받으면 앱 안쪽 캐시로 옮겨 담으며 맞춰 본 것만 설치합니다(`AppUpdateFiles.verifyInto`). 시스템의
+  "다 받음" 알림은 켜지 마세요 — 누르면 해시를 보기 전에 설치 화면이 열립니다. 끊긴 데서 이어 받는 것은 서버 정적 파일의
+  ETag·Range에 기댑니다(`sendFile`).
 - **자판이 올라와도 창은 줄지 않습니다**(가장자리까지 그리는 창 — Android 15 에뮬레이터에서 확인, `adjustResize`는 자판 높이만
   알려 줍니다). 맨 아래에 붙은 입력 칸은 `consumeWindowInsets(innerPadding).imePadding()`으로 비킵니다(대화 화면) —
   `consumeWindowInsets` 없이 붙이면 아래 시스템 막대 몫이 겹쳐 입력 칸과 자판 사이에 빈 줄이 생깁니다. 긴 글 화면의 버튼은 글 위에 둡니다.

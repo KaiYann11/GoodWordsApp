@@ -90,6 +90,16 @@ class AppUpdateCardTest {
         // 다시 누를 수 있으면 같은 파일을 두 번 받습니다.
         compose.onNodeWithTag(appUpdateDownloadTag).assertDoesNotExist()
         compose.onNodeWithTag(appUpdateCheckTag).assertDoesNotExist()
+        // 받기는 안드로이드가 합니다. 기다리는 동안 다른 앱을 써도 된다는 것을 알려 둡니다.
+        compose.onNodeWithText("다른 앱으로 가도 계속 받고", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun aLostConnectionIsShownAsWaitingNotAsFailure() {
+        // 연결이 끊기면 안드로이드가 기다렸다가 받은 데부터 이어 받습니다. 실패라고 말하면 처음부터 다시 누릅니다.
+        card(AppUpdateState.Downloading(info, 12_505_447, waitingForNetwork = true))
+
+        compose.onNodeWithText("연결을 기다리는 중… 50%").assertIsDisplayed()
+        compose.onNodeWithTag(appUpdateCheckTag).assertDoesNotExist()
     }
 
     @Test fun installHandsOverTheFileThatWasVerified() {
