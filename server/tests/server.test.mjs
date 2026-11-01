@@ -1601,6 +1601,94 @@ describe("라우팅", () => {
   });
 });
 
+describe("설치 파일 내주기", () => {
+  // 앱은 설치 파일을 안드로이드 DownloadManager로 받습니다. 끊긴 데서 이어 받으려면 크기·ETag·Range가 있어야 합니다.
+  // 이 PC에 게시해 둔 설치 파일을 건드리지 않도록 화면 자리를 따로 만들어 서버를 하나 더 띄웁니다.
+  let updateServer;
+  const apk = Buffer.from(Array.from({ length: 70_000 }, (_, index) => (index * 31 + 7) % 256));
+  const fileName = "app-good-words-9.9.9-999-abcdef12.apk";
+
+  before(async () => {
+    const webRoot = join(workDir, "web-root");
+    await mkdir(join(webRoot, "update"), { recursive: true });
+    await writeFile(join(webRoot, "index.html"), "<!doctype html><title>화면</title>", "utf8");
+    await writeFile(join(webRoot, "update", fileName), apk);
+    updateServer = await startServer({ APP_GOOD_WORDS_WEB_ROOT: webRoot });
+  });
+
+  after(() => {
+    if (updateServer) updateServer.stop();
+  });
+
+  const get = (path, headers = {}) => fetch(`${updateServer.url}${path}`, { headers });
+
+  it("통째로 줄 때 크기와 ETag와 이어 받기를 알린다", async () => {
+    const response = await get(`/update/${fileName}`);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "application/vnd.android.package-archive");
+    assert.equal(response.headers.get("content-length"), String(apk.length));
+    assert.equal(response.headers.get("accept-ranges"), "bytes");
+    assert.match(response.headers.get("etag"), /^"[0-9a-f]+-[0-9a-f]+"$/);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), apk);
+  });
+
+  it("받은 데부터 이어 받으면 나머지만 206으로 준다", async () => {
+    const etag = (await get(`/update/${fileName}`)).headers.get("etag");
+
+    const response = await get(`/update/${fileName}`, { Range: "bytes=50000-", "If-Match": etag });
+
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get("content-range"), `bytes 50000-${apk.length - 1}/${apk.length}`);
+    assert.equal(response.headers.get("content-length"), String(apk.length - 50_000));
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), apk.subarray(50_000));
+  });
+
+  it("끝을 정한 조각과 끝에서 센 조각도 준다", async () => {
+    const middle = await get(`/update/${fileName}`, { Range: "bytes=10-19" });
+    assert.equal(middle.status, 206);
+    assert.deepEqual(Buffer.from(await middle.arrayBuffer()), apk.subarray(10, 20));
+
+    const tail = await get(`/update/${fileName}`, { Range: "bytes=-5" });
+    assert.equal(tail.status, 206);
+    assert.deepEqual(Buffer.from(await tail.arrayBuffer()), apk.subarray(apk.length - 5));
+  });
+
+  it("그사이 파일이 바뀌었으면 412로 이어 받기를 막는다", async () => {
+    // 앞부분과 뒷부분이 다른 파일에서 오면 해시가 맞을 리 없고, 앱은 처음부터 다시 받습니다.
+    const response = await get(`/update/${fileName}`, { Range: "bytes=100-", "If-Match": '"0-0"' });
+
+    assert.equal(response.status, 412);
+  });
+
+  it("If-Range가 지금 파일이 아니면 조각이 아니라 통째로 준다", async () => {
+    const response = await get(`/update/${fileName}`, { Range: "bytes=100-", "If-Range": '"0-0"' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-length"), String(apk.length));
+    await response.arrayBuffer();
+  });
+
+  it("파일 끝을 넘는 조각은 416이다", async () => {
+    const response = await get(`/update/${fileName}`, { Range: `bytes=${apk.length}-` });
+
+    assert.equal(response.status, 416);
+    assert.equal(response.headers.get("content-range"), `bytes */${apk.length}`);
+  });
+
+  it("없는 설치 파일은 화면 대신 404다", async () => {
+    // 화면 주소처럼 index.html을 주면 앱이 그것을 설치 파일로 받아 "해시가 다르다"는 엉뚱한 말을 합니다.
+    const missing = await get("/update/app-good-words-0.0.0-1-00000000.apk");
+    assert.equal(missing.status, 404);
+    await missing.arrayBuffer();
+
+    // 화면의 다른 주소는 지금처럼 index.html로 갑니다.
+    const page = await get("/goals");
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /<title>화면<\/title>/);
+  });
+});
+
 describe("일기와 할 일 병합", () => {
   async function resetServer() {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
