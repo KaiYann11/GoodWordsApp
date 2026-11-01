@@ -4,18 +4,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import com.codex.appgoodwords.data.RoutineCategories
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineMergeChoice
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.RoutineStatsReport
 import java.time.LocalDate
@@ -196,6 +201,110 @@ class RoutineScreenTest {
 
         assertEquals(1L, opened?.id)
     }
+
+    @Test
+    fun mergingStartsFromTheEditorAndHandsOverTheChosenNameAndMemo() {
+        // 합치기는 고치던 루틴의 창에서 시작하고, 그 루틴이 남습니다(사용자가 정함, 2026-11-02).
+        val merged = mutableListOf<List<String>>()
+        val withNotes = listOf(
+            routine(id = 1, title = "기상 후 물 한 컵", orderIndex = 0).copy(note = "일어나자마자"),
+            routine(id = 2, title = "물 마시기", orderIndex = 1).copy(note = "물병을 책상에"),
+            routine(id = 3, title = "책 한 쪽", orderIndex = 2)
+        )
+        showMerge(withNotes, checkCounts(withNotes, 1L to 12, 2L to 30)) { keep, gone, title, note ->
+            merged += listOf("${keep.id}", "${gone.id}", title, note)
+        }
+
+        compose.onAllNodesWithContentDescription("루틴 수정")[0].performClick()
+        compose.onNodeWithTag(routineMergeStartTag).performClick()
+        // 고치던 루틴은 고를 수 없습니다. 쌓인 체크 수를 보고 고릅니다.
+        compose.onNodeWithTag(routineMergeCandidateTag(1)).assertDoesNotExist()
+        compose.onNodeWithText("체크 30회").assertIsDisplayed()
+        compose.onNodeWithTag(routineMergeCandidateTag(2)).performClick()
+
+        // 이름은 고치던 것, 메모는 둘 다로 시작합니다. 이력은 모두 모읍니다.
+        compose.onNodeWithTag(routineMergeTitleTag).assertTextContains("기상 후 물 한 컵")
+        compose.onNodeWithTag(routineMergeChoiceTag("title", RoutineMergeChoice.THIS)).assertIsSelected()
+        compose.onNodeWithTag(routineMergeChoiceTag("note", RoutineMergeChoice.BOTH)).assertIsSelected()
+        compose.onNodeWithText("체크 42회(12+30)", substring = true).assertIsDisplayed()
+
+        compose.onNodeWithTag(routineMergeChoiceTag("title", RoutineMergeChoice.BOTH)).performClick()
+        compose.onNodeWithTag(routineMergeConfirmTag).performClick()
+
+        assertEquals(listOf(listOf("1", "2", "기상 후 물 한 컵 · 물 마시기", "일어나자마자\n\n물병을 책상에")), merged)
+    }
+
+    @Test
+    fun aChosenNameCanBeEditedBeforeMerging() {
+        val merged = mutableListOf<String>()
+        showMerge(routines, emptyMap()) { _, _, title, _ -> merged += title }
+
+        compose.onAllNodesWithContentDescription("루틴 수정")[1].performClick()
+        compose.onNodeWithTag(routineMergeStartTag).performClick()
+        compose.onNodeWithTag(routineMergeCandidateTag(3)).performClick()
+        compose.onNodeWithTag(routineMergeChoiceTag("title", RoutineMergeChoice.THAT)).performClick()
+        compose.onNodeWithTag(routineMergeTitleTag).assertTextContains("책 한 쪽")
+
+        // 고른 글을 손으로 고치면 어느 알약도 아닙니다. 고친 글 그대로 합칩니다.
+        compose.onNodeWithTag(routineMergeTitleTag).performTextReplacement("아침 스트레칭과 책")
+        compose.onNodeWithTag(routineMergeChoiceTag("title", RoutineMergeChoice.THAT)).assertIsNotSelected()
+        compose.onNodeWithTag(routineMergeConfirmTag).performClick()
+
+        assertEquals(listOf("아침 스트레칭과 책"), merged)
+    }
+
+    @Test
+    fun aNewRoutineOrTheOnlyRoutineHasNothingToMergeWith() {
+        showMerge(listOf(routine(id = 1, title = "하나뿐인 루틴", orderIndex = 0)), emptyMap()) { _, _, _, _ -> }
+        compose.onNodeWithContentDescription("루틴 수정").performClick()
+        compose.onNodeWithTag(routineMergeStartTag).assertDoesNotExist()
+        compose.onNodeWithText("취소").performClick()
+
+        compose.onNodeWithText("루틴 추가").performClick()
+        compose.onNodeWithTag(routineMergeStartTag).assertDoesNotExist()
+    }
+
+    private fun showMerge(
+        routines: List<RoutineEntity>,
+        stats: Map<Long, RoutineStatsReport>,
+        onMerge: (RoutineEntity, RoutineEntity, String, String) -> Unit
+    ) {
+        compose.setContent {
+            RoutineScreen(
+                routines = routines,
+                todayCounts = emptyMap(),
+                stats = stats,
+                memos = emptyList(),
+                onSaveRoutine = {},
+                onDeleteRoutine = {},
+                onSaveMemo = { _, _ -> },
+                onDeleteMemo = {},
+                onCheckRoutine = {},
+                onMoveRoutine = { _, _ -> },
+                onMoveRoutineTo = { _, _ -> },
+                onMergeRoutines = onMerge
+            )
+        }
+    }
+
+    /** 루틴마다 지난 며칠에 하나씩 체크한 기록. */
+    private fun checkCounts(routines: List<RoutineEntity>, vararg counts: Pair<Long, Int>): Map<Long, RoutineStatsReport> =
+        RoutineStatsCalculator.buildAll(
+            routines = routines,
+            checks = counts.flatMap { (id, count) ->
+                (1..count).map { n ->
+                    RoutineCheckEntity(
+                        syncId = "check-$id-$n",
+                        routineId = id,
+                        routineSyncId = "routine-$id",
+                        routineTitle = "루틴 $id",
+                        checkedAt = today.minusDays(n.toLong()).atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+                    )
+                }
+            },
+            today = today,
+            zoneId = zone
+        )
 
     private fun statsFor(vararg dates: String): Map<Long, RoutineStatsReport> =
         RoutineStatsCalculator.buildAll(

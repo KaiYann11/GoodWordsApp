@@ -53,6 +53,7 @@ import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
 import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.RoutineMergeResult
 import com.codex.appgoodwords.data.StatsCalculator
 import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.SyncBackupKind
@@ -1133,6 +1134,19 @@ class MainViewModel(
 
     suspend fun deleteRoutine(routineId: Long): Result<Unit> = runCatching {
         container.repository.deleteRoutine(routineId)
+    }
+
+    /**
+     * [mergeId] 루틴을 [keepId] 루틴에 합칩니다. 이름과 메모는 합치기 창에서 고르거나 고친 것입니다.
+     *
+     * 다음 동기화는 한 번 통째로 보냅니다 — 남는 루틴 앞에 옮겨 적은 체크는 시각이 지난날이라 "바뀐 것만" 보내는
+     * 동기화에 잡히지 않습니다([AppRepository.mergeRoutines]).
+     */
+    suspend fun mergeRoutines(keepId: Long, mergeId: Long, title: String, note: String): Result<RoutineMergeResult> = runCatching {
+        require(title.isNotBlank()) { "루틴 이름을 입력해 주세요." }
+        container.repository.mergeRoutines(keepId, mergeId, title, note).also {
+            container.settingsStore.requestFullPush()
+        }
     }
 
     /** 루틴을 한 칸 위/아래로 옮깁니다. 이미 끝이라 옮기지 못했으면 false. */

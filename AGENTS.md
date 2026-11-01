@@ -140,6 +140,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 첨부 주소 형식 | 앱 `AttachmentUris.SCHEME` · 서버·웹 `attachmentScheme` |
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
+| 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |
 | 같은 내용 합치기(기분 `moodLogFingerprint` 포함) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
