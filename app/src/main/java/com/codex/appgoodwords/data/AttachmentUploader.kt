@@ -1,5 +1,7 @@
 package com.codex.appgoodwords.data
 
+import android.util.Log
+
 /**
  * 동기화 직전에 기기 안 첨부를 서버로 올리고 주소를 서버 것으로 바꿉니다.
  *
@@ -13,20 +15,30 @@ class AttachmentUploader(
     private val client: AttachmentClient,
     private val database: AppDatabase
 ) {
-    data class Result(val uploaded: Int, val failed: Int)
+    /** [firstError]는 처음 실패한 까닭입니다. 같은 까닭으로 여러 장이 실패하기 쉬워 하나만 들고 있습니다. */
+    data class Result(val uploaded: Int, val failed: Int, val firstError: String? = null)
 
     suspend fun uploadPending(settings: ServerSyncSettings): Result {
         if (settings.serverUrl.isBlank()) return Result(uploaded = 0, failed = 0)
 
         var uploaded = 0
         var failed = 0
+        var firstError: String? = null
         val cache = mutableMapOf<String, String>()
 
         suspend fun convert(uris: List<String>): List<String> = uris.map { uri ->
             if (!AttachmentUris.isLocal(uri)) return@map uri
             // 같은 파일이 여러 기록에 붙어 있으면 한 번만 올립니다.
             cache[uri]?.let { return@map it }
-            val serverUri = runCatching { client.upload(settings, uri) }.getOrNull()
+            val serverUri = runCatching { client.upload(settings, uri) }
+                .onFailure { error ->
+                    // 까닭을 버리면 휴대폰에서는 보이는 사진이 왜 서버에 못 가는지 알 길이 없습니다. 설정의 동기화 줄에도
+                    // 처음 까닭을 보여 줍니다([SyncStatus.attachmentNote]).
+                    val reason = "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                    if (firstError == null) firstError = reason
+                    Log.w(TAG, "첨부를 올리지 못했습니다 — $reason")
+                }
+                .getOrNull()
             if (serverUri == null) {
                 failed += 1
                 uri
@@ -67,6 +79,10 @@ class AttachmentUploader(
             )
         }
 
-        return Result(uploaded = uploaded, failed = failed)
+        return Result(uploaded = uploaded, failed = failed, firstError = firstError)
+    }
+
+    private companion object {
+        const val TAG = "AttachmentUploader"
     }
 }

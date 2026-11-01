@@ -503,6 +503,72 @@ class AppRepository(
         memos.forEach { recordDeletion(it.syncId, SyncEntityType.ROUTINE_MEMO) }
     }
 
+    /**
+     * 두 루틴을 하나로 합칩니다(사용자가 정함, 2026-11-02).
+     *
+     * [keepId]가 남습니다 — 차례·갈래·알림·글귀 출처는 그대로이고, 이름과 메모만 사용자가 고르거나 고친 [title]·[note]로
+     * 바뀝니다. [mergeId]는 사라집니다. **이력은 모두 모읍니다** — 같은 날 둘 다 체크했으면 그날 두 번입니다(사용자가 정함).
+     *
+     * 체크는 한 번 적으면 바뀌지 않는 기록입니다(updatedAt이 없고, 서버도 같은 식별자는 다시 받지 않습니다). 그래서 남는
+     * 루틴을 가리키게 고치지 않고, **같은 시각으로 남는 루틴 앞에 새로 적은 뒤 옛 체크는 지우고 표식을 남깁니다.** 고쳐 쓰면
+     * 이 기기에서만 합쳐지고 다른 기기와 서버에는 옛 루틴의 체크가 그대로 남습니다. 메모는 고칠 수 있는 기록이라 남는 루틴을
+     * 가리키게 고치고, 목표에 이어 둔 루틴도 옮깁니다.
+     *
+     * 새로 적은 체크는 시각이 지난날이라 "바뀐 것만" 보내는 동기화에 잡히지 않습니다. 부르는 쪽이 다음 동기화를 한 번
+     * 통째로 보내게 합니다([SettingsStore.requestFullPush]).
+     */
+    suspend fun mergeRoutines(keepId: Long, mergeId: Long, title: String, note: String): RoutineMergeResult =
+        database.withTransaction {
+            require(keepId != mergeId) { "같은 루틴끼리는 합칠 수 없습니다." }
+            val keep = routineDao.getById(keepId) ?: error("남길 루틴을 찾을 수 없습니다.")
+            val gone = routineDao.getById(mergeId) ?: error("합칠 루틴을 찾을 수 없습니다.")
+            val name = title.trim()
+            require(name.isNotBlank()) { "루틴 이름을 입력해 주세요." }
+            val now = System.currentTimeMillis()
+
+            val kept = keep.copy(title = name, note = note.trim(), updatedAt = maxOf(now, keep.updatedAt + 1))
+            routineDao.insert(kept)
+
+            // 그날 무엇을 했는지는 그때의 이름으로 남깁니다(체크마다 이름을 함께 적어 두는 까닭과 같습니다).
+            val oldChecks = routineCheckDao.getByRoutineId(gone.id)
+            routineCheckDao.insertAll(
+                oldChecks.map { check ->
+                    RoutineCheckEntity(
+                        routineId = kept.id,
+                        routineSyncId = kept.syncId,
+                        routineTitle = check.routineTitle,
+                        checkedAt = check.checkedAt
+                    )
+                }
+            )
+            routineCheckDao.deleteBySyncIds(oldChecks.map { it.syncId })
+            oldChecks.forEach { recordDeletion(it.syncId, SyncEntityType.ROUTINE_CHECK) }
+
+            val memos = routineMemoDao.getByRoutineId(gone.id)
+            memos.forEach { memo ->
+                routineMemoDao.insert(
+                    memo.copy(
+                        routineId = kept.id,
+                        routineSyncId = kept.syncId,
+                        routineTitle = kept.title,
+                        updatedAt = maxOf(now, memo.updatedAt + 1)
+                    )
+                )
+            }
+
+            // 사라지는 루틴을 이어 둔 목표는 남는 루틴을 가리키게 합니다. 둘 다 이어 두었으면 한 번만 남깁니다.
+            contentItemDao.getAll()
+                .filter { gone.syncId in it.linkedRoutineSyncIds }
+                .forEach { item ->
+                    val linked = item.linkedRoutineSyncIds.map { if (it == gone.syncId) kept.syncId else it }.distinct()
+                    contentItemDao.insert(item.copy(linkedRoutineSyncIds = linked, updatedAt = maxOf(now, item.updatedAt + 1)))
+                }
+
+            routineDao.deleteById(gone.id)
+            recordDeletion(gone.syncId, SyncEntityType.ROUTINE)
+            RoutineMergeResult(routine = kept, movedChecks = oldChecks.size, movedMemos = memos.size)
+        }
+
     suspend fun getRandomReminderRoutine(): RoutineEntity? {
         return routineDao.getRandomReminderRoutine()
     }

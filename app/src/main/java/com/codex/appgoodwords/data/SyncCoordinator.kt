@@ -51,7 +51,9 @@ class SyncCoordinator(
             val syncSettings = settingsStore.getServerSyncSettings()
             // 첨부를 먼저 올립니다. 스냅샷에 기기 주소가 그대로 담기면
             // 다른 기기와 웹에서는 그 사진을 열 방법이 없습니다.
-            attachmentUploader.uploadPending(syncSettings)
+            val uploads = attachmentUploader.uploadPending(syncSettings)
+            // 올리지 못한 것은 동기화를 막지 않지만, 설정에서 볼 수 있게 수와 까닭을 남깁니다.
+            settingsStore.recordAttachmentNote(attachmentNote(uploads))
 
             val cursor = settingsStore.getSyncCursor()
             val startedAt = System.currentTimeMillis()
@@ -100,6 +102,9 @@ class SyncCoordinator(
      * 양쪽이 같은 기간을 쓰지 않으면 한쪽이 지운 표식을 다른 쪽이 되돌려 주므로,
      * 서버도 같은 [DELETION_RETENTION_DAYS]를 씁니다.
      */
+    private fun attachmentNote(uploads: AttachmentUploader.Result): String =
+        if (uploads.failed == 0) "" else "첨부 ${uploads.failed}개는 서버에 못 올림(${uploads.firstError.orEmpty().take(160)})"
+
     private suspend fun pruneOldDeletions() {
         val before = System.currentTimeMillis() - DELETION_RETENTION_DAYS * MILLIS_PER_DAY
         database.deletionDao().deleteOlderThan(before)

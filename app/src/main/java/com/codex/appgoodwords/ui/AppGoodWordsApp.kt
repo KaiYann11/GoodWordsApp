@@ -1262,6 +1262,18 @@ fun AppGoodWordsApp(
                                             snackbarHostState.showSnackbar(message)
                                         }
                                     },
+                                    onMergeRoutines = { keep, merge, title, note ->
+                                        coroutineScope.launch {
+                                            val result = viewModel.mergeRoutines(keep.id, merge.id, title, note)
+                                            val message = result.fold(
+                                                onSuccess = { merged ->
+                                                    "루틴을 합쳤습니다 — '${merged.routine.title}', 체크 ${merged.movedChecks}회·메모 ${merged.movedMemos}개를 옮겼습니다."
+                                                },
+                                                onFailure = { error -> error.message ?: "루틴을 합치지 못했습니다." }
+                                            )
+                                            snackbarHostState.showSnackbar(message)
+                                        }
+                                    },
                                     onSaveMemo = { routine, body ->
                                         coroutineScope.launch {
                                             val result = viewModel.saveRoutineMemo(routine.id, body)

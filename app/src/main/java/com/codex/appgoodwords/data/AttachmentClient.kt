@@ -20,22 +20,23 @@ class AttachmentClient(private val context: Context) {
     /**
      * 기기 파일을 올리고 서버 주소를 돌려줍니다.
      *
-     * 열 수 없는 파일(사용자가 지웠거나 권한이 끊긴 경우)은 null입니다.
-     * 사진 한 장 때문에 동기화 전체가 멈추면 안 되므로, 부르는 쪽에서 건너뛰게 합니다.
+     * 올리지 못하면 **까닭을 담아 실패합니다**(열 수 없음·형식 모름·서버가 거절함 등). 예전에는 null만 돌려줘, 휴대폰에서는
+     * 보이는 사진이 왜 서버에 못 가는지 알 길이 없었습니다(2026-11 일기 사진 34장). 사진 한 장 때문에 동기화 전체가
+     * 멈추면 안 되므로, 부르는 쪽([AttachmentUploader])이 건너뛰고 까닭을 남깁니다.
      */
-    suspend fun upload(settings: ServerSyncSettings, uri: String): String? = withContext(Dispatchers.IO) {
-        if (!AttachmentUris.isLocal(uri)) return@withContext null
-        val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return@withContext null
+    suspend fun upload(settings: ServerSyncSettings, uri: String): String = withContext(Dispatchers.IO) {
+        require(AttachmentUris.isLocal(uri)) { "기기 안 파일 주소가 아닙니다." }
+        val parsed = Uri.parse(uri)
         val mime = mimeOf(parsed)
-        if (mime.isBlank()) return@withContext null
+        require(mime.isNotBlank()) { "파일 형식을 알 수 없습니다." }
 
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(parsed)?.use { it.readBytes() }
-        }.getOrNull() ?: return@withContext null
-        if (bytes.isEmpty()) return@withContext null
+        val bytes = context.contentResolver.openInputStream(parsed)?.use { it.readBytes() }
+            ?: error("파일을 열 수 없습니다.")
+        require(bytes.isNotEmpty()) { "빈 파일입니다." }
 
         val response = post(settings, bytes, mime)
         JSONObject(response).optString("uri").takeIf { AttachmentUris.isServerAttachment(it) }
+            ?: error("서버가 첨부 주소를 주지 않았습니다($mime, ${bytes.size}바이트).")
     }
 
     /**

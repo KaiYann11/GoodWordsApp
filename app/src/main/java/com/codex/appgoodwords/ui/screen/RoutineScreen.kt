@@ -3,6 +3,8 @@ package com.codex.appgoodwords.ui.screen
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,6 +69,8 @@ import com.codex.appgoodwords.data.RoutineCategories
 import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineMergeChoice
+import com.codex.appgoodwords.data.RoutineMergeText
 import com.codex.appgoodwords.data.RoutineMemoEntity
 import com.codex.appgoodwords.data.RoutineOrder
 import com.codex.appgoodwords.data.RoutineStatsCalculator
@@ -96,6 +100,21 @@ internal fun routineCategorySuggestionTag(category: String): String = "routine_c
 
 /** 쌓인 기록으로 들어가는 줄. 카드마다 하나씩 있어 글자만으로는 짚기 어렵습니다. */
 internal fun routineStatsOpenTag(routineId: Long): String = "routine_stats_open_$routineId"
+
+/** 고치기 창의 "다른 루틴과 합치기". */
+internal const val routineMergeStartTag = "routine_merge_start"
+
+/** 합칠 루틴 고르기 창의 한 줄. */
+internal fun routineMergeCandidateTag(routineId: Long): String = "routine_merge_candidate_$routineId"
+
+/** 합치기 창의 이름·메모 칸. */
+internal const val routineMergeTitleTag = "routine_merge_title"
+internal const val routineMergeNoteTag = "routine_merge_note"
+internal const val routineMergeConfirmTag = "routine_merge_confirm"
+
+/** 합치기 창의 고르기 알약. [field]는 "title"이나 "note"입니다. */
+internal fun routineMergeChoiceTag(field: String, choice: RoutineMergeChoice): String =
+    "routine_merge_${field}_${choice.name.lowercase()}"
 
 /**
  * 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다.
@@ -159,9 +178,17 @@ fun RoutineScreen(
     /** 그 루틴의 요일별·연속 기록을 펼칩니다. */
     onOpenStats: (RoutineEntity) -> Unit = {},
     /** 검색에서 고른 루틴. 그 자리로 굴려 주고 잠깐 강조합니다. */
-    focusId: Long? = null
+    focusId: Long? = null,
+    /** [merge]를 [keep]에 합칩니다. 이름과 메모는 합치기 창에서 고르거나 고친 것입니다. */
+    onMergeRoutines: (keep: RoutineEntity, merge: RoutineEntity, title: String, note: String) -> Unit = { _, _, _, _ -> }
 ) {
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
+    // 합치기(사용자가 정함, 2026-11-02): 고치던 루틴이 남습니다. 고치기 창에서 고치던 이름·메모를 이어받아, 합치기 창의
+    // "이것"으로 씁니다 — 고치다가 합치기를 눌러도 고친 글을 잃지 않습니다.
+    var mergeKeepId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var mergeKeepTitle by rememberSaveable { mutableStateOf("") }
+    var mergeKeepNote by rememberSaveable { mutableStateOf("") }
+    var mergePartnerId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDeleteRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var memoRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     var movingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -169,6 +196,8 @@ fun RoutineScreen(
     val deletingRoutine = routines.firstOrNull { it.id == showDeleteRoutineId }
     val memoRoutine = routines.firstOrNull { it.id == memoRoutineId }
     val movingRoutine = routines.firstOrNull { it.id == movingRoutineId }
+    val mergeKeep = routines.firstOrNull { it.id == mergeKeepId }
+    val mergePartner = routines.firstOrNull { it.id == mergePartnerId && it.id != mergeKeepId }
     val memosByRoutine = memos.groupBy { it.routineId }
     // 하루를 밟는 차례입니다. 수행한 것을 아래로 내리지 않습니다. 자리가 움직이면 어디까지 했는지
     // 눈으로 짚기 어렵고, 사용자가 정한 순서라는 약속도 깨집니다.
@@ -216,6 +245,47 @@ fun RoutineScreen(
             onSave = { draft ->
                 onSaveRoutine(draft)
                 editingRoutineId = null
+            },
+            // 있던 루틴을 고칠 때만, 합칠 다른 루틴이 있을 때만 둡니다.
+            onMerge = editingRoutine?.takeIf { routines.size > 1 }?.let { routine ->
+                { title, note ->
+                    mergeKeepId = routine.id
+                    mergeKeepTitle = title
+                    mergeKeepNote = note
+                    mergePartnerId = null
+                    editingRoutineId = null
+                }
+            }
+        )
+    }
+
+    if (mergeKeep != null && mergePartner == null) {
+        RoutineMergePickerDialog(
+            keepTitle = mergeKeepTitle.ifBlank { mergeKeep.title },
+            candidates = sortedRoutines.filter { it.id != mergeKeep.id },
+            stats = stats,
+            onPick = { mergePartnerId = it.id },
+            onDismiss = { mergeKeepId = null }
+        )
+    }
+
+    if (mergeKeep != null && mergePartner != null) {
+        RoutineMergeDialog(
+            keepTitle = mergeKeepTitle.ifBlank { mergeKeep.title },
+            keepNote = mergeKeepNote,
+            partner = mergePartner,
+            keepChecks = stats[mergeKeep.id]?.totalChecks ?: 0,
+            partnerChecks = stats[mergePartner.id]?.totalChecks ?: 0,
+            keepMemos = memosByRoutine[mergeKeep.id]?.size ?: 0,
+            partnerMemos = memosByRoutine[mergePartner.id]?.size ?: 0,
+            onDismiss = {
+                mergeKeepId = null
+                mergePartnerId = null
+            },
+            onMerge = { title, note ->
+                onMergeRoutines(mergeKeep, mergePartner, title, note)
+                mergeKeepId = null
+                mergePartnerId = null
             }
         )
     }
@@ -1250,7 +1320,9 @@ private fun RoutineEditorDialog(
     initialDraft: RoutineDraft,
     knownCategories: List<String>,
     onDismiss: () -> Unit,
-    onSave: (RoutineDraft) -> Unit
+    onSave: (RoutineDraft) -> Unit,
+    /** 고치던 이름·메모를 들고 합치기로 넘어갑니다. null이면 단추를 두지 않습니다. */
+    onMerge: ((title: String, note: String) -> Unit)? = null
 ) {
     var title by rememberSaveable(initialDraft.id) { mutableStateOf(initialDraft.title) }
     var note by rememberSaveable(initialDraft.id) { mutableStateOf(initialDraft.note) }
@@ -1311,6 +1383,15 @@ private fun RoutineEditorDialog(
                         onCheckedChange = { reminderEnabled = it }
                     )
                 }
+                if (onMerge != null) {
+                    // 비슷한 루틴이 둘로 갈라져 기록도 둘로 나뉜 때 씁니다. 이 루틴이 남습니다.
+                    TextButton(
+                        onClick = { onMerge(title, note) },
+                        modifier = Modifier.testTag(routineMergeStartTag)
+                    ) {
+                        Text("다른 루틴과 합치기")
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1336,6 +1417,197 @@ private fun RoutineEditorDialog(
             }
         }
     )
+}
+
+/**
+ * 합칠 루틴을 고릅니다. 고친 루틴(남는 쪽)은 빠져 있습니다.
+ *
+ * 서른 개 넘는 루틴에서 찾으려면 갈래로 거를 수 있어야 합니다(루틴 탭의 갈래 알약과 같은 규칙). 줄마다 쌓인 체크 수를
+ * 함께 보여, 어느 쪽 기록이 많은지 보고 고르게 합니다.
+ */
+@Composable
+private fun RoutineMergePickerDialog(
+    keepTitle: String,
+    candidates: List<RoutineEntity>,
+    stats: Map<Long, RoutineStatsReport>,
+    onPick: (RoutineEntity) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var category by rememberSaveable { mutableStateOf<String?>(null) }
+    val categories = RoutineCategories.ordered(candidates)
+    val shown = candidates.filter { RoutineCategories.matches(it, category) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("어느 루틴을 합칠까요?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "고른 루틴의 체크와 메모를 '$keepTitle'에 모읍니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (categories.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            FilterChip(selected = category == null, onClick = { category = null }, label = { Text("전체") })
+                        }
+                        items(categories) { name ->
+                            FilterChip(
+                                selected = category == name,
+                                onClick = { category = name },
+                                label = { Text(RoutineCategories.label(name)) }
+                            )
+                        }
+                    }
+                }
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(shown, key = { it.id }) { routine ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(role = Role.Button) { onPick(routine) }
+                                .testTag(routineMergeCandidateTag(routine.id))
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = routine.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "체크 ${stats[routine.id]?.totalChecks ?: 0}회",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
+}
+
+/**
+ * 두 루틴을 합치는 창(사용자가 정함, 2026-11-02).
+ *
+ * 이름과 메모는 칸마다 이것(고치던 루틴)·그것(고른 루틴)·둘 다 중에 고르고, 고른 글을 그대로 고칠 수 있습니다. 손으로
+ * 고치면 알약은 꺼집니다 — 어느 것도 아닌 글이기 때문입니다. 이름은 고치던 루틴의 것, 메모는 둘 다로 시작합니다(메모는
+ * 이어 붙여도 잃는 것이 없습니다). 체크와 메모 이력은 모두 남는 루틴으로 모입니다.
+ */
+@Composable
+private fun RoutineMergeDialog(
+    keepTitle: String,
+    keepNote: String,
+    partner: RoutineEntity,
+    keepChecks: Int,
+    partnerChecks: Int,
+    keepMemos: Int,
+    partnerMemos: Int,
+    onDismiss: () -> Unit,
+    onMerge: (title: String, note: String) -> Unit
+) {
+    fun titleOf(choice: RoutineMergeChoice) = RoutineMergeText.title(choice, keepTitle, partner.title)
+    fun noteOf(choice: RoutineMergeChoice) = RoutineMergeText.note(choice, keepNote, partner.note)
+
+    var titleChoice by rememberSaveable(partner.id) { mutableStateOf<RoutineMergeChoice?>(RoutineMergeChoice.THIS) }
+    var title by rememberSaveable(partner.id) { mutableStateOf(titleOf(RoutineMergeChoice.THIS)) }
+    var noteChoice by rememberSaveable(partner.id) { mutableStateOf<RoutineMergeChoice?>(RoutineMergeChoice.BOTH) }
+    var note by rememberSaveable(partner.id) { mutableStateOf(noteOf(RoutineMergeChoice.BOTH)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("루틴 합치기") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "이것: $keepTitle\n그것: ${partner.title}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text("이름", style = MaterialTheme.typography.labelLarge)
+                MergeChoiceRow(field = "title", selected = titleChoice) { choice ->
+                    titleChoice = choice
+                    title = titleOf(choice)
+                }
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { typed ->
+                        title = typed
+                        titleChoice = RoutineMergeChoice.entries.firstOrNull { titleOf(it) == typed.trim() }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(routineMergeTitleTag),
+                    label = { Text("합친 이름") },
+                    singleLine = true
+                )
+                Text("메모", style = MaterialTheme.typography.labelLarge)
+                MergeChoiceRow(field = "note", selected = noteChoice) { choice ->
+                    noteChoice = choice
+                    note = noteOf(choice)
+                }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { typed ->
+                        note = typed
+                        noteChoice = RoutineMergeChoice.entries.firstOrNull { noteOf(it) == typed.trim() }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(routineMergeNoteTag),
+                    label = { Text("합친 메모") },
+                    minLines = 3
+                )
+                Text(
+                    text = "체크 ${keepChecks + partnerChecks}회(${keepChecks}+${partnerChecks})·메모 ${keepMemos + partnerMemos}개를 " +
+                        "한 루틴에 모읍니다. '${partner.title}' 루틴은 목록에서 사라지고 되돌릴 수 없습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onMerge(title, note) },
+                enabled = title.isNotBlank(),
+                modifier = Modifier.testTag(routineMergeConfirmTag)
+            ) {
+                Text("합치기")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
+}
+
+@Composable
+private fun MergeChoiceRow(field: String, selected: RoutineMergeChoice?, onSelect: (RoutineMergeChoice) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RoutineMergeChoice.entries.forEach { choice ->
+            FilterChip(
+                selected = selected == choice,
+                onClick = { onSelect(choice) },
+                label = {
+                    Text(
+                        when (choice) {
+                            RoutineMergeChoice.THIS -> "이것"
+                            RoutineMergeChoice.THAT -> "그것"
+                            RoutineMergeChoice.BOTH -> "둘 다"
+                        }
+                    )
+                },
+                modifier = Modifier.testTag(routineMergeChoiceTag(field, choice))
+            )
+        }
+    }
 }
 
 private fun formatMemoTime(timestamp: Long): String {
