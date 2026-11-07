@@ -27,12 +27,14 @@ class AttachmentClient(private val context: Context) {
     suspend fun upload(settings: ServerSyncSettings, uri: String): String = withContext(Dispatchers.IO) {
         require(AttachmentUris.isLocal(uri)) { "기기 안 파일 주소가 아닙니다." }
         val parsed = Uri.parse(uri)
-        val mime = mimeOf(parsed)
-        require(mime.isNotBlank()) { "파일 형식을 알 수 없습니다." }
-
-        val bytes = context.contentResolver.openInputStream(parsed)?.use { it.readBytes() }
-            ?: error("파일을 열 수 없습니다.")
+        // 먼저 열어 봅니다. 열 수 없는 파일은 형식도 알 수 없어서, 예전에는 "형식을 알 수 없다"고만 남았습니다
+        // (2026-11, 4월에 붙인 글귀 사진). 무엇을 해야 할지 알 수 있게 둘을 나눠 알립니다.
+        val bytes = runCatching { context.contentResolver.openInputStream(parsed)?.use { it.readBytes() } }
+            .getOrNull()
+            ?: error(UNREADABLE)
         require(bytes.isNotEmpty()) { "빈 파일입니다." }
+        val mime = mimeOf(parsed).ifBlank { AttachmentTypes.sniff(bytes) }
+        require(mime.isNotBlank()) { "파일 형식을 알 수 없습니다." }
 
         val response = post(settings, bytes, mime)
         JSONObject(response).optString("uri").takeIf { AttachmentUris.isServerAttachment(it) }
@@ -43,10 +45,11 @@ class AttachmentClient(private val context: Context) {
      * 파일 형식을 알아냅니다.
      *
      * `getType()`은 `content://`가 아니면 대체로 null이고, content 제공자도 형식을 안 줄 때가 있습니다.
-     * 서버는 형식을 보고 받을지 정하므로, 여기서 비어 있으면 멀쩡한 사진도 못 올립니다.
+     * 서버는 형식을 보고 받을지 정하므로, 여기서 비어 있으면 멀쩡한 사진도 못 올립니다. 둘 다 없으면 파일 앞부분으로
+     * 알아냅니다([AttachmentTypes]).
      */
     private fun mimeOf(uri: Uri): String {
-        context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() }?.let { return it }
+        runCatching { context.contentResolver.getType(uri) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
         val extension = MimeTypeMap.getFileExtensionFromUrl(uri.toString()).lowercase()
         if (extension.isBlank()) return ""
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension).orEmpty()
@@ -88,5 +91,8 @@ class AttachmentClient(private val context: Context) {
 
     private companion object {
         const val ATTACHMENTS_PATH = "/api/attachments"
+
+        /** 지웠거나, 다른 기기·예전 설치에서 붙여 이 기기에는 권한이 없는 파일입니다. 다시 붙이면 올라갑니다. */
+        const val UNREADABLE = "이 기기에서 열 수 없는 파일입니다(지웠거나 다른 기기·예전 설치에서 붙인 파일). 다시 붙여 주세요."
     }
 }
