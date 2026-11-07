@@ -66,6 +66,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- 일일 집계·AI 돌아보기를 정한 시각에 깨우는 알람. 재부팅·업데이트로 사라진 알람과, 정확한 알람 권한을 켰을 때 다시 겁니다. -->
+        <receiver
+            android:name=".work.DailyAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".widget.QuoteWidgetReceiver"
             android:exported="true"
