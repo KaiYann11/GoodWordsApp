@@ -9,10 +9,13 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 옛 앱은 같은 날 기분을 합쳐 지우므로 칸이 같아도 붙지 않게 합니다(사용자가 정함, 2026-10-29).
-const schemaVersion = 24;
+// 걸음 수(stepCounts)와 걷기(walks)가 생겼습니다(사용자가 정함, 2026-11-07). 옛 앱·서버는 둘을 몰라 받아도 버리므로
+// 형식을 올립니다. 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 25;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
+/** 걷기의 지나온 길(polyline)이 이보다 길면 버린다. 몇 시간을 걸어도 수십 KB다. */
+const maxWalkPathLength = 500_000;
 /**
  * 일기 물음의 답을 이어 붙일 때 쓰는 구분자.
  * 답에는 쉼표도 줄바꿈도 들어가므로 글자가 아닌 것을 쓴다.
@@ -95,6 +98,8 @@ const deletionEntityTypes = new Set([
   "GROWTH_REPORT",
   "MOOD_LOG",
   "BOOK_READING_LOG",
+  "STEP_COUNT",
+  "WALK",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
@@ -1296,6 +1301,8 @@ const revisionedCollections = [
   "growthReports",
   "moodLogs",
   "bookReadingLogs",
+  "stepCounts",
+  "walks",
 ];
 
 async function withDb(mutator) {
@@ -1380,6 +1387,8 @@ function emptyDb() {
     growthReports: [],
     moodLogs: [],
     bookReadingLogs: [],
+    stepCounts: [],
+    walks: [],
   };
 }
 
@@ -1404,6 +1413,8 @@ function normalizeDb(db) {
     growthReports: normalizeList(db?.growthReports, normalizeGrowthReport),
     moodLogs: normalizeList(db?.moodLogs, normalizeMoodLog),
     bookReadingLogs: normalizeList(db?.bookReadingLogs, normalizeBookReadingLog),
+    stepCounts: normalizeList(db?.stepCounts, normalizeStepCount),
+    walks: normalizeList(db?.walks, normalizeWalk),
   };
 }
 
@@ -1464,6 +1475,8 @@ function snapshot(db, since = 0, epoch = null) {
     growthReportCount: normalized.growthReports.length,
     moodLogCount: normalized.moodLogs.length,
     bookReadingLogCount: normalized.bookReadingLogs.length,
+    stepCountCount: normalized.stepCounts.length,
+    walkCount: normalized.walks.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -1480,6 +1493,8 @@ function snapshot(db, since = 0, epoch = null) {
     growthReports: only(sortDesc(normalized.growthReports, "createdAt")),
     moodLogs: only(sortDesc(normalized.moodLogs, "createdAt")),
     bookReadingLogs: only(sortDesc(normalized.bookReadingLogs, "createdAt")),
+    stepCounts: only(sortDesc(normalized.stepCounts, "updatedAt")),
+    walks: only(sortDesc(normalized.walks, "startedAt")),
   };
 }
 
@@ -1507,6 +1522,8 @@ function mergeSnapshot(db, payload) {
     growthReports: payload?.growthReports,
     moodLogs: payload?.moodLogs,
     bookReadingLogs: payload?.bookReadingLogs,
+    stepCounts: payload?.stepCounts,
+    walks: payload?.walks,
   });
   const current = normalizeDb(db);
 
@@ -1531,6 +1548,9 @@ function mergeSnapshot(db, payload) {
   db.moodLogs = mergeMutable(current.moodLogs, incoming.moodLogs, deletedAt);
   // 같은 날 같은 책을 두 기기에서 각각 적을 수 있다. 나중에 적은 쪽이 그날 닿은 쪽이다.
   db.bookReadingLogs = mergeMutable(current.bookReadingLogs, incoming.bookReadingLogs, deletedAt);
+  // 같은 기록의 사본이면 나중에 읽은 쪽이다(그날 걸음은 저녁까지 는다). 다른 기기가 읽은 같은 날은 합치기에서 큰 쪽을 남긴다.
+  db.stepCounts = mergeMutable(current.stepCounts, incoming.stepCounts, deletedAt);
+  db.walks = mergeMutable(current.walks, incoming.walks, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -1567,6 +1587,9 @@ function deduplicate(db) {
   const reports = resolveDuplicates(db.growthReports, reportFingerprint);
   const moodLogs = resolveDuplicates(db.moodLogs, moodLogFingerprint);
   const readingLogs = resolveDuplicates(db.bookReadingLogs, readingLogFingerprint);
+  // 같은 날을 두 기기가 각각 읽었으면 걸음이 많은 쪽이다. 앱 SyncDeduplicator와 같은 차례여야 한다.
+  const stepCounts = resolveDuplicates(db.stepCounts, stepCountFingerprint, moreSteps);
+  const walks = resolveDuplicates(db.walks, walkFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   // 목표에 이어 둔 루틴도 남은 루틴으로 옮긴다. 둘이 하나로 합쳐졌으면 한 번만 남긴다(앱 SyncDeduplicator와 같게).
@@ -1593,6 +1616,8 @@ function deduplicate(db) {
   db.bookReadingLogs = readingLogs.kept.map((log) =>
     log.bookSyncId ? { ...log, bookSyncId: books.movedTo.get(log.bookSyncId) || log.bookSyncId } : log,
   );
+  db.stepCounts = stepCounts.kept;
+  db.walks = walks.kept;
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -1606,6 +1631,8 @@ function deduplicate(db) {
     [reports.movedTo, "GROWTH_REPORT"],
     [moodLogs.movedTo, "MOOD_LOG"],
     [readingLogs.movedTo, "BOOK_READING_LOG"],
+    [stepCounts.movedTo, "STEP_COUNT"],
+    [walks.movedTo, "WALK"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1637,18 +1664,14 @@ function deduplicate(db) {
  * 내용이 같은 것끼리 묶어 최근에 손댄 쪽을 남깁니다.
  * 같은 시각이면 syncId 순으로 정해, 앱에서 돌려도 서버에서 돌려도 결과가 같게 합니다.
  */
-function resolveDuplicates(records, fingerprint) {
+function resolveDuplicates(records, fingerprint, prefer = newerRecord) {
   const winners = new Map();
   for (const record of records) {
     // 내용이 비어 있으면 무엇과도 같아 보이므로 묶지 않는다.
     const key = fingerprint(record);
     if (!key) continue;
     const current = winners.get(key);
-    if (!current || record.updatedAt > current.updatedAt) {
-      winners.set(key, record);
-    } else if (record.updatedAt === current.updatedAt && record.syncId > current.syncId) {
-      winners.set(key, record);
-    }
+    if (!current || prefer(record, current)) winners.set(key, record);
   }
 
   const movedTo = new Map();
@@ -1660,6 +1683,21 @@ function resolveDuplicates(records, fingerprint) {
   });
 
   return { kept, movedTo };
+}
+
+/** 묶음에서 남길 쪽. 최근에 손댄 쪽이고, 같으면 syncId 순이다(앱 SyncDeduplicator.resolve와 같다). */
+function newerRecord(record, current) {
+  if (record.updatedAt !== current.updatedAt) return record.updatedAt > current.updatedAt;
+  return record.syncId > current.syncId;
+}
+
+/**
+ * 같은 날의 걸음 수는 많은 쪽이다. 나중에 읽은 쪽을 남기면 걸음을 덜 본 기기가 걸은 날을 지운다.
+ * 앱 `SyncDeduplicator`의 stepCounts 승자(걸음 → 수정 시각 → syncId)와 같아야 한다.
+ */
+function moreSteps(record, current) {
+  if (record.steps !== current.steps) return record.steps > current.steps;
+  return newerRecord(record, current);
 }
 
 // 글만 같고 첨부가 다르면 다른 기록이다. 첨부까지 넣지 않으면
@@ -1723,6 +1761,19 @@ function readingLogFingerprint(log) {
  */
 function moodLogFingerprint(log) {
   return [text(log.entryDate), text(log.mood), log.createdAt, log.updatedAt].join("|");
+}
+
+/** 하루에 하나다. 앱 `SyncDeduplicator.stepCountFingerprint`와 같아야 한다. */
+function stepCountFingerprint(count) {
+  return text(count.date);
+}
+
+/**
+ * 시작한 순간(밀리초)이 같으면 같은 걷기다. 같은 걷기를 다른 syncId로 다시 올려도 한 번만 남는다.
+ * 앱 `SyncDeduplicator.walkFingerprint`와 같아야 한다.
+ */
+function walkFingerprint(walk) {
+  return walk.startedAt > 0 ? String(walk.startedAt) : "";
 }
 
 /**
@@ -1826,6 +1877,9 @@ function reindex(db) {
     ...log,
     bookId: bookIds.get(log.bookSyncId) || 0,
   }));
+  // 걸음 수와 걷기는 딸린 것도 가리키는 것도 없어 번호만 보면 된다.
+  db.stepCounts = withStableIds(db.stepCounts);
+  db.walks = withStableIds(db.walks);
 
   return db;
 }
@@ -1955,6 +2009,8 @@ function replaceSnapshot(db, payload) {
   db.bookReadingLogs = Array.isArray(payload.bookReadingLogs)
     ? payload.bookReadingLogs.map(normalizeBookReadingLog).filter(Boolean)
     : [];
+  db.stepCounts = Array.isArray(payload.stepCounts) ? payload.stepCounts.map(normalizeStepCount).filter(Boolean) : [];
+  db.walks = Array.isArray(payload.walks) ? payload.walks.map(normalizeWalk).filter(Boolean) : [];
   return db;
 }
 
@@ -2619,6 +2675,49 @@ function normalizeBookReadingLog(log) {
     startPage: Math.max(0, positiveInt(log.startPage)),
     endPage: Math.max(0, positiveInt(log.endPage)),
     createdAt: integer(log.createdAt, nowMs()),
+  };
+}
+
+/**
+ * 어느 날 몇 걸음을 걸었는지(Health Connect에서 앱이 받아 적은 하루치).
+ *
+ * 날짜가 없으면 버린다. 어느 날인지 모르면 걸은 날로도 셀 수 없다.
+ */
+function normalizeStepCount(count) {
+  if (!count) return null;
+  const date = text(count.date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    id: positiveInt(count.id),
+    syncId: syncId(count.syncId),
+    updatedAt: integer(count.updatedAt, integer(count.createdAt, nowMs())),
+    date,
+    steps: positiveInt(count.steps),
+    createdAt: integer(count.createdAt, nowMs()),
+  };
+}
+
+/**
+ * 걷기 한 번. 다 걸은 것만 받는다 — 앱도 걷는 중인 길은 보내지 않는다.
+ *
+ * 지나온 길은 polyline 글자(ASCII 63~126)만 받는다. 아니면 길만 비우고 거리·시간은 남긴다.
+ */
+function normalizeWalk(walk) {
+  if (!walk) return null;
+  const startedAt = integer(walk.startedAt, 0);
+  const endedAt = integer(walk.endedAt, 0);
+  if (startedAt <= 0 || endedAt < startedAt) return null;
+  const path = typeof walk.path === "string" ? walk.path : "";
+  return {
+    id: positiveInt(walk.id),
+    syncId: syncId(walk.syncId),
+    updatedAt: integer(walk.updatedAt, integer(walk.createdAt, nowMs())),
+    startedAt,
+    endedAt,
+    distanceMeters: positiveInt(walk.distanceMeters),
+    steps: positiveInt(walk.steps),
+    path: path.length <= maxWalkPathLength && /^[\x3f-\x7e]*$/.test(path) ? path : "",
+    createdAt: integer(walk.createdAt, nowMs()),
   };
 }
 

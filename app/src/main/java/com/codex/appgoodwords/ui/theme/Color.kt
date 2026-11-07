@@ -46,6 +46,10 @@ val RoseSoft = Color(0xFFFFE7E8)
 val Violet = Color(0xFF8B5CF6)
 val VioletSoft = Color(0xFFF0E9FF)
 
+/** 걷기. 바깥과 하늘 빛입니다. */
+val Sky = Color(0xFF0EA5E9)
+val SkySoft = Color(0xFFE0F4FD)
+
 // 예전 이름들. 아직 이 이름을 쓰는 화면이 남아 있어 한동안 둡니다.
 val MidnightBlue = Ink
 val OceanBlue = Indigo

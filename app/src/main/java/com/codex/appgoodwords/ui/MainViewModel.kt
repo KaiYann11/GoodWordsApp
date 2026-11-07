@@ -51,6 +51,9 @@ import com.codex.appgoodwords.data.DailyLoopCalculator
 import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
+import com.codex.appgoodwords.data.HealthConnection
+import com.codex.appgoodwords.data.WalkRecords
+import com.codex.appgoodwords.data.Walking
 import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.RoutineMergeResult
@@ -64,6 +67,7 @@ import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.HomeQuote
 import com.codex.appgoodwords.widget.QuoteWidget
 import com.codex.appgoodwords.work.AppNotifications
+import com.codex.appgoodwords.work.WalkRecordingService
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -134,6 +138,33 @@ class MainViewModel(
     /** 날짜별 독서 기록. 독서 걸음과 점수가 "언제 읽었는지"를 여기서 봅니다. */
     val bookReadingLogs = container.repository.observeBookReadingLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 하루 걸음 수(Health Connect에서 받아 적은 것). */
+    val stepCounts = container.walkRepository.observeStepCounts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 기록한 걷기. 걷는 중인 것도 담깁니다 — 화면이 지금 걷는 길을 그립니다. */
+    val walks = container.walkRepository.observeWalks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val walkGoalSteps = container.settingsStore.walkGoalStepsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Walking.DEFAULT_GOAL_STEPS)
+
+    /** 걸은 날을 가리는 데 드는 것. 점수·걸음 카드·하루 요약이 같은 묶음을 봅니다([Walking]). */
+    private val walkRecords = combine(stepCounts, walks, walkGoalSteps) { counts, walkList, goal ->
+        WalkRecords(stepCounts = counts, walks = walkList, goalSteps = goal)
+    }
+
+    /** 지금 걷기를 기록하는 중인지. */
+    val walkRecording: StateFlow<Boolean> = WalkRecordingService.recording
+
+    /** Health Connect 권한 창에 넘기는 묶음(걸음 읽기 하나). */
+    val healthStepsPermissions: Set<String>
+        get() = container.healthSteps.permissions
+
+    private val _healthConnection = MutableStateFlow(HealthConnection.UNKNOWN)
+    val healthConnection: StateFlow<HealthConnection> = _healthConnection.asStateFlow()
+    private var lastWalkRefreshAt = 0L
 
     val growthReports = container.repository.observeGrowthReports()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -221,8 +252,9 @@ class MainViewModel(
         combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
             DayInputs(events, checks, todoList, diaryList, logs)
         },
-        container.settingsStore.dailyStepsFlow
-    ) { inputs, steps ->
+        container.settingsStore.dailyStepsFlow,
+        walkRecords
+    ) { inputs, steps, walking ->
         DailyLoopCalculator.build(
             events = inputs.events,
             routineChecks = inputs.routineChecks,
@@ -230,7 +262,8 @@ class MainViewModel(
             diaries = inputs.diaries,
             today = LocalDate.now(),
             steps = steps,
-            readingLogs = inputs.readingLogs
+            readingLogs = inputs.readingLogs,
+            walkRecords = walking
         )
     }.stateIn(
         viewModelScope,
@@ -258,8 +291,9 @@ class MainViewModel(
         combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
             DayInputs(events, checks, todoList, diaryList, logs)
         },
-        container.settingsStore.dailyStepsFlow
-    ) { inputs, steps ->
+        container.settingsStore.dailyStepsFlow,
+        walkRecords
+    ) { inputs, steps, walking ->
         DayScoreCalculator.trend(
             today = LocalDate.now(),
             events = inputs.events,
@@ -267,7 +301,8 @@ class MainViewModel(
             todos = inputs.todos,
             diaries = inputs.diaries,
             steps = steps,
-            readingLogs = inputs.readingLogs
+            readingLogs = inputs.readingLogs,
+            walkRecords = walking
         )
     }.stateIn(
         viewModelScope,
@@ -286,8 +321,9 @@ class MainViewModel(
             DayInputs(events, checks, todoList, diaryList, logs)
         },
         moodLogs,
-        container.settingsStore.dailyStepsFlow
-    ) { inputs, logs, steps ->
+        container.settingsStore.dailyStepsFlow,
+        walkRecords
+    ) { inputs, logs, steps, walking ->
         DayScoreCalculator.digest(
             date = LocalDate.now(),
             events = inputs.events,
@@ -296,7 +332,8 @@ class MainViewModel(
             diaries = inputs.diaries,
             moodLogs = logs,
             steps = steps,
-            readingLogs = inputs.readingLogs
+            readingLogs = inputs.readingLogs,
+            walkRecords = walking
         )
     }.stateIn(
         viewModelScope,
@@ -396,8 +433,9 @@ class MainViewModel(
             DayInputs(events, checks, todoList, diaryList, logs)
         },
         moodLogs,
-        container.settingsStore.dailyStepsFlow
-    ) { date, inputs, logs, steps ->
+        container.settingsStore.dailyStepsFlow,
+        walkRecords
+    ) { date, inputs, logs, steps, walking ->
         date?.let {
             DayScoreCalculator.digest(
                 date = it,
@@ -407,7 +445,8 @@ class MainViewModel(
                 diaries = inputs.diaries,
                 moodLogs = logs,
                 steps = steps,
-                readingLogs = inputs.readingLogs
+                readingLogs = inputs.readingLogs,
+                walkRecords = walking
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -682,6 +721,59 @@ class MainViewModel(
         _openDailyCoachTalkRequest.value = false
     }
 
+    /** 걷기 기록 알림을 눌러 들어왔는지. 걷기 화면으로 데려갑니다. */
+    private val _openWalkRequest = MutableStateFlow(false)
+    val openWalkRequest: StateFlow<Boolean> = _openWalkRequest.asStateFlow()
+
+    fun handleOpenWalkRequest() {
+        _openWalkRequest.value = true
+    }
+
+    fun consumeOpenWalkRequest() {
+        _openWalkRequest.value = false
+    }
+
+    /**
+     * Health Connect가 이어져 있는지 보고, 이어져 있으면 걸음 수를 다시 읽습니다(사용자가 정함, 2026-11-07).
+     *
+     * 앱이 앞으로 나올 때마다 부르되 1분에 한 번까지입니다 — 칸을 오갈 때마다 읽을 일은 아닙니다.
+     */
+    fun refreshWalking(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastWalkRefreshAt < WALK_REFRESH_GAP_MS) return
+        lastWalkRefreshAt = now
+        viewModelScope.launch {
+            val connection = container.healthSteps.connection()
+            _healthConnection.value = connection
+            if (connection == HealthConnection.CONNECTED) container.walkRepository.refreshStepCounts()
+        }
+    }
+
+    /** Health Connect 권한 창에서 돌아왔을 때. 허락받았으면 걷기를 하루의 걸음에 넣고(한 번만) 걸음을 읽어 옵니다. */
+    fun onHealthPermissionResult(granted: Set<String>) {
+        viewModelScope.launch {
+            if (granted.containsAll(container.healthSteps.permissions)) container.walkRepository.onHealthConnected()
+            _healthConnection.value = container.healthSteps.connection()
+        }
+    }
+
+    /** 걷기 기록을 시작합니다. 위치 권한은 화면이 먼저 받아 둡니다. */
+    fun startWalk() {
+        WalkRecordingService.start(container.appContext)
+    }
+
+    fun stopWalk() {
+        WalkRecordingService.stop(container.appContext)
+    }
+
+    fun deleteWalk(syncId: String) {
+        viewModelScope.launch { container.walkRepository.deleteWalk(syncId) }
+    }
+
+    fun setWalkGoalSteps(steps: Int) {
+        viewModelScope.launch { container.settingsStore.setWalkGoalSteps(steps) }
+    }
+
     private val _confirmedTodayIds = MutableStateFlow<Set<Long>>(emptySet())
     val confirmedTodayIds: StateFlow<Set<Long>> = _confirmedTodayIds.asStateFlow()
 
@@ -749,6 +841,8 @@ class MainViewModel(
             val aiSettings = container.settingsStore.getAiFeedbackSettings()
             container.reminderScheduler.syncGrowthFeedback(aiSettings)
             container.reminderScheduler.syncDailyCoach(aiSettings, container.dailyCoachCoordinator.state())
+            // 기록하던 서비스가 앱과 함께 거둬졌으면 끝나지 않은 걷기가 남습니다. 마지막으로 적은 때로 마무리합니다.
+            if (!WalkRecordingService.recording.value) container.walkRepository.finishInterrupted()
             _lockState.value = if (container.settingsStore.appLockEnabledFlow.first()) {
                 AppLockState.LOCKED
             } else {
@@ -879,6 +973,7 @@ class MainViewModel(
             _lockState.value = AppLockState.LOCKED
         }
         leftAtMillis = 0L
+        refreshWalking()
     }
 
     /** 0은 "섞지 않음"이라 씨앗으로 쓰지 않습니다([ContentShuffle]). */
@@ -1547,6 +1642,9 @@ class MainViewModel(
          * 짧게 잡으면 사진을 고르러 갤러리에 다녀올 때마다 잠기고, 길게 잡으면 잠가 둔 뜻이 없습니다.
          */
         const val LOCK_AFTER_MS = 60 * 1000L
+
+        /** 걸음 수를 다시 읽는 가장 짧은 사이. */
+        const val WALK_REFRESH_GAP_MS = 60 * 1000L
     }
 }
 

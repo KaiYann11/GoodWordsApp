@@ -109,6 +109,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jsoup:jsoup:1.18.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // 하루 걸음 수 읽기(사용자가 정함, 2026-11-07). 1.1.0 정식판은 AGP 8.9.1·compileSdk 36·Kotlin 2를 요구해
+    // 지금 도구로 쓸 수 있는 마지막 판입니다(AGENTS.md "조용히 망가지는 것들").
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha12")
     implementation("com.google.android.material:material:1.12.0")
 
     ksp("androidx.room:room-compiler:2.6.1")
@@ -120,6 +123,9 @@ dependencies {
     // Glance 테스트 하네스는 실제 android.os.Bundle이 필요해 JVM 스텁에서는 못 돌린다.
     androidTestImplementation("androidx.glance:glance-appwidget-testing:1.1.0")
     androidTestImplementation("androidx.work:work-testing:2.9.1")
+    // Health Connect가 Guava를 런타임으로만 끌고 오면서 WorkManager의 listenablefuture를 빈 판(9999.0-empty)으로 바꿔
+    // 놓습니다. 그러면 계측 시험이 ListenableFuture(`Operation.result`·`getWorkInfos…().get()`)를 컴파일 때 보지 못합니다.
+    androidTestImplementation("com.google.guava:guava:31.1-android")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

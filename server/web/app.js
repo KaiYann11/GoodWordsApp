@@ -397,6 +397,8 @@ function emptySnapshot() {
     growthReports: [],
     moodLogs: [],
     bookReadingLogs: [],
+    stepCounts: [],
+    walks: [],
     settings: {},
   };
 }
@@ -509,6 +511,7 @@ function render() {
   if (state.activeTab === "diaries") renderDiaries();
   if (state.activeTab === "books") renderBooks();
   if (state.activeTab === "moods") renderMoods();
+  if (state.activeTab === "walks") renderWalks();
   if (state.activeTab === "growth") renderGrowth();
   if (state.activeTab === "history") renderHistory();
   if (state.activeTab === "settings") renderSettings();
@@ -2050,6 +2053,158 @@ function attr(value = "") {
  * 여기서는 읽기만 합니다. 기분은 그날 그때 찍는 것이라, 나중에 웹에서 고쳐 넣으면
  * 그때 어땠는지가 아니라 지금 기억하는 것이 남습니다.
  */
+/**
+ * 걷기(사용자가 정함, 2026-11-07). 앱이 Health Connect에서 읽은 날마다의 걸음 수와 기록한 걷기를 보여 줍니다.
+ *
+ * **지도 타일은 불러오지 않고 지나온 길의 모양만 그립니다.** 브라우저가 바깥 지도 서버에 타일을 청하면 이 서버의
+ * 주소(Tailscale 이름)가 함께 전해집니다. 읽기만 합니다 — 지우기는 앱의 걷기 화면에서 합니다.
+ */
+function renderWalks() {
+  const days = walkDays(state.snapshot.stepCounts || [], state.snapshot.walks || []);
+  app.innerHTML = `
+    <section>
+      <h2 class="sectionTitle">걷기 ${days.length}일</h2>
+      <p class="meta">앱이 Health Connect에서 읽은 걸음 수와 기록한 걷기입니다. 지나온 길은 지도 없이 모양만 그립니다.</p>
+      <div class="itemList">
+        ${days.length ? days.map(([date, day]) => `
+          <article class="item">
+            <h3>${escapeHtml(date)}</h3>
+            ${day.steps > 0 ? `<p>${escapeHtml(formatWalkSteps(day.steps))}</p>` : ""}
+            ${day.walks.map(walkCard).join("")}
+          </article>
+        `).join("") : empty("아직 걷기 기록이 없습니다.")}
+      </div>
+    </section>
+  `;
+}
+
+/**
+ * 날짜별로 묶습니다. 최근 날이 먼저, 하루 안의 걷기는 시작한 차례입니다.
+ * 같은 날 걸음 수가 둘이면 큰 쪽입니다(앱 `Walking.stepsByDate`와 같게 — 같은 하루를 두 기기가 따로 읽은 것).
+ */
+function walkDays(stepCounts, walks) {
+  const days = new Map();
+  const dayOf = (date) => {
+    if (!days.has(date)) days.set(date, { steps: 0, walks: [] });
+    return days.get(date);
+  };
+  for (const count of stepCounts) {
+    const date = String(count.date || "");
+    if (!date) continue;
+    const entry = dayOf(date);
+    entry.steps = Math.max(entry.steps, Number(count.steps) || 0);
+  }
+  for (const walk of walks) {
+    if (!(walk.startedAt > 0) || !(walk.endedAt >= walk.startedAt)) continue;
+    dayOf(walkLocalDate(walk.startedAt)).walks.push(walk);
+  }
+  for (const entry of days.values()) entry.walks.sort((a, b) => a.startedAt - b.startedAt);
+  return [...days].sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+}
+
+function walkLocalDate(millis) {
+  const at = new Date(millis);
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+}
+
+function walkClock(millis) {
+  const at = new Date(millis);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+function walkCard(walk) {
+  const points = decodePolyline(String(walk.path || ""));
+  const numbers = [
+    formatWalkDistance(Number(walk.distanceMeters) || 0),
+    formatWalkDuration(walk.endedAt - walk.startedAt),
+    ...(walk.steps > 0 ? [formatWalkSteps(walk.steps)] : []),
+  ].join(" · ");
+  return `
+    <div class="walk">
+      ${points.length >= 2 ? walkSketch(points) : ""}
+      <p class="meta">${escapeHtml(walkClock(walk.startedAt))}–${escapeHtml(walkClock(walk.endedAt))} · ${escapeHtml(numbers)}</p>
+    </div>`;
+}
+
+/** 앱 `Walking.formatSteps`와 같은 꼴(`6,240걸음`). */
+function formatWalkSteps(steps) {
+  return `${Number(steps).toLocaleString("ko-KR")}걸음`;
+}
+
+/** 앱 `Walking.formatDistance`와 같은 꼴. 1km 아래는 미터, 위는 소수 한 자리 km. */
+function formatWalkDistance(meters) {
+  return meters < 1000 ? `${Math.max(0, Math.trunc(meters))}m` : `${(meters / 1000).toFixed(1)}km`;
+}
+
+/** 앱 `Walking.formatDuration`과 같은 꼴(`32분`, `1시간 5분`). 1분이 안 되면 1분입니다. */
+function formatWalkDuration(millis) {
+  const minutes = Math.max(1, Math.floor(millis / 60000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}분`;
+  return rest === 0 ? `${hours}시간` : `${hours}시간 ${rest}분`;
+}
+
+/** 앱 `WalkPath.decode`와 같은 풀이(구글 polyline, 소수 다섯째 자리). 깨진 곳이 있으면 거기까지만입니다. */
+function decodePolyline(path) {
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const next = () => {
+    let result = 0;
+    let shift = 0;
+    for (;;) {
+      if (index >= path.length || shift > 30) return null;
+      const chunk = path.charCodeAt(index) - 63;
+      index += 1;
+      if (chunk < 0 || chunk > 63) return null;
+      result |= (chunk & 0x1f) << shift;
+      shift += 5;
+      if (chunk < 0x20) break;
+    }
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+  while (index < path.length) {
+    const dLat = next();
+    if (dLat === null) break;
+    const dLng = next();
+    if (dLng === null) break;
+    lat += dLat;
+    lng += dLng;
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+
+/** 앱 `MapTiles.project`와 같은 메르카토르로 길의 모양만 그립니다. 지도 타일은 없습니다. */
+function walkSketch(points) {
+  const width = 320;
+  const height = 200;
+  const pad = 14;
+  const world = points.map(([lat, lng]) => {
+    const rad = (Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180;
+    return [(lng + 180) / 360, (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2];
+  });
+  const xs = world.map(([x]) => x);
+  const ys = world.map(([, y]) => y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const spanX = Math.max(...xs) - minX || 1e-9;
+  const spanY = Math.max(...ys) - minY || 1e-9;
+  const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY);
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+  const at = ([x, y]) => [offsetX + (x - minX) * scale, offsetY + (y - minY) * scale];
+  const line = world.map((point) => at(point).map((value) => value.toFixed(1)).join(",")).join(" ");
+  const [startX, startY] = at(world[0]);
+  const [endX, endY] = at(world[world.length - 1]);
+  return `<svg class="walkSketch" viewBox="0 0 ${width} ${height}" role="img" aria-label="지나온 길">` +
+    `<polyline points="${line}" fill="none" stroke="#0ea5e9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>` +
+    `<circle cx="${startX.toFixed(1)}" cy="${startY.toFixed(1)}" r="5" fill="#2e7d32"/>` +
+    `<circle cx="${endX.toFixed(1)}" cy="${endY.toFixed(1)}" r="5" fill="#0ea5e9"/></svg>`;
+}
+
 function renderMoods() {
   const days = moodDays(state.snapshot.moodLogs || []);
   app.innerHTML = `

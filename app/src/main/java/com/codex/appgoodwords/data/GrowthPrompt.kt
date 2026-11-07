@@ -20,6 +20,11 @@ data class GrowthDigest(
     val quoteLines: List<String>,
     val bookLines: List<String>,
     /**
+     * 날마다의 걸음 수와 기록한 걷기. **숫자만 담습니다**(사용자가 정함, 2026-11-07 — 위치·경로는 AI에 보내지 않음).
+     * 지나온 길을 받지도 않으므로([Walking.factLine]) 실수로 실을 수도 없습니다.
+     */
+    val walkLines: List<String> = emptyList(),
+    /**
      * 이미 담아 둔 글귀.
      *
      * 추천을 받으려고 보내는 것이 아니라 **빼 달라고** 보냅니다. 기록만 보여 주면 모델은
@@ -52,7 +57,8 @@ data class GrowthDigest(
             diaryLines.isEmpty() &&
             quoteLines.isEmpty() &&
             bookLines.isEmpty() &&
-            moodLines.isEmpty()
+            moodLines.isEmpty() &&
+            walkLines.isEmpty()
 }
 
 /**
@@ -121,6 +127,8 @@ object GrowthPrompt {
         previousReport: GrowthReportEntity? = null,
         /** 이상향·목표·롤모델을 실을지([AiFeedbackSettings.includeGoals], 기본 꺼짐). */
         includeGoals: Boolean = false,
+        /** 걸음 수와 걷기. 숫자만 실립니다. */
+        walkRecords: WalkRecords = WalkRecords(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): GrowthDigest {
         val from = today.minusDays((period.days - 1).toLong())
@@ -189,6 +197,18 @@ object GrowthPrompt {
             .map { (date, entry) -> "$date ${entry.mood.label}" + if (entry.settled) "" else " (하루 안에 달라짐)" }
             .take(MAX_LINES)
 
+        // 걸은 날은 표시해 둡니다. 걸음 수는 모자란 날을 세려는 것이 아니라 그 기간의 흐름입니다.
+        val stepsByDate = Walking.stepsByDate(walkRecords)
+        val walkedDays = Walking.walkedDays(walkRecords, zoneId)
+        val walkLines = generateSequence(from) { it.plusDays(1) }
+            .takeWhile { !it.isAfter(today) }
+            .mapNotNull { date ->
+                Walking.factLine(stepsByDate[date], Walking.walksOn(walkRecords, date, zoneId))
+                    ?.let { "$date $it" + if (date in walkedDays) " (걸은 날)" else "" }
+            }
+            .toList()
+            .takeLast(MAX_LINES)
+
         val previousOn = previousReport
             ?.let { toDate(it.createdAt, zoneId) }
             ?.takeIf { it.plusDays(PREVIOUS_ADVICE_MAX_DAYS) >= today }
@@ -202,6 +222,7 @@ object GrowthPrompt {
             diaryLines = diaryLines,
             quoteLines = quoteLines,
             bookLines = bookLines,
+            walkLines = walkLines,
             ownedQuoteLines = ownedQuoteLines,
             moodLines = moodLines,
             directionLines = if (includeGoals) directionLines(items, routines) else emptyList(),
@@ -333,6 +354,7 @@ object GrowthPrompt {
         section("그날의 기분 (찍은 것이 먼저, 마지막 기록 기준)", digest.moodLines)
         section("읽은 글귀", digest.quoteLines)
         section("독서", digest.bookLines)
+        section("걷기 (걸음 수·기록한 걷기, 숫자만)", digest.walkLines)
         // 추천을 받으려는 것이 아니라 빼 달라는 목록입니다. 무엇에 쓰는지 제목에 적어 둡니다.
         section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
         if (digest.previousAdviceLines.isNotEmpty()) {

@@ -70,6 +70,8 @@ import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.AppUpdateState
 import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.HealthConnection
+import com.codex.appgoodwords.data.Walking
 import com.codex.appgoodwords.data.GrowthCadence
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
@@ -206,6 +208,11 @@ fun SettingsScreen(
     /** 하루의 축으로 삼을 걸음. 고른 차례가 그대로 홈 카드의 차례입니다. */
     dailySteps: List<DailyStep> = DailyStep.DEFAULTS,
     onDailyStepsChanged: (List<DailyStep>) -> Unit = {},
+    /** 이 걸음 수를 넘은 날을 걸은 날로 셉니다. */
+    walkGoalSteps: Int = Walking.DEFAULT_GOAL_STEPS,
+    onWalkGoalStepsChanged: (Int) -> Unit = {},
+    healthConnection: HealthConnection = HealthConnection.UNKNOWN,
+    onConnectHealth: () -> Unit = {},
     /** 지금 깔려 있는 버전. 화면이 BuildConfig를 직접 보지 않아야 시험에서 값을 정해 줄 수 있습니다. */
     currentVersionName: String = "",
     currentVersionCode: Int = 0,
@@ -570,6 +577,14 @@ fun SettingsScreen(
                 SettingsSection.STEPS -> {
                     item {
                         DailyStepsSection(steps = dailySteps, onChanged = onDailyStepsChanged)
+                    }
+                    item {
+                        WalkGoalSection(
+                            goalSteps = walkGoalSteps,
+                            onGoalChanged = onWalkGoalStepsChanged,
+                            connection = healthConnection,
+                            onConnectHealth = onConnectHealth
+                        )
                     }
                 }
                 SettingsSection.SYNC -> {
@@ -1170,6 +1185,62 @@ private fun DailyStepsSection(
         }
     }
 }
+
+/**
+ * 걸은 날의 기준과 걸음 수를 어디서 가져오는지(사용자가 정함, 2026-11-07).
+ *
+ * 걸음 수를 넘었거나 걷기를 기록한 날이 걸은 날입니다. 기준을 바꾸면 지난날도 새 기준으로 다시 셉니다 — 걸은 날은
+ * 어디에도 적어 두지 않고 그때그때 셉니다([Walking]).
+ */
+@Composable
+private fun WalkGoalSection(
+    goalSteps: Int,
+    onGoalChanged: (Int) -> Unit,
+    connection: HealthConnection,
+    onConnectHealth: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("걷기", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "하루에 이만큼 걸었거나 걷기를 기록한 날을 걸은 날로 셉니다. 바꾸면 지난날도 새 기준으로 다시 셉니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Walking.GOAL_CHOICES.forEach { choice ->
+                    FilterChip(
+                        selected = goalSteps == choice,
+                        onClick = { onGoalChanged(choice) },
+                        label = { Text(String.format(java.util.Locale.KOREA, "%,d", choice)) },
+                        modifier = Modifier.testTag(walkGoalChipTag(choice))
+                    )
+                }
+            }
+            Text(
+                text = when (connection) {
+                    HealthConnection.CONNECTED -> "걸음 수: Health Connect에서 읽는 중입니다. 휴대폰 설정 → Health Connect에서 거둘 수 있습니다."
+                    HealthConnection.NOT_CONNECTED -> "걸음 수: 아직 Health Connect에 잇지 않았습니다."
+                    HealthConnection.NEEDS_UPDATE -> "걸음 수: Health Connect를 깔거나 업데이트해야 합니다."
+                    HealthConnection.UNAVAILABLE -> "걸음 수: 이 휴대폰에서는 읽을 수 없습니다. 걷기 기록으로만 셉니다."
+                    HealthConnection.UNKNOWN -> "걸음 수: 확인하는 중입니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (connection == HealthConnection.NOT_CONNECTED || connection == HealthConnection.NEEDS_UPDATE) {
+                OutlinedButton(onClick = onConnectHealth) {
+                    Text(if (connection == HealthConnection.NEEDS_UPDATE) "Health Connect 열기" else "걸음 수 가져오기")
+                }
+            }
+        }
+    }
+}
+
+internal fun walkGoalChipTag(steps: Int): String = "walk_goal_$steps"
 
 /** 한 자리 옮깁니다. 줄 밖을 가리키면 그대로 둡니다. */
 private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {

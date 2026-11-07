@@ -18,6 +18,19 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 재부팅하면 AlarmManager 예약이 모두 사라지므로 다시 걸어야 합니다. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 걷기 기록(사용자가 정함, 2026-11-07). "걷기 기록 시작"을 누른 동안에만 위치를 받습니다. 화면을 꺼도 이어지게
+         위치 종류의 앞쪽 서비스로 돌고, 사용자가 화면에서 시작하므로 배경 위치 권한은 두지 않습니다. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- 하루 걸음 수를 Health Connect에서 읽기만 합니다(S24는 삼성 헬스가 걸음을 넣습니다). 쓰지 않습니다. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+
+    <!-- Android 13 아래에서는 Health Connect가 따로 깔린 앱입니다. 있는지 보려면 이름을 밝혀 둬야 합니다. -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:name=".AppGoodWordsApplication"
@@ -147,6 +160,36 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- 걷기를 기록하는 동안 위치를 받는 서비스. 끝내기는 화면이나 알림에서 합니다. -->
+        <service
+            android:name=".work.WalkRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!--
+          Health Connect의 권한 화면에서 "개인정보처리방침"을 누르면 여는 화면입니다. 이것이 없으면 권한 창이 아예 뜨지 않습니다.
+          Android 13 아래는 앞의 동작으로, Android 14부터는 아래 별칭으로 엽니다.
+        -->
+        <activity
+            android:name=".HealthPermissionsActivity"
+            android:exported="true"
+            android:theme="@style/Theme.AppGoodWords">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".HealthPermissionsActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
     </application>
 
 </manifest>

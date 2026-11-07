@@ -86,6 +86,10 @@ class SettingsStore(
          * 하기도 합니다. 한쪽에서 고른 축이 다른 쪽까지 따라가면 오히려 성가십니다.
          */
         val dailySteps = stringPreferencesKey("daily_steps")
+        /** 이 걸음 수를 넘은 날을 걸은 날로 셉니다([Walking]). 하루의 축처럼 이 기기에만 둡니다. */
+        val walkGoalSteps = intPreferencesKey("walk_goal_steps")
+        /** 걷기를 하루의 걸음에 한 번 넣었는지([addWalkStepOnce]). 사용자가 뺀 뒤에 다시 넣지 않으려고 둡니다. */
+        val walkStepAdded = booleanPreferencesKey("walk_step_added")
 
         /** 앱 잠금. 비밀번호는 담지 않습니다. 기기에 있는 잠금을 빌려 씁니다. */
         val appLockEnabled = booleanPreferencesKey("app_lock_enabled")
@@ -240,6 +244,33 @@ class SettingsStore(
         val kept = steps.distinct().ifEmpty { DailyStep.DEFAULTS }
         context.dataStore.edit { preferences ->
             preferences[Keys.dailySteps] = DailyStep.store(kept)
+        }
+    }
+
+    /**
+     * 걷기를 하루의 걸음에 **한 번만** 넣습니다(사용자가 정함, 2026-11-07 — "하루의 걸음에 걷기 넣기").
+     *
+     * 업데이트하자마자 넣지 않고, Health Connect를 처음 잇거나 첫 걷기를 기록할 때 부릅니다. 걸음 기록이 들어오기 전에
+     * 넣으면 지난날이 모두 "안 걸은 날"이 되어 점수가 근거 없이 내려갑니다. 사용자가 설정에서 뺀 뒤에는 다시 넣지 않습니다.
+     */
+    suspend fun addWalkStepOnce() {
+        context.dataStore.edit { preferences ->
+            if (preferences[Keys.walkStepAdded] == true) return@edit
+            preferences[Keys.walkStepAdded] = true
+            val steps = DailyStep.parse(preferences[Keys.dailySteps].orEmpty())
+            preferences[Keys.dailySteps] = DailyStep.store(DailyStep.withWalk(steps))
+        }
+    }
+
+    val walkGoalStepsFlow: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[Keys.walkGoalSteps]?.takeIf { it > 0 } ?: Walking.DEFAULT_GOAL_STEPS
+    }
+
+    suspend fun getWalkGoalSteps(): Int = walkGoalStepsFlow.first()
+
+    suspend fun setWalkGoalSteps(steps: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.walkGoalSteps] = steps.coerceAtLeast(1)
         }
     }
 

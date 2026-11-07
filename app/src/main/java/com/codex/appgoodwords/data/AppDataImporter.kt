@@ -17,7 +17,9 @@ data class AppImportResult(
     val bookCount: Int = 0,
     val growthReportCount: Int = 0,
     val moodLogCount: Int = 0,
-    val bookReadingLogCount: Int = 0
+    val bookReadingLogCount: Int = 0,
+    val stepCountCount: Int = 0,
+    val walkCount: Int = 0
 )
 
 class AppDataImporter(
@@ -71,6 +73,8 @@ class AppDataImporter(
         val reportDao = database.growthReportDao()
         val moodLogDao = database.moodLogDao()
         val readingLogDao = database.bookReadingLogDao()
+        val stepCountDao = database.stepCountDao()
+        val walkDao = database.walkDao()
 
         val previousReminders = database.todoDao().getPendingReminders()
         val deletedSyncIds = incoming.deletions.map { it.syncId }
@@ -91,6 +95,8 @@ class AppDataImporter(
                 reportDao.deleteBySyncIds(deletedSyncIds)
                 moodLogDao.deleteBySyncIds(deletedSyncIds)
                 readingLogDao.deleteBySyncIds(deletedSyncIds)
+                stepCountDao.deleteBySyncIds(deletedSyncIds)
+                walkDao.deleteBySyncIds(deletedSyncIds)
             }
 
             val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
@@ -176,6 +182,13 @@ class AppDataImporter(
                     )
                 }
             )
+
+            val localStepCountIds = stepCountDao.getAll().associate { it.syncId to it.id }
+            stepCountDao.insertAll(incoming.stepCounts.map { it.copy(id = localStepCountIds[it.syncId] ?: 0L) })
+
+            // 걷는 중인 걷기는 서버에서 오지 않습니다(다 걸은 것만 오고 갑니다). 그래서 지금 걷는 길을 덮을 일이 없습니다.
+            val localWalkIds = walkDao.getAll().associate { it.syncId to it.id }
+            walkDao.insertAll(incoming.walks.map { it.copy(id = localWalkIds[it.syncId] ?: 0L) })
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
@@ -205,7 +218,9 @@ class AppDataImporter(
             bookCount = incoming.books.size,
             growthReportCount = incoming.growthReports.size,
             moodLogCount = incoming.moodLogs.size,
-            bookReadingLogCount = incoming.bookReadingLogs.size
+            bookReadingLogCount = incoming.bookReadingLogs.size,
+            stepCountCount = incoming.stepCounts.size,
+            walkCount = incoming.walks.size
         )
     }
 
@@ -223,7 +238,13 @@ class AppDataImporter(
         // 들어온 할 일에는 예약이 없다. 예전 할 일의 예약은 id가 다시 매겨지면 가리킬 곳을 잃는다.
         val previousReminders = database.todoDao().getPendingReminders()
 
+        // 걷는 중인 길은 스냅샷에 없습니다(다 걸은 것만 오고 갑니다). 통째로 바꾸면서 지우면 기록하던 길이 사라지니
+        // 남겨 두었다가 새 번호로 다시 넣습니다. 기록하는 서비스는 번호가 아니라 syncId로 이어 적습니다.
+        val ongoingWalks = database.walkDao().getUnfinished()
+
         database.withTransaction {
+            database.walkDao().clearAll()
+            database.stepCountDao().clearAll()
             database.bookReadingLogDao().clearAll()
             database.moodLogDao().clearAll()
             database.growthReportDao().clearAll()
@@ -290,6 +311,16 @@ class AppDataImporter(
             if (snapshot.bookReadingLogs.isNotEmpty()) {
                 database.bookReadingLogDao().insertAll(snapshot.bookReadingLogs)
             }
+
+            if (snapshot.stepCounts.isNotEmpty()) {
+                database.stepCountDao().insertAll(snapshot.stepCounts)
+            }
+
+            if (snapshot.walks.isNotEmpty()) {
+                database.walkDao().insertAll(snapshot.walks)
+            }
+            val arrived = snapshot.walks.mapTo(mutableSetOf()) { it.syncId }
+            database.walkDao().insertAll(ongoingWalks.filter { it.syncId !in arrived }.map { it.copy(id = 0L) })
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
@@ -327,7 +358,9 @@ class AppDataImporter(
             bookCount = snapshot.books.size,
             growthReportCount = snapshot.growthReports.size,
             moodLogCount = snapshot.moodLogs.size,
-            bookReadingLogCount = snapshot.bookReadingLogs.size
+            bookReadingLogCount = snapshot.bookReadingLogs.size,
+            stepCountCount = snapshot.stepCounts.size,
+            walkCount = snapshot.walks.size
         )
     }
 }

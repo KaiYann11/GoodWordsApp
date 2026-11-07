@@ -306,6 +306,11 @@ class DailyCoachCoordinator(
         val moodLogs = database.moodLogDao().getAll()
         val readingLogs = database.bookReadingLogDao().getAll()
         val steps = settingsStore.getDailySteps()
+        val walkRecords = WalkRecords(
+            stepCounts = database.stepCountDao().getAll(),
+            walks = database.walkDao().getFinished(),
+            goalSteps = settingsStore.getWalkGoalSteps()
+        )
 
         return DailyCoachPrompt.digest(
             today = today,
@@ -320,6 +325,7 @@ class DailyCoachCoordinator(
                 moodLogs = moodLogs,
                 steps = steps,
                 readingLogs = readingLogs,
+                walkRecords = walkRecords,
                 zoneId = zoneId
             ),
             progress = DailyLoopCalculator.build(
@@ -330,6 +336,7 @@ class DailyCoachCoordinator(
                 today = today,
                 steps = steps,
                 readingLogs = readingLogs,
+                walkRecords = walkRecords,
                 zoneId = zoneId
             ),
             routines = routines,

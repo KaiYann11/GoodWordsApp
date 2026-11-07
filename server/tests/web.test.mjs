@@ -248,3 +248,50 @@ test("진도를 올리거나 되돌려 적은 날짜의 기존 설명은 지킨�
   assert.match(html, /200 → 150쪽 · 앞으로 돌아갔습니다/);
   assert.match(html, /읽은 날 2일 · 하루 평균 75쪽/);
 });
+
+/** 걷기 화면의 실제 렌더링. 지도 타일 없이 길의 모양만, 숫자는 앱과 같은 꼴로 그리는지 봅니다. */
+async function renderWalks(stepCounts, walks) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const app = { innerHTML: "" };
+  const context = vm.createContext({ app, state: { snapshot: { stepCounts, walks } }, empty: value => value });
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  vm.runInContext(source.slice(source.indexOf("function renderWalks("), source.indexOf("function renderMoods(")), context);
+  context.renderWalks();
+  return { html: app.innerHTML, decode: context.decodePolyline, days: context.walkDays };
+}
+
+test("걷기는 날짜별로 걸음 수와 길의 모양을 보이고 바깥 지도를 부르지 않는다", async () => {
+  const startedAt = new Date("2026-11-07T18:40:00").getTime();
+  const walk = {
+    syncId: "w1", startedAt, endedAt: startedAt + 32 * 60_000, distanceMeters: 2_100, steps: 2_900,
+    // 앱 WalkPath.encode와 같은 글자(시청 → 광화문 쪽).
+    path: "sehdFok_fWwy@nF",
+  };
+  const { html } = await renderWalks(
+    [
+      { date: "2026-11-07", steps: 6_240 },
+      { date: "2026-11-07", steps: 300 },
+      { date: "2026-11-05", steps: 3_100 },
+    ],
+    [walk],
+  );
+
+  assert.match(html, /걷기 2일/);
+  assert.ok(html.indexOf("2026-11-07") < html.indexOf("2026-11-05"));
+  assert.match(html, /6,240걸음/, "같은 날이 둘이면 큰 쪽입니다(앱 Walking.stepsByDate).");
+  assert.doesNotMatch(html, /300걸음/);
+  assert.match(html, /18:40–19:12 · 2\.1km · 32분 · 2,900걸음/);
+  assert.match(html, /<svg class="walkSketch"/);
+  assert.match(html, /<polyline points="[\d., ]+"/);
+  assert.doesNotMatch(html, /openstreetmap|tile\.|<img/, "브라우저가 바깥 지도 서버에 이 서버 주소를 흘리면 안 됩니다.");
+  assert.doesNotMatch(html, /<button|<input|<form/);
+});
+
+test("웹의 길 풀이는 구글 polyline과 같고 깨진 길에서는 멈춘다", async () => {
+  const { decode, html } = await renderWalks([], []);
+  // vm 안에서 만든 배열은 이쪽 배열과 원형이 달라 그대로는 엄격 비교가 안 됩니다. 값만 견줍니다.
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@")), [[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]]);
+  assert.deepEqual(plain(decode(" !!")), []);
+  assert.match(html, /아직 걷기 기록이 없습니다/);
+});

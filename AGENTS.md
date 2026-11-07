@@ -126,6 +126,8 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |
+| 걸은 날(정한 걸음 수 이상 **또는** 걷기를 기록한 날 — 사용자가 정함, 2026-11-07) | `Walking`(`walkedDays`·`stepsByDate`·AI에 가는 한 줄 `factLine`). 하루의 걸음·점수·연속·홈 카드·AI가 모두 여기서 셉니다 |
+| 지나온 길의 꼴(구글 polyline, 소수 다섯째 자리) | 앱 `WalkPath` · 웹 `decodePolyline` · 서버 `normalizeWalk`(글자만 확인) |
 
 ## 함께 고쳐야 하는 것
 
@@ -146,6 +148,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
+| 걸음 수·걷기 합치기 | 같은 날 걸음 수는 **걸음이 많은 쪽**이 남습니다(앱 `SyncDeduplicator`의 `winner` · 서버 `moreSteps`). 걷기는 시작한 밀리초가 같으면 같은 것입니다(`walkFingerprint`) |
 | 글 쌓이는 새 자리 | `AppSearch`에 찾을 길(딸린 글은 부모에 얹기) |
 | `routineChecks`를 "실천했다"로 세는 곳 | `DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt` · `DailyCoachPrompt` · `RoutineNudge` |
 | 홈 목록의 줄(`HomeScreen`) | `QUOTE_ITEM_INDEX`·`TAB_ROW_ITEM_INDEX`·`PAGES_ITEM_INDEX` |
@@ -179,6 +182,19 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   통신을 끊습니다). 다 받으면 앱 안쪽 캐시로 옮겨 담으며 맞춰 본 것만 설치합니다(`AppUpdateFiles.verifyInto`). 시스템의
   "다 받음" 알림은 켜지 마세요 — 누르면 해시를 보기 전에 설치 화면이 열립니다. 끊긴 데서 이어 받는 것은 서버 정적 파일의
   ETag·Range에 기댑니다(`sendFile`).
+- **걸음 수는 Health Connect `connect-client:1.1.0-alpha12`로 읽습니다.** 1.1.0 정식판은 AGP 8.9.1·compileSdk 36·Kotlin 2(표준
+  라이브러리 2.0)를 요구해 지금 도구(AGP 8.5.2·compileSdk 35·Kotlin 1.9.24)로는 빌드되지 않습니다 — 도구를 올리는 일과 함께 바꿉니다.
+  Health Connect 권한 창은 **권한 안내 화면이 없으면 아예 뜨지 않습니다**(`HealthPermissionsActivity`와 Android 14+의
+  `ViewPermissionUsageActivity` 별칭, 매니페스트). Health Connect는 허락받기 30일 전보다 오래된 걸음을 주지 않으므로 하루치를
+  받아 적어 둡니다(`StepCountEntity`) — 그날 것은 **늘기만** 고칩니다(다른 기기가 더 많이 본 기록을 덮지 않게).
+- **걷기 기록 서비스는 번호가 아니라 syncId로 이어 적습니다**(`WalkDao.updateProgress`). 걷는 사이에 통째로 가져오기·병합이 오면
+  번호가 다시 매겨지고, `AppDataImporter.importSnapshot`은 **걷는 중인 걷기를 남겨 두었다가 다시 넣습니다.** 걷는 중인 걷기는
+  동기화·내보내기에 싣지 않고(`WalkDao.getFinished`), 서비스가 죽어 남은 것은 다음에 앱이 켜질 때 마지막으로 적은 때로 마무리합니다.
+- **지도는 OpenStreetMap 타일을 앱이 직접 받습니다**(`AppContainer.mapTileImageLoader` — 앱을 밝히는 User-Agent, 한 서버에 동시에
+  둘, 디스크 캐시, 보이는 칸만). 지도 귀퉁이의 "© OpenStreetMap"은 쓰는 조건이라 지우지 않습니다. **웹은 타일을 부르지 않고 길의
+  모양만 그립니다** — 브라우저가 바깥 타일 서버에 청하면 이 서버의 주소(Tailscale 이름)가 함께 갑니다.
+- **위치는 AI에 가지 않습니다**(사용자가 정함, 2026-11-07). AI가 보는 하루(`DayDigest`)에는 길을 뺀 `WalkSummary`만 담기고, AI에
+  가는 걷기는 `Walking.factLine`의 숫자뿐입니다(`WalkPromptTest`가 길·좌표가 섞이지 않는지 봅니다).
 - **자판이 올라와도 창은 줄지 않습니다**(가장자리까지 그리는 창 — Android 15 에뮬레이터에서 확인, `adjustResize`는 자판 높이만
   알려 줍니다). 맨 아래에 붙은 입력 칸은 `consumeWindowInsets(innerPadding).imePadding()`으로 비킵니다(대화 화면) —
   `consumeWindowInsets` 없이 붙이면 아래 시스템 막대 몫이 겹쳐 입력 칸과 자판 사이에 빈 줄이 생깁니다. 긴 글 화면의 버튼은 글 위에 둡니다.
@@ -189,7 +205,8 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 
 - **못 한 것을 세지 않습니다.** "0일 연속"·빠진 날·남은 개수 대신 **다음 하나**와 한 것만 말합니다.
 - **셈한 것은 저장하지 않고 기록에서 다시 셉니다**(연속·점수·통계·목표의 실천).
-- 하루 점수에 기분을 넣지 않습니다.
+- 하루 점수에 기분을 넣지 않습니다. 걷기는 넣되 **걸음 수가 아니라 걸은 날인지로** 셉니다(덤도 하나) — 많이 걸은 날 하나로
+  덤이 차지 않고, 모자란 걸음을 세지 않습니다.
 - **값이 드는 일은 사용자가 정하고 몰래 돌지 않습니다** — 횟수·주기·배경 스위치가 설정에 보입니다. 알리기만 하는 것은 아무것도
   만들지 않고, 가벼운 쪽은 AI를 부르지 않습니다.
 - AI에 못 붙어도 막다른 길이 아닙니다 — 미리 보기와 복사되는 글은 같고, 붙여넣은 답은 형식이 어긋나도 버리지 않습니다.

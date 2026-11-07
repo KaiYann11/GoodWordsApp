@@ -25,6 +25,10 @@ data class AppDataSnapshot(
     val bookReadingLogs: List<BookReadingLogEntity> = emptyList(),
     /** 글귀에 달아 둔 메모. 루틴 메모와 같은 자리이되 붙는 곳이 다릅니다. */
     val contentMemos: List<ContentMemoEntity> = emptyList(),
+    /** 날짜별 걸음 수. Health Connect에서 받아 적은 하루치입니다. */
+    val stepCounts: List<StepCountEntity> = emptyList(),
+    /** 기록한 걷기. 다 걸은 것만 담습니다 — 걷는 중인 길은 아직 기록이 아닙니다. */
+    val walks: List<WalkEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -48,13 +52,14 @@ data class AppDataSnapshot(
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
             contentMemos.size + diaries.size + todos.size + books.size + growthReports.size +
-            moodLogs.size + bookReadingLogs.size
+            moodLogs.size + bookReadingLogs.size + stepCounts.size + walks.size
 }
 
 object AppDataJson {
-    // 옛 앱은 같은 날 기분을 합쳐 지웁니다. 칸은 그대로여도 서로 붙지 않게 형식을 올립니다
-    // (사용자가 정함, 2026-10-29). Room은 칸·인덱스가 바뀌지 않아 23 그대로입니다.
-    const val schemaVersion: Int = 24
+    // 걸음 수(`stepCounts`)와 걷기(`walks`)가 생겼습니다(사용자가 정함, 2026-11-07). 옛 서버는 둘을 몰라 받아도
+    // 버리므로 형식을 올립니다. Room은 표 둘이 늘어 24입니다. 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고
+    // 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 25
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -152,6 +157,20 @@ object AppDataJson {
                 snapshot.contentMemos.forEach { memo -> put(memo.toJson()) }
             }
         )
+        .put("stepCountCount", snapshot.stepCounts.size)
+        .put(
+            "stepCounts",
+            JSONArray().apply {
+                snapshot.stepCounts.forEach { count -> put(count.toJson()) }
+            }
+        )
+        .put("walkCount", snapshot.walks.size)
+        .put(
+            "walks",
+            JSONArray().apply {
+                snapshot.walks.forEach { walk -> put(walk.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -173,6 +192,8 @@ object AppDataJson {
             growthReports = payload.optJSONArray("growthReports").toGrowthReports(),
             moodLogs = payload.optJSONArray("moodLogs").toMoodLogs(),
             bookReadingLogs = payload.optJSONArray("bookReadingLogs").toBookReadingLogs(),
+            stepCounts = payload.optJSONArray("stepCounts").toStepCounts(),
+            walks = payload.optJSONArray("walks").toWalks(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -279,6 +300,78 @@ object AppDataJson {
                         startPage = log.optInt("startPage", 0),
                         endPage = log.optInt("endPage", 0),
                         createdAt = log.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
+
+    private fun StepCountEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("date", date)
+        .put("steps", steps)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toStepCounts(): List<StepCountEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val count = optJSONObject(index) ?: continue
+                val date = count.optString("date")
+                // 어느 날인지 모르면 걸은 날로도 그래프로도 놓을 수 없습니다.
+                if (date.isBlank()) continue
+                add(
+                    StepCountEntity(
+                        id = count.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(count.optString("syncId")),
+                        updatedAt = count.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: count.optLong("createdAt", 0L),
+                        date = date,
+                        steps = count.optInt("steps", 0).coerceAtLeast(0),
+                        createdAt = count.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
+
+    private fun WalkEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("startedAt", startedAt)
+        .put("endedAt", endedAt)
+        .put("distanceMeters", distanceMeters)
+        .put("steps", steps)
+        .put("path", path)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toWalks(): List<WalkEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val walk = optJSONObject(index) ?: continue
+                val startedAt = walk.optLong("startedAt", 0L)
+                val endedAt = walk.optLong("endedAt", 0L)
+                // 언제 걸었는지 모르거나 아직 걷는 중인 것은 받지 않습니다. 끝나지 않은 걷기가 다른 기기에서 와서
+                // 이 기기의 "걷는 중"으로 보이면 끝낼 길이 없습니다.
+                if (startedAt <= 0L || endedAt < startedAt) continue
+                add(
+                    WalkEntity(
+                        id = walk.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(walk.optString("syncId")),
+                        updatedAt = walk.optLong("updatedAt", 0L)
+                            .takeIf { it > 0L }
+                            ?: walk.optLong("createdAt", 0L),
+                        startedAt = startedAt,
+                        endedAt = endedAt,
+                        distanceMeters = walk.optInt("distanceMeters", 0).coerceAtLeast(0),
+                        steps = walk.optInt("steps", 0).coerceAtLeast(0),
+                        path = walk.optString("path"),
+                        createdAt = walk.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
             }

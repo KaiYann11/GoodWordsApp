@@ -20,9 +20,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookEntity::class,
         GrowthReportEntity::class,
         MoodLogEntity::class,
-        BookReadingLogEntity::class
+        BookReadingLogEntity::class,
+        StepCountEntity::class,
+        WalkEntity::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -40,8 +42,48 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun growthReportDao(): GrowthReportDao
     abstract fun moodLogDao(): MoodLogDao
     abstract fun bookReadingLogDao(): BookReadingLogDao
+    abstract fun stepCountDao(): StepCountDao
+    abstract fun walkDao(): WalkDao
 
     companion object {
+        /**
+         * 하루 걸음 수와 걷기를 담을 자리를 만듭니다(사용자가 정함, 2026-11-07). 기존 표는 건드리지 않습니다.
+         *
+         * 옮겨 올 것이 없습니다. 걸음 수는 Health Connect에서 지난 30일을 다시 읽어 오고, 걷기는 이제부터 기록합니다.
+         * 칸·인덱스 이름은 [StepCountEntity]·[WalkEntity]와 정확히 같아야 합니다 — 어긋나면 Room이 열기를 거부합니다.
+         */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS step_counts (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "date TEXT NOT NULL, " +
+                        "steps INTEGER NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_step_counts_syncId ON step_counts (syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_step_counts_date ON step_counts (date)")
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS walks (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "startedAt INTEGER NOT NULL, " +
+                        "endedAt INTEGER NOT NULL, " +
+                        "distanceMeters INTEGER NOT NULL, " +
+                        "steps INTEGER NOT NULL, " +
+                        "path TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_walks_syncId ON walks (syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_walks_startedAt ON walks (startedAt)")
+            }
+        }
+
         /**
          * 이상향·목표·롤모델에 이어 둔 루틴을 담을 자리를 만듭니다. 세 종류 자체는 표를 건드리지 않습니다.
          *

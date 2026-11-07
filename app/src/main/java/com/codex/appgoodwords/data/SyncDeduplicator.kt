@@ -24,6 +24,16 @@ object SyncDeduplicator {
         val reports = resolve(snapshot.growthReports, { it.syncId }, { it.updatedAt }, ::reportFingerprint)
         val moodLogs = resolve(snapshot.moodLogs, { it.syncId }, { it.updatedAt }, ::moodLogFingerprint)
         val readingLogs = resolve(snapshot.bookReadingLogs, { it.syncId }, { it.updatedAt }, ::readingLogFingerprint)
+        // 같은 날을 두 기기가 각각 읽었으면 걸음이 많은 쪽입니다. 나중에 읽은 쪽을 남기면, 걸음을 덜 본 기기가
+        // 걸은 날을 지웁니다. 서버 `deduplicate()`와 같은 차례여야 합니다.
+        val stepCounts = resolve(
+            snapshot.stepCounts,
+            { it.syncId },
+            { it.updatedAt },
+            ::stepCountFingerprint,
+            winner = compareBy<StepCountEntity>({ it.steps }, { it.updatedAt }, { it.syncId })
+        )
+        val walks = resolve(snapshot.walks, { it.syncId }, { it.updatedAt }, ::walkFingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -44,6 +54,8 @@ object SyncDeduplicator {
             books = books.kept,
             growthReports = reports.kept,
             moodLogs = moodLogs.kept,
+            stepCounts = stepCounts.kept,
+            walks = walks.kept,
             // 사라진 책을 가리키던 독서 기록은 남은 책으로 옮겨 붙입니다.
             bookReadingLogs = readingLogs.kept.map { log ->
                 if (log.bookSyncId.isBlank()) log
@@ -83,13 +95,15 @@ object SyncDeduplicator {
         records: List<T>,
         syncId: (T) -> String,
         updatedAt: (T) -> Long,
-        fingerprint: (T) -> String
+        fingerprint: (T) -> String,
+        /** 묶음에서 남길 쪽. 대개 최근에 손댄 쪽이고, 같으면 `syncId` 순입니다. */
+        winner: Comparator<T> = compareBy({ updatedAt(it) }, { syncId(it) })
     ): Resolution<T> {
         // 내용이 비어 있으면 무엇과도 같아 보이므로 묶지 않는다.
         val winnerByFingerprint = records
             .filter { fingerprint(it).isNotBlank() }
             .groupBy(fingerprint)
-            .mapValues { (_, group) -> group.maxWith(compareBy({ updatedAt(it) }, { syncId(it) })) }
+            .mapValues { (_, group) -> group.maxWith(winner) }
 
         val movedTo = mutableMapOf<String, String>()
         val kept = records.filter { record ->
@@ -182,6 +196,16 @@ object SyncDeduplicator {
      */
     private fun readingLogFingerprint(log: BookReadingLogEntity): String =
         log.bookSyncId.trim() + "|" + log.readDate.trim()
+
+    /** 하루에 하나입니다. 서버 `stepCountFingerprint`와 같아야 합니다. */
+    private fun stepCountFingerprint(count: StepCountEntity): String = count.date.trim()
+
+    /**
+     * 시작한 순간(밀리초)이 같으면 같은 걷기입니다. 두 걷기가 같은 밀리초에 시작할 일은 없고, 같은 걷기를
+     * 다른 `syncId`로 다시 올려도(예전 설치의 백업 등) 한 번만 남습니다. 서버 `walkFingerprint`와 같아야 합니다.
+     */
+    private fun walkFingerprint(walk: WalkEntity): String =
+        if (walk.startedAt > 0L) walk.startedAt.toString() else ""
 
     /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 봅니다. */
     private fun normalize(value: String): String = value.trim().lowercase().replace(WHITESPACE, " ")

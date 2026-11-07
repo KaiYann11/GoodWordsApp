@@ -71,6 +71,17 @@ class AppDataSnapshotCountTest {
                 contentTitle = "글귀",
                 body = "이 문장이 오늘 눈에 들어왔다."
             )
+        ),
+        stepCounts = listOf(StepCountEntity(id = 1, syncId = "sc1", date = "2026-08-26", steps = 6_240)),
+        walks = listOf(
+            WalkEntity(
+                id = 1,
+                syncId = "w1",
+                startedAt = 1_000_000L,
+                endedAt = 1_600_000L,
+                distanceMeters = 830,
+                path = WalkPath.encode(listOf(GeoPoint(37.5665, 126.978), GeoPoint(37.57, 126.98)))
+            )
         )
     )
 
@@ -96,12 +107,14 @@ class AppDataSnapshotCountTest {
         assertEquals(32, restored.bookReadingLogs.single().pagesRead)
         assertEquals("글귀 메모가 파일에 담기지 않았습니다.", 1, restored.contentMemos.size)
         assertEquals("i1", restored.contentMemos.single().contentItemSyncId)
+        assertEquals("걸음 수가 파일에 담기지 않았습니다.", 6_240, restored.stepCounts.single().steps)
+        assertEquals("걷기가 파일에 담기지 않았습니다.", 2, WalkPath.decode(restored.walks.single().path).size)
     }
 
     @Test
     fun theCountAddsUpEveryKind() {
         // 새 종류를 만들고 recordCount에 더하지 않으면 여기서 걸립니다.
-        assertEquals(12, snapshot.recordCount)
+        assertEquals(14, snapshot.recordCount)
     }
 
     @Test

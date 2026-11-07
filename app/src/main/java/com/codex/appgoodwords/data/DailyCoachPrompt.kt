@@ -137,6 +137,11 @@ object DailyCoachPrompt {
             names("할 일", dayDigest.todoTitles)?.let { add(it) }
             names("읽은 글귀", dayDigest.quoteTitles)?.let { add(it) }
             names("독서", dayDigest.bookTitles)?.let { add(it) }
+            // 걷기는 숫자만 갑니다(사용자가 정함, 2026-11-07). 지나온 길·위치는 DayDigest에 담기지도 않습니다.
+            // 걸은 날이 된 뒤에만 싣습니다 — 아침의 몇백 걸음만 보고 말을 걸면 모자란 걸음을 세는 셈입니다.
+            if (dayDigest.score.walked) {
+                Walking.factLine(dayDigest.score.walkSteps, dayDigest.walks)?.let { add("걷기: $it") }
+            }
             // 일기는 제목도 본문으로 봅니다. 켜지 않으면 날짜·기분·날씨·글자 수만 나갑니다 —
             // 그 규칙은 GrowthPrompt.diaryLine 한 곳에 있습니다.
             todayDiaries.forEach { add("일기: " + GrowthPrompt.diaryLine(it, includeDiaryBody)) }

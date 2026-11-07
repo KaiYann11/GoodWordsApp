@@ -1,7 +1,13 @@
 package com.codex.appgoodwords.ui
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.health.connect.client.HealthConnectClient
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,6 +22,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.Add
@@ -79,6 +86,8 @@ import com.codex.appgoodwords.data.BookProgressCalculator
 import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DayMood
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.HealthConnection
+import com.codex.appgoodwords.data.HealthSteps
 import com.codex.appgoodwords.data.ContentType
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureEventType
@@ -123,8 +132,12 @@ import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
 import com.codex.appgoodwords.ui.screen.SettingsSection
 import com.codex.appgoodwords.ui.screen.TodoScreen
+import com.codex.appgoodwords.ui.screen.WalkCard
+import com.codex.appgoodwords.ui.screen.WalkDetail
+import com.codex.appgoodwords.ui.screen.WalkScreen
 import com.codex.appgoodwords.ui.theme.AppGoodWordsTheme
 import com.codex.appgoodwords.work.AppNotifications
+import com.codex.appgoodwords.work.WalkRecordingService
 import com.codex.appgoodwords.work.DailyCoachSchedule
 import java.time.LocalDate
 import java.time.ZoneId
@@ -165,6 +178,11 @@ private enum class AppTab(
     COACH_TALK("오늘의 한마디"),
     /** 붙여 둔 첨부 모아 보기. 일기 화면에서 엽니다. */
     GALLERY("모아 보기"),
+    /**
+     * 걷기(사용자가 정함, 2026-11-07). 홈 걷기 카드·하루의 걸음 "걷기"·기록 알림에서 엽니다. 하단 바에는 없습니다 —
+     * 매일 손이 가는 것은 홈의 카드입니다.
+     */
+    WALK("걷기"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
     SETTINGS("설정")
@@ -196,7 +214,9 @@ private data class AppDestination(
     /** 쌓인 기록을 펼친 루틴. */
     val statsRoutineId: Long? = null,
     /** 펼친 이상향·목표·롤모델. */
-    val goalId: Long? = null
+    val goalId: Long? = null,
+    /** 지도에 펼친 걷기. */
+    val walkSyncId: String? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -225,6 +245,12 @@ fun AppGoodWordsApp(
     val contentMemos by viewModel.contentMemos.collectAsStateWithLifecycle()
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
+    val walks by viewModel.walks.collectAsStateWithLifecycle()
+    val stepCounts by viewModel.stepCounts.collectAsStateWithLifecycle()
+    val walkGoalSteps by viewModel.walkGoalSteps.collectAsStateWithLifecycle()
+    val walkRecording by viewModel.walkRecording.collectAsStateWithLifecycle()
+    val healthConnection by viewModel.healthConnection.collectAsStateWithLifecycle()
+    val openWalkRequest by viewModel.openWalkRequest.collectAsStateWithLifecycle()
     val openedDayDigest by viewModel.openedDayDigest.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val feedbackNotes by viewModel.feedbackNotes.collectAsStateWithLifecycle()
@@ -345,6 +371,60 @@ fun AppGoodWordsApp(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+
+    // 걸음 수는 Health Connect에서 읽습니다. 권한 창은 Health Connect가 띄웁니다(사용자가 정함, 2026-11-07).
+    val healthPermissionLauncher = rememberLauncherForActivityResult(HealthSteps.permissionContract()) { granted ->
+        viewModel.onHealthPermissionResult(granted)
+        if (granted.isEmpty()) {
+            coroutineScope.launch {
+                // 두 번 거절하면 창이 다시 뜨지 않습니다. 그때는 Health Connect 설정에서 켜야 합니다.
+                val result = snackbarHostState.showSnackbar(
+                    message = "걸음 수를 읽으려면 Health Connect에서 이 앱의 걸음 읽기를 허용해 주세요.",
+                    actionLabel = "설정 열기"
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    runCatching { context.startActivity(Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)) }
+                }
+            }
+        }
+    }
+
+    // 걸은 길은 "걷기 기록 시작"을 누른 동안에만 위치를 받습니다. 처음 누를 때 위치 권한을 묻습니다.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result.values.any { it }) {
+            viewModel.startWalk()
+        } else {
+            coroutineScope.launch { snackbarHostState.showSnackbar("위치 권한을 허용해야 걸은 길을 기록할 수 있습니다.") }
+        }
+    }
+
+    fun connectHealth() {
+        if (healthConnection == HealthConnection.NEEDS_UPDATE) {
+            // Android 13 아래에서는 Health Connect가 따로 깔리는 앱입니다. 스토어의 그 자리로 보냅니다.
+            runCatching {
+                context.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("market://details?id=${HealthSteps.PROVIDER_PACKAGE}&url=healthconnect%3A%2F%2Fonboarding")
+                    ).setPackage("com.android.vending")
+                )
+            }
+        } else {
+            healthPermissionLauncher.launch(viewModel.healthStepsPermissions)
+        }
+    }
+
+    fun startWalk() {
+        if (WalkRecordingService.hasLocationPermission(context)) {
+            viewModel.startWalk()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     fun unlockDiary(onUnlocked: () -> Unit = {}) {
@@ -544,6 +624,14 @@ fun AppGoodWordsApp(
         }
     }
 
+    // 걷기 기록 알림을 눌러 왔으면 걷기 화면으로. 뒤로 가면 홈입니다.
+    LaunchedEffect(openWalkRequest) {
+        if (openWalkRequest) {
+            if (currentTab != AppTab.WALK) navStack = listOf(tabRoute(AppTab.HOME), tabRoute(AppTab.WALK))
+            viewModel.consumeOpenWalkRequest()
+        }
+    }
+
     // 코치의 답 알림을 눌러 왔으면 그 대화로 데려갑니다. 답을 읽고 바로 이어 말할 수 있게.
     LaunchedEffect(openDailyCoachTalkRequest) {
         if (openDailyCoachTalkRequest) {
@@ -670,6 +758,10 @@ fun AppGoodWordsApp(
                 ) else digest,
                 onMove = { date -> viewModel.openDay(date) },
                 onDeleteMood = viewModel::clearMoodLog,
+                onOpenWalk = { syncId ->
+                    viewModel.closeDay()
+                    pushRoute(walkRoute(syncId))
+                },
                 onDismiss = { viewModel.closeDay() }
             )
         }
@@ -817,6 +909,7 @@ fun AppGoodWordsApp(
                                                 AppTab.ROUTINE_STATS -> Icons.Outlined.CheckCircle
                                                 AppTab.GROWTH, AppTab.COACH_TALK -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
+                                                AppTab.WALK -> Icons.AutoMirrored.Outlined.DirectionsWalk
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS -> Icons.Outlined.Settings
                                             },
@@ -953,7 +1046,23 @@ fun AppGoodWordsApp(
                                             focusRoute(SearchKind.BOOK, 0L)
                                         )
                                     }
+                                    DailyStep.WALK -> pushRoute(tabRoute(AppTab.WALK))
                                 }
+                            },
+                            // 걷기는 걸음 카드 바로 아래입니다(사용자가 고름, 2026-11-07).
+                            walkCard = {
+                                WalkCard(
+                                    todaySteps = todayScore.walkSteps,
+                                    walkedToday = todayScore.walked,
+                                    connection = healthConnection,
+                                    latestWalk = walks.firstOrNull { it.isFinished },
+                                    ongoingWalk = walks.firstOrNull { !it.isFinished },
+                                    recording = walkRecording,
+                                    onConnectHealth = { connectHealth() },
+                                    onStart = { startWalk() },
+                                    onStop = { viewModel.stopWalk() },
+                                    onOpenWalks = { pushRoute(tabRoute(AppTab.WALK)) }
+                                )
                             },
                             latestReport = growthReports.firstOrNull(),
                             onOpenGrowth = { pushRoute(tabRoute(AppTab.GROWTH)) },
@@ -1693,6 +1802,36 @@ fun AppGoodWordsApp(
                             onSeen = { viewModel.markDailyCoachSeen() }
                         )
 
+                        AppTab.WALK -> {
+                            val opened = destination.walkSyncId?.let { id -> walks.firstOrNull { it.syncId == id } }
+                            if (destination.walkSyncId != null && opened == null) {
+                                // 지웠거나 다른 기기에서 지운 걷기입니다. 목록으로 돌아갑니다.
+                                LaunchedEffect(destination.walkSyncId) { popRoute() }
+                            } else if (opened != null) {
+                                WalkDetail(
+                                    walk = opened,
+                                    modifier = Modifier.padding(innerPadding),
+                                    onDelete = {
+                                        viewModel.deleteWalk(opened.syncId)
+                                        popRoute()
+                                    }
+                                )
+                            } else {
+                                WalkScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    walks = walks,
+                                    stepCounts = stepCounts,
+                                    goalSteps = walkGoalSteps,
+                                    connection = healthConnection,
+                                    recording = walkRecording,
+                                    onConnectHealth = { connectHealth() },
+                                    onStart = { startWalk() },
+                                    onStop = { viewModel.stopWalk() },
+                                    onOpenWalk = { syncId -> pushRoute(walkRoute(syncId)) }
+                                )
+                            }
+                        }
+
                         AppTab.GALLERY -> AttachmentGalleryScreen(
                             modifier = Modifier.padding(innerPadding),
                             diaryLocked = diaryLocked,
@@ -1824,6 +1963,10 @@ fun AppGoodWordsApp(
                             },
                             dailySteps = dailySteps,
                             onDailyStepsChanged = { updated -> viewModel.setDailySteps(updated) },
+                            walkGoalSteps = walkGoalSteps,
+                            onWalkGoalStepsChanged = { steps -> viewModel.setWalkGoalSteps(steps) },
+                            healthConnection = healthConnection,
+                            onConnectHealth = { connectHealth() },
                             onServerSyncSettingsChanged = viewModel::updateServerSyncSettings,
                             onSendTestNotification = {
                                 viewModel.sendTestNotification()
@@ -2049,6 +2192,9 @@ private fun routineStatsRoute(routineId: Long): String = "routine-stats:$routine
 /** 이상향·목표·롤모델 하나. 목표 탭의 카드나 홈의 한 줄에서 엽니다. */
 private fun goalRoute(goalId: Long): String = "goal:$goalId"
 
+/** 걷기 하나를 지도에 펼칩니다. 기기마다 같은 syncId로 가리킵니다(콜론이 들어가지 않습니다). */
+private fun walkRoute(syncId: String): String = "walk:$syncId"
+
 /** 막 적은 목표가 목록에 따라오기를 기다리는 시간. 지나도 없으면 다른 기기에서 지운 것으로 보고 목록으로 돌립니다. */
 private const val GOAL_APPEAR_GRACE_MS = 1_500L
 
@@ -2104,6 +2250,10 @@ private fun parseRoute(route: String): AppDestination {
         "routine-stats" -> AppDestination(
             tab = AppTab.ROUTINE_STATS,
             statsRoutineId = parts.getOrNull(1)?.toLongOrNull()
+        )
+        "walk" -> AppDestination(
+            tab = AppTab.WALK,
+            walkSyncId = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
         )
         "edit" -> AppDestination(
             tab = AppTab.ADD,

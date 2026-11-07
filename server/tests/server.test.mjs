@@ -205,6 +205,8 @@ function emptySnapshot(overrides = {}) {
     growthReports: [],
     moodLogs: [],
     bookReadingLogs: [],
+    stepCounts: [],
+    walks: [],
     ...overrides,
   };
 }
@@ -2680,7 +2682,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 24);
+    assert.equal(stored.schemaVersion, 25);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2895,9 +2897,10 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("날짜로 합치는 옛 앱과 구별할 형식 24를 알린다", async () => {
+  it("걷기를 모르는 옛 앱과 구별할 형식 25를 알린다", async () => {
+    // 24는 날짜로 기분을 합치는 옛 앱과 가르려고, 25는 걸음 수·걷기를 버리는 옛 앱과 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 24);
+    assert.equal(health.schemaVersion, 25);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {
@@ -3630,5 +3633,116 @@ describe("글귀 메모와 루틴 뽑기", () => {
     const routine = await (await api("/api/routines", { method: "POST", body: { title: "손으로 만든 것" } })).json();
 
     assert.equal(routine.sourceContentSyncId, "");
+  });
+});
+
+describe("걷기", () => {
+  // 시청에서 광화문 쪽으로 두 점(앱 WalkPath.encode와 같은 polyline).
+  const path = "sehdFok_fWwy@nF";
+
+  function stepCount(overrides = {}) {
+    return { id: 1, syncId: "steps-1", updatedAt: 1_000, date: "2026-11-07", steps: 6_240, createdAt: 1_000, ...overrides };
+  }
+
+  function walk(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "walk-1",
+      updatedAt: 2_000,
+      startedAt: 1_762_508_400_000,
+      endedAt: 1_762_510_320_000,
+      distanceMeters: 2_100,
+      steps: 2_900,
+      path,
+      createdAt: 2_000,
+      ...overrides,
+    };
+  }
+
+  it("걸음 수와 걷기가 스냅샷에 그대로 남는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ stepCounts: [stepCount()], walks: [walk()] }) });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.stepCountCount, 1);
+    assert.equal(stored.walkCount, 1);
+    assert.equal(stored.stepCounts[0].steps, 6_240);
+    assert.equal(stored.walks[0].path, path);
+    assert.equal(stored.walks[0].distanceMeters, 2_100);
+  });
+
+  it("업로드가 걷기만 남겨 두지 않는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ stepCounts: [stepCount()], walks: [walk()] }) });
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.stepCounts.length, 0);
+    assert.equal(stored.walks.length, 0);
+  });
+
+  it("날짜 없는 걸음 수와 끝나지 않은 걷기는 받지 않고, 깨진 길은 비운다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        stepCounts: [stepCount({ date: "" }), stepCount({ syncId: "steps-2", date: "어제" })],
+        walks: [
+          walk({ syncId: "ongoing", endedAt: 0 }),
+          walk({ syncId: "broken", startedAt: 5_000_000, endedAt: 6_000_000, path: "<script>" }),
+        ],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.equal(stored.stepCounts.length, 0);
+    assert.deepEqual(stored.walks.map((entry) => entry.syncId), ["broken"]);
+    assert.equal(stored.walks[0].path, "", "polyline 글자가 아닌 길은 버립니다.");
+    assert.equal(stored.walks[0].distanceMeters, 2_100, "길만 비우고 거리는 남깁니다.");
+  });
+
+  it("같은 날을 두 기기가 읽으면 걸음이 많은 쪽을 남긴다", async () => {
+    // 앱 WalkSyncTest와 같은 경계입니다. 나중에 읽은 쪽을 남기면 걸음을 덜 본 기기가 걸은 날을 지웁니다.
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ stepCounts: [stepCount({ syncId: "phone", updatedAt: 100 })] }) });
+
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ stepCounts: [stepCount({ syncId: "tablet", steps: 300, updatedAt: 200 })] }),
+    })).json();
+
+    assert.deepEqual(merged.stepCounts.map((entry) => entry.syncId), ["phone"]);
+    assert.ok(merged.deletions.some((entry) => entry.syncId === "tablet" && entry.entityType === "STEP_COUNT"));
+  });
+
+  it("같은 걷기는 한 번만 남고, 지운 걷기는 되살아나지 않는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ walks: [walk()] }) });
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ walks: [walk({ syncId: "walk-copy", updatedAt: 3_000 })] }),
+    })).json();
+    assert.deepEqual(merged.walks.map((entry) => entry.syncId), ["walk-copy"]);
+
+    const afterDelete = await (await api("/api/sync", {
+      method: "POST",
+      // 90일 넘은 표식은 서버가 정리합니다. 지금 지운 것으로 보냅니다.
+      body: emptySnapshot({ deletions: [{ syncId: "walk-copy", entityType: "WALK", deletedAt: Date.now() }] }),
+    })).json();
+
+    assert.equal(afterDelete.walks.length, 0);
+    assert.ok(afterDelete.deletions.some((entry) => entry.syncId === "walk-copy" && entry.entityType === "WALK"));
+  });
+
+  it("바뀐 것만 달라고 하면 새 걷기만 온다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ walks: [walk()], stepCounts: [stepCount()] }) });
+    const first = await (await api("/api/sync", { method: "POST", body: emptySnapshot() })).json();
+
+    const delta = await (await api(`/api/sync?since=${first.rev}`, {
+      method: "POST",
+      body: emptySnapshot({ walks: [walk({ syncId: "walk-2", startedAt: 1_762_600_000_000, endedAt: 1_762_601_000_000 })] }),
+    })).json();
+
+    assert.equal(delta.partial, true);
+    assert.deepEqual(delta.walks.map((entry) => entry.syncId), ["walk-2"]);
+    assert.equal(delta.stepCounts.length, 0);
   });
 });
