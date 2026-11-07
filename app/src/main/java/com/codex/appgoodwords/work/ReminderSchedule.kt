@@ -2,8 +2,11 @@ package com.codex.appgoodwords.work
 
 import com.codex.appgoodwords.data.ReminderSettings
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 import kotlin.math.max
 
 /**
@@ -44,23 +47,27 @@ object ReminderSchedule {
         return Duration.ofMinutes(intervalMinutes)
     }
 
-    /** 하루 정리 알림의 다음 실행까지 남은 시간. 오늘 시각이 지났으면 내일입니다. */
-    fun nextDailyDelay(
+    /**
+     * 하루 한 번 울리는 알람([DailyAlarm])의 다음 시각(epoch 밀리초). 오늘 그 시각이 지났으면 내일입니다.
+     *
+     * **언제 물어도 같은 시각이 나와야 합니다.** 앱이 켜질 때마다 다시 거는데, 1.18.0까지의 WorkManager 예약은
+     * 켤 때마다 앞당겨졌습니다([DailyAlarm]). 벽시계로 셉니다 — 서머타임이 있는 곳에서 "24시간 뒤"로 세면 한 시간 어긋납니다.
+     */
+    fun nextDailyAt(
         hour: Int,
         minute: Int,
-        now: LocalDateTime
-    ): Duration {
-        var next = now
-            .withHour(hour)
-            .withMinute(minute)
-            .withSecond(0)
-            .withNano(0)
+        nowMillis: Long,
+        zone: ZoneId
+    ): Long {
+        val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
+        val time = LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59))
+        var next = now.toLocalDate().atTime(time).atZone(zone)
 
         if (!next.isAfter(now)) {
-            next = next.plusDays(1)
+            next = now.toLocalDate().plusDays(1).atTime(time).atZone(zone)
         }
 
-        return Duration.between(now, next)
+        return next.toInstant().toEpochMilli()
     }
 
     private fun buildWindow(

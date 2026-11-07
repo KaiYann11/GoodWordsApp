@@ -29,6 +29,8 @@ object AppNotifications {
     const val summarySilentChannelId = "daily_good_words_summary_silent"
     const val todoChannelId = "good_words_todo_alarm"
     const val coachChannelId = "good_words_daily_coach"
+    /** 일일 집계 알림. 날마다 같은 자리에 덮어써서 어제 것이 쌓이지 않습니다. */
+    const val dailySummaryNotificationId = 9_002
     const val actionMarkRead = "com.codex.appgoodwords.action.MARK_READ"
     const val actionCheckRoutine = "com.codex.appgoodwords.action.CHECK_ROUTINE"
     const val extraContentId = "extra_content_id"
@@ -469,7 +471,7 @@ object AppNotifications {
             .setSilent(!soundEnabled)
             .build()
 
-        NotificationManagerCompat.from(context).notify(9_002, notification)
+        NotificationManagerCompat.from(context).notify(dailySummaryNotificationId, notification)
     }
 
     /**

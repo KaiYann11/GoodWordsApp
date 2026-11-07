@@ -748,7 +748,6 @@ class MainViewModel(
             container.reminderScheduler.syncAutoSync(container.settingsStore.getServerSyncSettings())
             val aiSettings = container.settingsStore.getAiFeedbackSettings()
             container.reminderScheduler.syncGrowthFeedback(aiSettings)
-            container.reminderScheduler.syncGrowthNudge(aiSettings)
             container.reminderScheduler.syncDailyCoach(aiSettings, container.dailyCoachCoordinator.state())
             _lockState.value = if (container.settingsStore.appLockEnabledFlow.first()) {
                 AppLockState.LOCKED
@@ -1317,7 +1316,6 @@ class MainViewModel(
         viewModelScope.launch {
             container.settingsStore.updateAiFeedbackSettings(updated)
             container.reminderScheduler.syncGrowthFeedback(updated)
-            container.reminderScheduler.syncGrowthNudge(updated)
             container.reminderScheduler.syncDailyCoach(updated, container.dailyCoachCoordinator.state())
         }
     }

@@ -3,6 +3,7 @@ package com.codex.appgoodwords.work
 import com.codex.appgoodwords.data.ReminderSettings
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -104,18 +105,49 @@ class ReminderScheduleTest {
     }
 
     @Test
-    fun dailySummaryWaitsForTodayWhenItHasNotPassed() {
-        val delay = ReminderSchedule.nextDailyDelay(hour = 21, minute = 0, now = at("2026-08-10T20:15"))
+    fun dailyAlarmWaitsForTodayWhenItHasNotPassed() {
+        val next = ReminderSchedule.nextDailyAt(hour = 21, minute = 0, nowMillis = millis("2026-08-10T20:15"), zone = seoul)
 
-        assertEquals(Duration.ofMinutes(45), delay)
+        assertEquals(millis("2026-08-10T21:00"), next)
     }
 
     @Test
-    fun dailySummaryMovesToTomorrowOnceItHasPassed() {
-        val delay = ReminderSchedule.nextDailyDelay(hour = 21, minute = 0, now = at("2026-08-10T21:00"))
+    fun dailyAlarmMovesToTomorrowOnceItHasPassed() {
+        val next = ReminderSchedule.nextDailyAt(hour = 21, minute = 0, nowMillis = millis("2026-08-10T21:00"), zone = seoul)
 
-        assertEquals("정각에 다시 예약하면 같은 날 두 번 울린다", Duration.ofHours(24), delay)
+        assertEquals("정각에 다시 걸면 같은 날 두 번 울린다", millis("2026-08-11T21:00"), next)
     }
 
+    @Test
+    fun dailyAlarmIsTheSameWheneverTheAppAsks() {
+        // 앱이 켜질 때마다 다시 겁니다. 1.18.0까지는 켤 때마다 앞당겨져 정한 시각에 오지 않았습니다.
+        val asked = listOf("2026-08-10T07:05", "2026-08-10T13:40", "2026-08-10T20:59").map { now ->
+            ReminderSchedule.nextDailyAt(hour = 21, minute = 0, nowMillis = millis(now), zone = seoul)
+        }
+
+        assertEquals(List(3) { millis("2026-08-10T21:00") }, asked)
+    }
+
+    @Test
+    fun dailyAlarmKeepsTheWallClockAcrossDaylightSaving() {
+        // 뉴욕은 2026-03-08 새벽에 한 시간을 건너뜁니다. 24시간 뒤로 세면 22:00에 울립니다.
+        val newYork = ZoneId.of("America/New_York")
+
+        val next = ReminderSchedule.nextDailyAt(
+            hour = 21,
+            minute = 0,
+            nowMillis = millis("2026-03-07T21:00", newYork),
+            zone = newYork
+        )
+
+        assertEquals(millis("2026-03-08T21:00", newYork), next)
+        assertEquals(Duration.ofHours(23), Duration.ofMillis(next - millis("2026-03-07T21:00", newYork)))
+    }
+
+    private val seoul = ZoneId.of("Asia/Seoul")
+
     private fun at(text: String): LocalDateTime = LocalDateTime.parse(text)
+
+    private fun millis(text: String, zone: ZoneId = seoul): Long =
+        at(text).atZone(zone).toInstant().toEpochMilli()
 }

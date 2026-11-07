@@ -7,7 +7,7 @@ import com.codex.appgoodwords.AppGoodWordsApplication
 import com.codex.appgoodwords.data.ReportPeriod
 
 /**
- * 주기가 돌아오면 성장 피드백을 만들고 알려 줍니다.
+ * 주기가 돌아오면 성장 피드백을 만들고 알려 줍니다. 정한 시각에 알람이 깨웁니다([DailyAlarm]).
  *
  * 주기가 이레·한 달이어도 **매일 깨어납니다.** 그 사이 폰이 꺼져 있거나 절전에 걸리면
  * 이레짜리 예약은 다음 차례가 통째로 밀리기 때문입니다. 깨어나서는 오늘이 그날인지만 봅니다.
