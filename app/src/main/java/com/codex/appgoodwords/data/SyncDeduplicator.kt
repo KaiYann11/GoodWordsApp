@@ -34,6 +34,7 @@ object SyncDeduplicator {
             winner = compareBy<StepCountEntity>({ it.steps }, { it.updatedAt }, { it.syncId })
         )
         val walks = resolve(snapshot.walks, { it.syncId }, { it.updatedAt }, ::walkFingerprint)
+        val goalTimeLogs = resolve(snapshot.goalTimeLogs, { it.syncId }, { it.updatedAt }, ::goalTimeLogFingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -56,6 +57,8 @@ object SyncDeduplicator {
             moodLogs = moodLogs.kept,
             stepCounts = stepCounts.kept,
             walks = walks.kept,
+            // 사라진 목표를 가리키던 시간은 남은 목표로 옮겨 붙입니다. 안 옮기면 쌓은 시간이 목표를 잃습니다.
+            goalTimeLogs = goalTimeLogs.kept.map { log -> log.copy(goalSyncId = items.survivorOf(log.goalSyncId)) },
             // 사라진 책을 가리키던 독서 기록은 남은 책으로 옮겨 붙입니다.
             bookReadingLogs = readingLogs.kept.map { log ->
                 if (log.bookSyncId.isBlank()) log
@@ -206,6 +209,13 @@ object SyncDeduplicator {
      */
     private fun walkFingerprint(walk: WalkEntity): String =
         if (walk.startedAt > 0L) walk.startedAt.toString() else ""
+
+    /**
+     * 같은 목표에 같은 순간(밀리초) 남긴 시간이면 같은 기록입니다. 같은 기록을 다른 `syncId`로 다시 올려도(예전 설치의
+     * 백업 등) 한 번만 셉니다 — 두 번 세면 들인 시간이 부풀어 보입니다. 서버 `goalTimeLogFingerprint`와 같아야 합니다.
+     */
+    private fun goalTimeLogFingerprint(log: GoalTimeLogEntity): String =
+        if (log.goalSyncId.isBlank() || log.loggedAt <= 0L) "" else log.goalSyncId.trim() + "|" + log.loggedAt
 
     /** 띄어쓰기와 대소문자만 다른 것도 같은 내용으로 봅니다. */
     private fun normalize(value: String): String = value.trim().lowercase().replace(WHITESPACE, " ")

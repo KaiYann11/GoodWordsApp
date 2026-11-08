@@ -128,7 +128,9 @@ object DailyCoachPrompt {
         talk: List<DailyCoachLine> = emptyList(),
         zoneId: ZoneId = ZoneId.systemDefault(),
         /** 기존 요청 횟수로 방식을 돌립니다. 별도 횟수나 지난날 답을 저장하지 않습니다. */
-        askCount: Int = 0
+        askCount: Int = 0,
+        /** 목표에 들인 시간. [includeGoals]일 때 시간 숫자만 실립니다([GrowthPrompt.directionLines]). */
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
     ): DailyCoachDigest {
         val todayDiaries = diaries.filter { runCatching { LocalDate.parse(it.entryDate) }.getOrNull() == today }
 
@@ -183,7 +185,7 @@ object DailyCoachPrompt {
             moodLabel = dayDigest.score.mood?.label.orEmpty(),
             ownedQuoteLines = ownedQuoteLines,
             // 무엇이 나가는지는 한 곳에서 정합니다. 돌아보기와 같은 함수입니다.
-            directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines) else emptyList(),
+            directionLines = if (includeGoals) GrowthPrompt.directionLines(items, routines, goalTimeLogs, today, zoneId) else emptyList(),
             talkLines = talkLines(talk, zoneId, includeDiaryBody, includeGoals),
             givenQuoteLines = givenQuoteLines(today, talk, zoneId, includeDiaryBody, includeGoals),
             givenTipLines = givenTipLines(today, talk, zoneId, includeDiaryBody, includeGoals),

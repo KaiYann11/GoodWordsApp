@@ -192,7 +192,13 @@ class MainViewModel(
      * 저장하지 않고 그때그때 셉니다([GoalTracking]). 루틴 하나의 날수는 루틴 기록 화면과 같은 셈
      * ([RoutineStatsCalculator])이라 두 화면이 다른 숫자를 말하지 않습니다.
      */
-    val goalTracks = combine(allItems, contentMemos, routines, routineChecks) { items, memos, routineList, checks ->
+    val goalTracks = combine(
+        allItems,
+        contentMemos,
+        routines,
+        routineChecks,
+        container.repository.observeGoalTimeLogs()
+    ) { items, memos, routineList, checks, timeLogs ->
         val today = LocalDate.now()
         GoalTracking.build(
             goals = items.filter { it.type.isGoal },
@@ -200,9 +206,14 @@ class MainViewModel(
             routines = routineList,
             routineStats = RoutineStatsCalculator.buildAll(routineList, checks, today),
             items = items,
-            today = today
+            today = today,
+            timeLogs = timeLogs
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 목표에 들이는 시간을 재는 타이머. 이 기기에만 있고, 남기기를 눌러야 기록이 됩니다. */
+    val goalTimer = container.settingsStore.goalTimerFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** 홈 "오늘" 칸 맨 위의 한 줄. 목표 탭에 아무것도 없으면 null입니다. */
     val homeGoalLine = allItems
@@ -1131,6 +1142,13 @@ class MainViewModel(
         result
     }
 
+    /** 백업 하나를 지웁니다. 이미 없던 것이면 false입니다. 어느 쪽이든 목록은 새로 읽습니다. */
+    suspend fun deleteSyncBackup(backup: SyncBackup): Result<Boolean> = runCatching {
+        val deleted = container.syncBackupStore.delete(backup)
+        reloadSyncBackups()
+        deleted
+    }
+
     // ---- 일기 ----
 
     suspend fun getDiary(id: Long): DiaryEntity? = container.repository.getDiaryById(id)
@@ -1151,8 +1169,8 @@ class MainViewModel(
         Unit
     }
 
-    suspend fun updateBookProgress(id: Long, currentPage: Int): Result<Unit> = runCatching {
-        container.repository.updateBookProgress(id, currentPage)
+    suspend fun updateBookProgress(id: Long, currentPage: Int, note: String = ""): Result<Unit> = runCatching {
+        container.repository.updateBookProgress(id, currentPage, note = note)
         Unit
     }
 
@@ -1528,6 +1546,40 @@ class MainViewModel(
 
     suspend fun deleteContentMemo(memoId: Long): Result<Int> = runCatching {
         container.repository.deleteContentMemo(memoId)
+    }
+
+    /**
+     * 목표에 들인 시간을 남깁니다. 이 목표에서 끝낸 타이머가 있으면 그것을 남기는 것으로 봅니다 — 잰 것을 시작한 때로
+     * 적고 타이머를 비웁니다(칸에 채워진 잰 시간을 고쳤어도 같은 한 번입니다).
+     */
+    suspend fun addGoalTime(goalId: Long, minutes: Int, note: String): Result<Long> = runCatching {
+        val goal = container.repository.getContentItem(goalId) ?: error("목표를 찾을 수 없습니다.")
+        val measured = container.settingsStore.goalTimerFlow.first()
+            ?.takeIf { !it.running && it.goalSyncId == goal.syncId }
+        val id = container.repository.addGoalTime(
+            goalId = goalId,
+            minutes = minutes,
+            note = note,
+            loggedAt = measured?.startedAt ?: System.currentTimeMillis()
+        )
+        if (measured != null) container.settingsStore.clearGoalTimer()
+        id
+    }
+
+    suspend fun deleteGoalTime(id: Long): Result<Int> = runCatching {
+        container.repository.deleteGoalTime(id)
+    }
+
+    fun startGoalTimer(goalSyncId: String) {
+        viewModelScope.launch { container.settingsStore.startGoalTimer(goalSyncId, System.currentTimeMillis()) }
+    }
+
+    fun stopGoalTimer() {
+        viewModelScope.launch { container.settingsStore.stopGoalTimer(System.currentTimeMillis()) }
+    }
+
+    fun discardGoalTimer() {
+        viewModelScope.launch { container.settingsStore.clearGoalTimer() }
     }
 
     suspend fun deleteHistoryEvents(eventIds: Set<Long>): Result<Int> = runCatching {

@@ -207,6 +207,7 @@ function emptySnapshot(overrides = {}) {
     bookReadingLogs: [],
     stepCounts: [],
     walks: [],
+    goalTimeLogs: [],
     ...overrides,
   };
 }
@@ -2682,7 +2683,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 25);
+    assert.equal(stored.schemaVersion, 26);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2897,10 +2898,11 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("걷기를 모르는 옛 앱과 구별할 형식 25를 알린다", async () => {
-    // 24는 날짜로 기분을 합치는 옛 앱과 가르려고, 25는 걸음 수·걷기를 버리는 옛 앱과 가르려고 올렸습니다.
+  it("목표 시간을 모르는 옛 앱과 구별할 형식 26을 알린다", async () => {
+    // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과
+    // 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 25);
+    assert.equal(health.schemaVersion, 26);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {
@@ -3277,6 +3279,101 @@ describe("목표", () => {
 
     // 앱 SyncDeduplicator와 같은 규칙이어야 두 기기가 서로를 고치지 않는다.
     assert.deepEqual(merged.items.find((item) => item.syncId === "goal-1").linkedRoutineSyncIds, ["r-new"]);
+  });
+
+  function timeLog(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "time-1",
+      updatedAt: 3_000,
+      goalSyncId: "goal-1",
+      minutes: 90,
+      note: "5km 템포런",
+      loggedAt: 1_762_508_400_000,
+      createdAt: 3_000,
+      ...overrides,
+    };
+  }
+
+  it("목표에 들인 시간이 스냅샷에 남고, 어느 목표의 것인지 모르거나 시간이 없는 것은 버린다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        items: [goal()],
+        goalTimeLogs: [
+          timeLog(),
+          timeLog({ syncId: "no-goal", goalSyncId: "" }),
+          timeLog({ syncId: "zero", minutes: 0 }),
+          timeLog({ syncId: "too-long", minutes: 24 * 60 + 1 }),
+        ],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+
+    assert.deepEqual(stored.goalTimeLogs.map((log) => log.syncId), ["time-1"]);
+    assert.equal(stored.goalTimeLogCount, 1);
+    assert.equal(stored.goalTimeLogs[0].minutes, 90);
+    assert.equal(stored.goalTimeLogs[0].note, "5km 템포런");
+  });
+
+  it("병합하면 붙을 목표가 없는 시간은 버린다", async () => {
+    // 글귀 메모와 같습니다. 목표 안에서만 보이는 것이라 남겨도 그릴 곳이 없습니다.
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({ items: [goal()], goalTimeLogs: [timeLog(), timeLog({ syncId: "orphan", goalSyncId: "goal-gone" })] }),
+      })
+    ).json();
+
+    assert.deepEqual(merged.goalTimeLogs.map((log) => log.syncId), ["time-1"]);
+  });
+
+  it("같은 시간을 다른 syncId로 두 번 올려도 한 번만 세고 사라진 쪽에 표식을 남긴다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [goal()],
+          goalTimeLogs: [timeLog({ syncId: "time-a", updatedAt: 3_000 }), timeLog({ syncId: "time-b", updatedAt: 4_000 })],
+        }),
+      })
+    ).json();
+
+    // 두 번 세면 들인 시간이 부풀어 보인다. 앱 SyncDeduplicator와 같은 규칙이어야 한다.
+    assert.deepEqual(merged.goalTimeLogs.map((log) => log.syncId), ["time-b"]);
+    assert.ok(merged.deletions.some((entry) => entry.syncId === "time-a" && entry.entityType === "GOAL_TIME_LOG"));
+  });
+
+  it("같은 목표 둘이 하나로 합쳐지면 들인 시간이 남은 목표로 옮겨 간다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          items: [goal({ syncId: "goal-old", updatedAt: 1_000 }), goal({ id: 2, syncId: "goal-new", updatedAt: 2_000 })],
+          goalTimeLogs: [timeLog({ goalSyncId: "goal-old" })],
+        }),
+      })
+    ).json();
+
+    assert.deepEqual(merged.items.filter((item) => item.type === "GOAL").map((item) => item.syncId), ["goal-new"]);
+    assert.equal(merged.goalTimeLogs[0].goalSyncId, "goal-new");
+  });
+
+  it("웹에서 목표를 지우면 들인 시간도 표식과 함께 지운다", async () => {
+    await resetServer();
+    await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [goal()], goalTimeLogs: [timeLog()] }) });
+    const existing = (await (await api("/api/snapshot")).json()).items.find((item) => item.syncId === "goal-1");
+
+    await api(`/api/content/${existing.id}`, { method: "DELETE" });
+    const stored = await (await api("/api/snapshot")).json();
+
+    // 표식이 없으면 기기가 다음 병합에 시간을 다시 올려 주인 없는 기록으로 떠돈다.
+    assert.equal(stored.goalTimeLogs.length, 0);
+    assert.ok(stored.deletions.some((entry) => entry.syncId === "time-1" && entry.entityType === "GOAL_TIME_LOG"));
   });
 
   it("웹에서는 제목만 있으면 적히고, 고쳐도 이어 둔 루틴은 남는다", async () => {

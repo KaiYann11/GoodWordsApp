@@ -28,11 +28,12 @@ data class BookEntity(
     val totalPages: Int = 0,
     val currentPage: Int = 0,
     val status: String = BookStatus.READING.name,
+    /** 메모. 진도를 적을 때 남긴 말이 끝에 한 줄씩 쌓입니다([BookNotes]). 카드에는 끝의 두 줄만 보입니다. */
     val note: String = "",
     /**
      * 독후감. 읽으며 적어 두는 긴 글입니다.
      *
-     * [note]와 자리를 나눈 이유가 있습니다. 메모는 목록에서 한눈에 보이는 한 줄이고, 독후감은
+     * [note]와 자리를 나눈 이유가 있습니다. 메모는 목록에서 한눈에 보는 짧은 줄들이고, 독후감은
      * 따로 펼쳐 읽고 고치는 글입니다. 한 칸에 합치면 책 카드가 글 전체를 싣고 길어져,
      * 목록이 아니라 문서 더미가 됩니다. 여기서 문장을 골라 글귀로 뽑아낼 수 있습니다.
      */

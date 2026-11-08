@@ -68,13 +68,19 @@ object AppSearch {
         routines: List<RoutineEntity> = emptyList(),
         /** 루틴에 적어 둔 메모. 루틴에서 실제로 글을 쓰는 자리는 여기뿐입니다. */
         routineMemos: List<RoutineMemoEntity> = emptyList(),
-        growthReports: List<GrowthReportEntity> = emptyList()
+        growthReports: List<GrowthReportEntity> = emptyList(),
+        /** 목표에 들인 시간. 그때 한 것을 적어 둔 글로 그 목표를 찾습니다(딸린 글은 부모에 얹습니다). */
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
     ): SearchResults {
         val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return SearchResults(query = query, hits = emptyList())
 
         val hits = buildList {
             val memoBodiesByItem = contentMemos.groupBy { it.contentItemId }
+            val timeNotesByGoal = goalTimeLogs.filter { it.note.isNotBlank() }.groupBy { it.goalSyncId }
+            val attachedTexts = { item: ContentItemEntity ->
+                memoBodiesByItem[item.id].orEmpty().map { it.body } + timeNotesByGoal[item.syncId].orEmpty().map { it.note }
+            }
             val contentGroups = items.groupBy { item ->
                 when (item.type) {
                     ContentType.MEMO -> SearchKind.MEMO
@@ -92,7 +98,7 @@ object AppSearch {
                         terms = terms,
                         fields = { item ->
                             listOf(item.title, item.body, item.author, item.sourceUrl, item.category, item.tags.joinToString(" ")) +
-                                memoBodiesByItem[item.id].orEmpty().map { it.body }
+                                attachedTexts(item)
                         }
                     ) { item ->
                         SearchHit(
@@ -100,8 +106,7 @@ object AppSearch {
                             id = item.id,
                             title = item.title.ifBlank { item.body.take(30) },
                             snippet = snippetOf(
-                                (listOf(item.body) + memoBodiesByItem[item.id].orEmpty().map { it.body })
-                                    .joinToString(" "),
+                                (listOf(item.body) + attachedTexts(item)).joinToString(" "),
                                 terms
                             ),
                             meta = listOfNotNull(

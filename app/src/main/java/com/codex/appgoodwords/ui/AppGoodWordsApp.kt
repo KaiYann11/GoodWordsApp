@@ -80,6 +80,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.codex.appgoodwords.BuildConfig
 import java.io.File
 import com.codex.appgoodwords.data.AppUpdateInstaller
+import com.codex.appgoodwords.data.SyncBackup
 import com.codex.appgoodwords.data.ContentDraft
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.BookProgressCalculator
@@ -130,6 +131,7 @@ import com.codex.appgoodwords.ui.screen.RoutineScreen
 import com.codex.appgoodwords.ui.screen.RoutineStatsScreen
 import com.codex.appgoodwords.ui.screen.SearchScreen
 import com.codex.appgoodwords.ui.screen.SettingsScreen
+import com.codex.appgoodwords.ui.screen.SyncBackupsScreen
 import com.codex.appgoodwords.ui.screen.SettingsSection
 import com.codex.appgoodwords.ui.screen.TodoScreen
 import com.codex.appgoodwords.ui.screen.WalkCard
@@ -185,7 +187,9 @@ private enum class AppTab(
     WALK("걷기"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
-    SETTINGS("설정")
+    SETTINGS("설정"),
+    /** 동기화 백업 모두 보기. 설정의 백업 카드에는 최근 3개만 두고 여기로 넘깁니다(사용자가 정함, 2026-11-08). */
+    SYNC_BACKUPS("동기화 백업")
 }
 
 private data class AppDestination(
@@ -271,6 +275,7 @@ fun AppGoodWordsApp(
     var capturingIdea by remember { mutableStateOf(false) }
     val homeQuote by viewModel.homeQuote.collectAsStateWithLifecycle()
     val goalTracks by viewModel.goalTracks.collectAsStateWithLifecycle()
+    val goalTimer by viewModel.goalTimer.collectAsStateWithLifecycle()
     val homeGoalLine by viewModel.homeGoalLine.collectAsStateWithLifecycle()
     val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
     val openDailyCoachTalkRequest by viewModel.openDailyCoachTalkRequest.collectAsStateWithLifecycle()
@@ -488,6 +493,33 @@ fun AppGoodWordsApp(
             navStack.take(index + 1)
         } else {
             listOf(tabRoute(AppTab.HOME), route)
+        }
+    }
+
+    // 설정의 백업 카드와 "모두 보기" 화면이 같이 씁니다.
+    fun restoreBackup(backup: SyncBackup) {
+        coroutineScope.launch {
+            val result = viewModel.restoreSyncBackup(backup)
+            val message = if (result.isSuccess) {
+                val restored = result.getOrThrow()
+                "백업에서 ${restored.itemCount}개 항목, ${restored.eventCount}개 이력, ${restored.routineCount}개 루틴을 복원했습니다."
+            } else {
+                result.exceptionOrNull()?.message ?: "백업을 복원하지 못했습니다."
+            }
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    fun deleteBackup(backup: SyncBackup) {
+        coroutineScope.launch {
+            val result = viewModel.deleteSyncBackup(backup)
+            snackbarHostState.showSnackbar(
+                when {
+                    result.isFailure -> result.exceptionOrNull()?.message ?: "백업을 지우지 못했습니다."
+                    result.getOrDefault(false) -> "백업을 지웠습니다."
+                    else -> "이미 지워진 백업입니다."
+                }
+            )
         }
     }
 
@@ -911,7 +943,7 @@ fun AppGoodWordsApp(
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.WALK -> Icons.AutoMirrored.Outlined.DirectionsWalk
                                                 AppTab.SEARCH -> Icons.Outlined.Search
-                                                AppTab.SETTINGS -> Icons.Outlined.Settings
+                                                AppTab.SETTINGS, AppTab.SYNC_BACKUPS -> Icons.Outlined.Settings
                                             },
                                             contentDescription = null
                                         )
@@ -1222,9 +1254,9 @@ fun AppGoodWordsApp(
                                             )
                                         }
                                     },
-                                    onUpdateProgress = { id, page ->
+                                    onUpdateProgress = { id, page, note ->
                                         coroutineScope.launch {
-                                            val result = viewModel.updateBookProgress(id, page)
+                                            val result = viewModel.updateBookProgress(id, page, note)
                                             if (result.isFailure) {
                                                 snackbarHostState.showSnackbar(
                                                     result.exceptionOrNull()?.message ?: "진도를 기록하지 못했습니다."
@@ -1524,6 +1556,7 @@ fun AppGoodWordsApp(
                             routines = routines,
                             routineMemos = routineMemos,
                             growthReports = growthReports,
+                            goalTimeLogs = goalTracks.flatMap { it.timeLogs },
                             onOpenHit = { hit ->
                                 if (hit.kind in listOf(SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT)) {
                                     openItemDetail(AppTab.SEARCH, hit.id)
@@ -1559,7 +1592,8 @@ fun AppGoodWordsApp(
                             modifier = Modifier.padding(innerPadding),
                             tracks = goalTracks,
                             onOpen = { id -> pushRoute(goalRoute(id)) },
-                            onSave = viewModel::saveGoal
+                            onSave = viewModel::saveGoal,
+                            goalTimer = goalTimer
                         )
 
                         AppTab.GOAL_DETAIL -> {
@@ -1571,9 +1605,18 @@ fun AppGoodWordsApp(
                                     popRoute()
                                 }
                             } else {
+                                // 타이머의 목표가 (다른 기기에서) 지워졌으면 없는 것으로 봅니다. 남길 곳 없는 타이머가 새 타이머를 막으면 안 됩니다.
+                                val timerGoal = goalTimer?.let { timer -> goalTracks.firstOrNull { it.goal.syncId == timer.goalSyncId } }
                                 GoalDetailScreen(
                                     modifier = Modifier.padding(innerPadding),
                                     track = track,
+                                    timer = goalTimer.takeIf { timerGoal != null },
+                                    timerGoalTitle = timerGoal?.goal?.title,
+                                    onAddTime = { minutes, note -> viewModel.addGoalTime(track.goal.id, minutes, note) },
+                                    onDeleteTime = { id -> viewModel.deleteGoalTime(id) },
+                                    onStartTimer = { viewModel.startGoalTimer(track.goal.syncId) },
+                                    onStopTimer = { viewModel.stopGoalTimer() },
+                                    onDiscardTimer = { viewModel.discardGoalTimer() },
                                     routines = routines,
                                     onSaveText = { title, body -> viewModel.saveGoal(track.goal.id, track.goal.type, title, body) },
                                     onSetRoutines = { ids -> viewModel.setGoalRoutines(track.goal.id, ids) },
@@ -1913,6 +1956,18 @@ fun AppGoodWordsApp(
                             }
                         )
 
+                        // 설정처럼 일기 잠금이 걸려 있으면 열지 않습니다. 복원은 일기까지 통째로 바꿉니다.
+                        AppTab.SYNC_BACKUPS -> if (diaryLocked) DiaryUnlockCard(
+                            modifier = Modifier.padding(innerPadding).padding(16.dp),
+                            onUnlock = { unlockDiary() }
+                        ) else SyncBackupsScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            backups = syncBackups,
+                            directory = syncBackupDirectory,
+                            onRestoreBackup = { backup -> restoreBackup(backup) },
+                            onDeleteBackup = { backup -> deleteBackup(backup) }
+                        )
+
                         AppTab.SETTINGS -> if (diaryLocked) DiaryUnlockCard(
                             modifier = Modifier.padding(innerPadding).padding(16.dp),
                             onUnlock = { unlockDiary() }
@@ -2079,18 +2134,9 @@ fun AppGoodWordsApp(
                                     snackbarHostState.showSnackbar(message)
                                 }
                             },
-                            onRestoreBackup = { backup ->
-                                coroutineScope.launch {
-                                    val result = viewModel.restoreSyncBackup(backup)
-                                    val message = if (result.isSuccess) {
-                                        val restored = result.getOrThrow()
-                                        "백업에서 ${restored.itemCount}개 항목, ${restored.eventCount}개 이력, ${restored.routineCount}개 루틴을 복원했습니다."
-                                    } else {
-                                        result.exceptionOrNull()?.message ?: "백업을 복원하지 못했습니다."
-                                    }
-                                    snackbarHostState.showSnackbar(message)
-                                }
-                            },
+                            onRestoreBackup = { backup -> restoreBackup(backup) },
+                            onDeleteBackup = { backup -> deleteBackup(backup) },
+                            onOpenAllBackups = { pushRoute(tabRoute(AppTab.SYNC_BACKUPS)) },
                             onDeleteCategory = { category ->
                                 coroutineScope.launch {
                                     val result = viewModel.deleteCategory(category)

@@ -75,6 +75,22 @@ class SyncBackupStore(
         AppDataJson.fromJsonText(file.readText(Charsets.UTF_8))
     }
 
+    /**
+     * 백업 하나를 지웁니다. 지운 것은 되살릴 수 없습니다. 이미 없던 것이면 false입니다.
+     *
+     * 목록([list])에서 온 이름만 받습니다. 이름에 경로가 섞이면 이 폴더 밖의 파일을 가리킬 수 있습니다.
+     */
+    suspend fun delete(backup: SyncBackup): Boolean = withContext(Dispatchers.IO) {
+        val name = backup.fileName
+        require(File(name).name == name && SyncBackupKind.fromFileName(name) != null) {
+            "백업 파일 이름이 아닙니다: $name"
+        }
+        val file = File(backupDirectory(), name)
+        if (!file.exists()) return@withContext false
+        check(file.delete()) { "백업을 지우지 못했습니다: $name" }
+        true
+    }
+
     suspend fun directoryPath(): String = withContext(Dispatchers.IO) {
         backupDirectory().absolutePath
     }

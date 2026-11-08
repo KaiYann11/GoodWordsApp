@@ -40,7 +40,8 @@ class SyncCoordinator(
         bookReadingLogs = database.bookReadingLogDao().getAll(),
         stepCounts = database.stepCountDao().getAll(),
         // 걷는 중인 길은 아직 기록이 아닙니다. 다 걸은 뒤에 갑니다.
-        walks = database.walkDao().getFinished()
+        walks = database.walkDao().getFinished(),
+        goalTimeLogs = database.goalTimeLogDao().getAll()
     )
 
     /**

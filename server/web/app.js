@@ -201,7 +201,7 @@ app.addEventListener("click", async (event) => {
       await loadSnapshot(false);
     } else if (action === "delete-goal") {
       const item = findById(state.snapshot.items, id);
-      if (!window.confirm(`'${item?.title || "이 목표"}'와 되새긴 기록을 함께 지울까요?`)) return;
+      if (!window.confirm(`'${item?.title || "이 목표"}'와 되새긴 기록·시간 기록을 함께 지울까요?`)) return;
       await api(`/api/content/${id}`, { method: "DELETE" });
       if (state.editingContentId === id) state.editingContentId = null;
       showToast("지웠습니다.");
@@ -399,6 +399,7 @@ function emptySnapshot() {
     bookReadingLogs: [],
     stepCounts: [],
     walks: [],
+    goalTimeLogs: [],
     settings: {},
   };
 }
@@ -738,8 +739,29 @@ function renderNotToDo() {
   `;
 }
 
+/** 들인 시간 `45분`·`1시간`·`1시간 30분`. 앱 `GoalTime.format`과 같습니다. */
+function formatMinutes(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}분`;
+  return rest === 0 ? `${hours}시간` : `${hours}시간 ${rest}분`;
+}
+
+/** 최근 4주(오늘 포함)에 들인 시간. 앱 `GoalTime.recent`와 같은 폭입니다. */
+function recentGoalMinutes(logs, today = todayIso()) {
+  const from = new Date(`${today}T00:00:00`);
+  from.setDate(from.getDate() - 27);
+  const end = new Date(`${today}T00:00:00`);
+  end.setDate(end.getDate() + 1);
+  return logs
+    .filter((log) => log.loggedAt >= from.getTime() && log.loggedAt < end.getTime())
+    .reduce((sum, log) => sum + log.minutes, 0);
+}
+
 /**
  * 목표 탭 — 이상향·목표·롤모델. 앱의 목표 탭과 같은 기록입니다.
+ *
+ * 목표에 들인 시간은 보여 주기만 합니다(사용자가 정함, 2026-11-08 — 타이머와 함께 앱에서 남깁니다).
  *
  * 되새긴 기록은 앱처럼 덧메모로 남깁니다. 이어 둔 루틴은 이름만 보여 주고 고치는 것은 앱에서 합니다 —
  * 루틴을 고르는 칸까지 두면 웹이 앱의 화면을 하나 더 따라 만들어야 합니다.
@@ -751,6 +773,9 @@ function renderGoals() {
   const memosOf = (item) => state.snapshot.contentMemos
     .filter((memo) => (memo.contentItemSyncId ? memo.contentItemSyncId === item.syncId : memo.contentItemId === item.id))
     .sort((a, b) => b.createdAt - a.createdAt);
+  const timeLogsOf = (item) => (state.snapshot.goalTimeLogs || [])
+    .filter((log) => log.goalSyncId === item.syncId)
+    .sort((a, b) => b.loggedAt - a.loggedAt);
   const section = (type) => {
     const records = items.filter((item) => item.type === type)
       .sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite) || a.createdAt - b.createdAt);
@@ -760,11 +785,16 @@ function renderGoals() {
         ${records.length ? records.map((item) => {
           const memos = memosOf(item);
           const linked = (item.linkedRoutineSyncIds || []).map((syncId) => routineTitles.get(syncId)).filter(Boolean);
+          const timeLogs = item.type === "GOAL" ? timeLogsOf(item) : [];
+          const totalMinutes = timeLogs.reduce((sum, log) => sum + log.minutes, 0);
           return `
           <article class="item">
             <h3>${item.isFavorite ? "📌 " : ""}${escapeHtml(item.title)}</h3>
             ${item.body ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.body)}</p>` : ""}
             ${linked.length ? `<p class="muted">이어 둔 루틴: ${linked.map(escapeHtml).join(", ")}</p>` : ""}
+            ${timeLogs.length ? `<p><strong>쓴 시간</strong> 누적 ${formatMinutes(totalMinutes)} · 최근 4주 ${formatMinutes(recentGoalMinutes(timeLogs))}</p>
+            <ul class="muted">${timeLogs.slice(0, 5).map((log) => `<li>${escapeHtml(formatDate(log.loggedAt))} · ${formatMinutes(log.minutes)}${log.note ? ` — ${escapeHtml(log.note)}` : ""}</li>`).join("")}</ul>
+            ${timeLogs.length > 5 ? `<p class="muted">시간 기록 ${timeLogs.length - 5}개 더</p>` : ""}` : ""}
             ${memos.length ? `<ul class="muted">${memos.slice(0, 5).map((memo) => `<li>${escapeHtml(formatDate(memo.createdAt))} — ${escapeHtml(memo.body)}</li>`).join("")}</ul>` : ""}
             ${memos.length > 5 ? `<p class="muted">되새긴 기록 ${memos.length - 5}개 더</p>` : ""}
             <form class="formGrid" data-form="contentMemo">
@@ -787,7 +817,7 @@ function renderGoals() {
     <section class="grid two">
       <form class="panel" data-form="goal">
         <h2>${editing.id ? "고치기" : "적기"}</h2>
-        <p class="muted">되고 싶은 나, 이루고 싶은 것, 닮고 싶은 사람. 기한이나 숫자로 재지 않고 되새기며 따라갑니다.</p>
+        <p class="muted">되고 싶은 나, 이루고 싶은 것, 닮고 싶은 사람. 기한이나 목표치로 재지 않고 되새기며 따라갑니다. 목표에 들인 시간은 앱에서 남깁니다.</p>
         <div class="formGrid">
           <div class="field full">
             <label for="goalType">종류</label>
@@ -1359,6 +1389,8 @@ function bookCard(book, quoteCount, readingDayCount) {
   const finished = book.status === "FINISHED";
   // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
   const ratio = book.totalPages > 0 ? Math.min(1, book.currentPage / book.totalPages) : null;
+  // 메모에는 앱에서 진도를 적을 때 남긴 말이 한 줄씩 쌓입니다. 줄을 살리지 않으면 한 문단으로 뭉칩니다.
+  const note = book.note ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(book.note)}</p>` : "";
   const progressText =
     book.totalPages > 0
       ? `${book.currentPage} / ${book.totalPages}쪽 · ${Math.round(ratio * 100)}%`
@@ -1383,7 +1415,7 @@ function bookCard(book, quoteCount, readingDayCount) {
       </div>
       ${ratio === null ? "" : `<div class="bookBar"><span style="width:${Math.round(ratio * 100)}%"></span></div>`}
       ${bookProgressList(book)}
-      ${book.note ? `<p>${escapeHtml(book.note)}</p>` : ""}
+      ${note}
       <div class="actions">
         <button type="button" data-action="quote-book" data-id="${book.id}">글귀 뽑기</button>
         <button type="button" data-action="edit-book" data-id="${book.id}">수정</button>

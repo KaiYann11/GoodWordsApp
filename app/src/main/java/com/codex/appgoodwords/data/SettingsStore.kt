@@ -90,6 +90,13 @@ class SettingsStore(
         val walkGoalSteps = intPreferencesKey("walk_goal_steps")
         /** 걷기를 하루의 걸음에 한 번 넣었는지([addWalkStepOnce]). 사용자가 뺀 뒤에 다시 넣지 않으려고 둡니다. */
         val walkStepAdded = booleanPreferencesKey("walk_step_added")
+        /**
+         * 목표에 들이는 시간을 재는 타이머([GoalTimer]). **이 기기에만 둡니다** — 재는 것은 이 휴대폰에서 하는 일이고,
+         * 남기기를 눌러야 기록이 되어 동기화됩니다.
+         */
+        val goalTimerGoal = stringPreferencesKey("goal_timer_goal")
+        val goalTimerStartedAt = longPreferencesKey("goal_timer_started_at")
+        val goalTimerStoppedAt = longPreferencesKey("goal_timer_stopped_at")
 
         /** 앱 잠금. 비밀번호는 담지 않습니다. 기기에 있는 잠금을 빌려 씁니다. */
         val appLockEnabled = booleanPreferencesKey("app_lock_enabled")
@@ -271,6 +278,47 @@ class SettingsStore(
     suspend fun setWalkGoalSteps(steps: Int) {
         context.dataStore.edit { preferences ->
             preferences[Keys.walkGoalSteps] = steps.coerceAtLeast(1)
+        }
+    }
+
+    val goalTimerFlow: Flow<GoalTimer?> = context.dataStore.data.map { preferences ->
+        val goalSyncId = preferences[Keys.goalTimerGoal].orEmpty()
+        val startedAt = preferences[Keys.goalTimerStartedAt] ?: 0L
+        if (goalSyncId.isBlank() || startedAt <= 0L) {
+            null
+        } else {
+            GoalTimer(
+                goalSyncId = goalSyncId,
+                startedAt = startedAt,
+                stoppedAt = preferences[Keys.goalTimerStoppedAt]?.takeIf { it >= startedAt }
+            )
+        }
+    }
+
+    /** 재기 시작합니다. 한 번에 하나라, 다른 목표에서 재던 것은 버립니다(화면은 그때 시작을 막습니다). */
+    suspend fun startGoalTimer(goalSyncId: String, now: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.goalTimerGoal] = goalSyncId
+            preferences[Keys.goalTimerStartedAt] = now
+            preferences.remove(Keys.goalTimerStoppedAt)
+        }
+    }
+
+    /** 재기를 끝냅니다. 잰 시간은 남기기 전까지 그대로 둡니다. 재고 있지 않으면 아무것도 하지 않습니다. */
+    suspend fun stopGoalTimer(now: Long) {
+        context.dataStore.edit { preferences ->
+            val startedAt = preferences[Keys.goalTimerStartedAt] ?: return@edit
+            if (preferences[Keys.goalTimerStoppedAt] == null) {
+                preferences[Keys.goalTimerStoppedAt] = maxOf(now, startedAt)
+            }
+        }
+    }
+
+    suspend fun clearGoalTimer() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(Keys.goalTimerGoal)
+            preferences.remove(Keys.goalTimerStartedAt)
+            preferences.remove(Keys.goalTimerStoppedAt)
         }
     }
 

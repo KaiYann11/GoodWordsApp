@@ -158,7 +158,6 @@ private sealed interface PendingSyncAction {
     object Merge : PendingSyncAction
     object Upload : PendingSyncAction
     object Download : PendingSyncAction
-    data class Restore(val backup: SyncBackup) : PendingSyncAction
 }
 
 @Composable
@@ -183,6 +182,9 @@ fun SettingsScreen(
     onUploadToServer: () -> Unit,
     onDownloadFromServer: () -> Unit,
     onRestoreBackup: (SyncBackup) -> Unit,
+    onDeleteBackup: (SyncBackup) -> Unit = {},
+    /** 동기화 백업 모두 보기. 카드에는 최근 [SETTINGS_BACKUP_PREVIEW]개만 둡니다. */
+    onOpenAllBackups: () -> Unit = {},
     onDeleteCategory: (String) -> Unit,
     onOpenHistory: () -> Unit = {},
     appLockEnabled: Boolean = false,
@@ -261,6 +263,7 @@ fun SettingsScreen(
     var serverApiKeyText by rememberSaveable { mutableStateOf(serverSyncSettings.apiKey) }
     // 화면이 다시 만들어지면 확인 대화상자를 닫아 실수로 실행되지 않게 한다.
     var pendingSyncAction by remember { mutableStateOf<PendingSyncAction?>(null) }
+    var pendingBackupAction by remember { mutableStateOf<BackupAction?>(null) }
 
     // 세 칸은 글자마다 저장하고, 저장된 값은 한 박자 늦게 돌아옵니다. 치는 동안 돌아온 옛 값으로 칸을 덮으면
     // 그 사이 친 글자가 지워지고 커서가 엉뚱한 데로 가, 빠르게 친 서버 주소가 뒤섞인 채 저장됐습니다
@@ -299,7 +302,20 @@ fun SettingsScreen(
                     PendingSyncAction.Merge -> onSyncWithServer()
                     PendingSyncAction.Upload -> onUploadToServer()
                     PendingSyncAction.Download -> onDownloadFromServer()
-                    is PendingSyncAction.Restore -> onRestoreBackup(action.backup)
+                }
+            }
+        )
+    }
+
+    pendingBackupAction?.let { action ->
+        BackupActionDialog(
+            action = action,
+            onDismiss = { pendingBackupAction = null },
+            onConfirm = {
+                pendingBackupAction = null
+                when (action) {
+                    is BackupAction.Restore -> onRestoreBackup(action.backup)
+                    is BackupAction.Delete -> onDeleteBackup(action.backup)
                 }
             }
         )
@@ -766,25 +782,22 @@ fun SettingsScreen(
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                 } else {
-                                    syncBackups.forEach { backup ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                    // 최근 몇 개만 둡니다. 다 두면 백업이 쌓일수록 카드가 아래로 끝없이 길어졌습니다.
+                                    syncBackups.take(SETTINGS_BACKUP_PREVIEW).forEach { backup ->
+                                        SyncBackupRow(backup = backup, onAction = { pendingBackupAction = it })
+                                    }
+                                    if (syncBackups.size > SETTINGS_BACKUP_PREVIEW) {
+                                        OutlinedButton(
+                                            onClick = onOpenAllBackups,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag(settingsAllBackupsTag)
                                         ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = backup.kind.label,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                                Text(
-                                                    text = "${formatDateTime(backup.createdAt)} · ${formatBackupSize(backup.sizeBytes)}",
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                            }
-                                            TextButton(onClick = { pendingSyncAction = PendingSyncAction.Restore(backup) }) {
-                                                Text("복원")
-                                            }
+                                            Text("백업 모두 보기 (${syncBackups.size}개)")
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                                contentDescription = null
+                                            )
                                         }
                                     }
                                 }
@@ -1031,14 +1044,6 @@ private fun SyncConfirmDialog(
                 "교체 직전 기기 데이터는 백업으로 저장됩니다."
             confirmLabel = "가져오기"
         }
-
-        is PendingSyncAction.Restore -> {
-            title = "백업을 복원할까요?"
-            message = "이 기기의 기존 데이터가 ${formatDateTime(action.backup.createdAt)}에 저장한 " +
-                "'${action.backup.kind.label}' 백업으로 완전히 교체됩니다. " +
-                "교체 직전 기기 데이터는 백업으로 저장됩니다."
-            confirmLabel = "복원"
-        }
     }
 
     AlertDialog(
@@ -1092,11 +1097,6 @@ private fun formatInterval(intervalMinutes: Int): String {
 private fun formatDateTime(millis: Long): String = LocalDateTime
     .ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
     .format(DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm"))
-
-private fun formatBackupSize(sizeBytes: Long): String = when {
-    sizeBytes >= 1024 -> "${(sizeBytes + 1023) / 1024}KB"
-    else -> "${sizeBytes}B"
-}
 
 private fun defaultExportFileName(): String {
     val timestamp = LocalDateTime.now()
@@ -1414,8 +1414,8 @@ private fun AiFeedbackSection(
             )
             Text(
                 text = if (settings.includeGoals) {
-                    "목표 탭에 적은 것의 제목·설명·이어 둔 루틴 이름이 함께 나가, 돌아보기와 한마디가 오늘 한 것을 " +
-                        "그 방향과 이어 봅니다. 되새긴 기록은 보내지 않습니다."
+                    "목표 탭에 적은 것의 제목·설명·이어 둔 루틴 이름과 목표에 들인 시간(숫자만)이 함께 나가, 돌아보기와 " +
+                        "한마디가 오늘 한 것을 그 방향과 이어 봅니다. 되새긴 기록과 시간 기록의 글은 보내지 않습니다."
                 } else {
                     "목표 탭에 적은 것은 보내지 않습니다. 켜면 돌아보기와 한마디가 그 방향을 알고 말합니다."
                 },

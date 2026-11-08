@@ -29,6 +29,8 @@ data class AppDataSnapshot(
     val stepCounts: List<StepCountEntity> = emptyList(),
     /** 기록한 걷기. 다 걸은 것만 담습니다 — 걷는 중인 길은 아직 기록이 아닙니다. */
     val walks: List<WalkEntity> = emptyList(),
+    /** 목표에 들인 시간. 재는 중인 타이머는 담지 않습니다 — 남기기를 눌러야 기록입니다. */
+    val goalTimeLogs: List<GoalTimeLogEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -52,14 +54,14 @@ data class AppDataSnapshot(
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
             contentMemos.size + diaries.size + todos.size + books.size + growthReports.size +
-            moodLogs.size + bookReadingLogs.size + stepCounts.size + walks.size
+            moodLogs.size + bookReadingLogs.size + stepCounts.size + walks.size + goalTimeLogs.size
 }
 
 object AppDataJson {
-    // 걸음 수(`stepCounts`)와 걷기(`walks`)가 생겼습니다(사용자가 정함, 2026-11-07). 옛 서버는 둘을 몰라 받아도
-    // 버리므로 형식을 올립니다. Room은 표 둘이 늘어 24입니다. 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고
-    // 올렸습니다(2026-10-29).
-    const val schemaVersion: Int = 25
+    // 목표에 들인 시간(`goalTimeLogs`)이 생겼습니다(사용자가 정함, 2026-11-08). 옛 서버는 몰라 받아도 버리므로 형식을
+    // 올립니다. Room은 표 하나가 늘어 25입니다. 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과
+    // 가르려고 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 26
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -171,6 +173,13 @@ object AppDataJson {
                 snapshot.walks.forEach { walk -> put(walk.toJson()) }
             }
         )
+        .put("goalTimeLogCount", snapshot.goalTimeLogs.size)
+        .put(
+            "goalTimeLogs",
+            JSONArray().apply {
+                snapshot.goalTimeLogs.forEach { log -> put(log.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -194,6 +203,7 @@ object AppDataJson {
             bookReadingLogs = payload.optJSONArray("bookReadingLogs").toBookReadingLogs(),
             stepCounts = payload.optJSONArray("stepCounts").toStepCounts(),
             walks = payload.optJSONArray("walks").toWalks(),
+            goalTimeLogs = payload.optJSONArray("goalTimeLogs").toGoalTimeLogs(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -372,6 +382,42 @@ object AppDataJson {
                         steps = walk.optInt("steps", 0).coerceAtLeast(0),
                         path = walk.optString("path"),
                         createdAt = walk.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+    }
+
+    private fun GoalTimeLogEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("goalSyncId", goalSyncId)
+        .put("minutes", minutes)
+        .put("note", note)
+        .put("loggedAt", loggedAt)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toGoalTimeLogs(): List<GoalTimeLogEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val log = optJSONObject(index) ?: continue
+                val goalSyncId = log.optString("goalSyncId").trim()
+                val minutes = log.optInt("minutes", 0)
+                // 어느 목표의 것인지 모르거나 들인 시간이 없으면 쌓을 곳도 셀 것도 없습니다.
+                if (goalSyncId.isBlank() || minutes !in 1..GoalTime.MAX_MINUTES) continue
+                val createdAt = log.optLong("createdAt", System.currentTimeMillis())
+                add(
+                    GoalTimeLogEntity(
+                        id = log.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(log.optString("syncId")),
+                        updatedAt = log.optLong("updatedAt", 0L).takeIf { it > 0L } ?: createdAt,
+                        goalSyncId = goalSyncId,
+                        minutes = minutes,
+                        note = log.optString("note"),
+                        loggedAt = log.optLong("loggedAt", 0L).takeIf { it > 0L } ?: createdAt,
+                        createdAt = createdAt
                     )
                 )
             }

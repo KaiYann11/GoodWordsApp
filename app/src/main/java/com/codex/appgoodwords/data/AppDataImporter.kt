@@ -19,7 +19,8 @@ data class AppImportResult(
     val moodLogCount: Int = 0,
     val bookReadingLogCount: Int = 0,
     val stepCountCount: Int = 0,
-    val walkCount: Int = 0
+    val walkCount: Int = 0,
+    val goalTimeLogCount: Int = 0
 )
 
 class AppDataImporter(
@@ -75,6 +76,7 @@ class AppDataImporter(
         val readingLogDao = database.bookReadingLogDao()
         val stepCountDao = database.stepCountDao()
         val walkDao = database.walkDao()
+        val goalTimeLogDao = database.goalTimeLogDao()
 
         val previousReminders = database.todoDao().getPendingReminders()
         val deletedSyncIds = incoming.deletions.map { it.syncId }
@@ -97,6 +99,7 @@ class AppDataImporter(
                 readingLogDao.deleteBySyncIds(deletedSyncIds)
                 stepCountDao.deleteBySyncIds(deletedSyncIds)
                 walkDao.deleteBySyncIds(deletedSyncIds)
+                goalTimeLogDao.deleteBySyncIds(deletedSyncIds)
             }
 
             val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
@@ -189,6 +192,9 @@ class AppDataImporter(
             // 걷는 중인 걷기는 서버에서 오지 않습니다(다 걸은 것만 오고 갑니다). 그래서 지금 걷는 길을 덮을 일이 없습니다.
             val localWalkIds = walkDao.getAll().associate { it.syncId to it.id }
             walkDao.insertAll(incoming.walks.map { it.copy(id = localWalkIds[it.syncId] ?: 0L) })
+
+            val localGoalTimeIds = goalTimeLogDao.getAll().associate { it.syncId to it.id }
+            goalTimeLogDao.insertAll(incoming.goalTimeLogs.map { it.copy(id = localGoalTimeIds[it.syncId] ?: 0L) })
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
@@ -220,7 +226,8 @@ class AppDataImporter(
             moodLogCount = incoming.moodLogs.size,
             bookReadingLogCount = incoming.bookReadingLogs.size,
             stepCountCount = incoming.stepCounts.size,
-            walkCount = incoming.walks.size
+            walkCount = incoming.walks.size,
+            goalTimeLogCount = incoming.goalTimeLogs.size
         )
     }
 
@@ -243,6 +250,7 @@ class AppDataImporter(
         val ongoingWalks = database.walkDao().getUnfinished()
 
         database.withTransaction {
+            database.goalTimeLogDao().clearAll()
             database.walkDao().clearAll()
             database.stepCountDao().clearAll()
             database.bookReadingLogDao().clearAll()
@@ -321,6 +329,10 @@ class AppDataImporter(
             }
             val arrived = snapshot.walks.mapTo(mutableSetOf()) { it.syncId }
             database.walkDao().insertAll(ongoingWalks.filter { it.syncId !in arrived }.map { it.copy(id = 0L) })
+
+            if (snapshot.goalTimeLogs.isNotEmpty()) {
+                database.goalTimeLogDao().insertAll(snapshot.goalTimeLogs)
+            }
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
@@ -360,7 +372,8 @@ class AppDataImporter(
             moodLogCount = snapshot.moodLogs.size,
             bookReadingLogCount = snapshot.bookReadingLogs.size,
             stepCountCount = snapshot.stepCounts.size,
-            walkCount = snapshot.walks.size
+            walkCount = snapshot.walks.size,
+            goalTimeLogCount = snapshot.goalTimeLogs.size
         )
     }
 }

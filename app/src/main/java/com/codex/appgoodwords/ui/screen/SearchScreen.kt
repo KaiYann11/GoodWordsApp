@@ -40,6 +40,7 @@ import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentMemoEntity
 import com.codex.appgoodwords.data.DiaryEntity
+import com.codex.appgoodwords.data.GoalTimeLogEntity
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineMemoEntity
@@ -71,7 +72,9 @@ fun SearchScreen(
     growthReports: List<GrowthReportEntity> = emptyList(),
     modifier: Modifier = Modifier,
     diaryLocked: Boolean = false,
-    onUnlockDiaries: () -> Unit = {}
+    onUnlockDiaries: () -> Unit = {},
+    /** 목표에 들인 시간. 그때 한 것을 적은 글로도 그 목표를 찾습니다. */
+    goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     /** 좁혀 둔 갈래. null이면 전체입니다. */
@@ -80,7 +83,7 @@ fun SearchScreen(
 
     // 글자를 칠 때마다 다시 찾습니다. 목록이 기기 안에 있어 따로 늦출 이유가 없습니다.
     val results = remember(
-        query, items, contentMemos, diaries, todos, books, routines, routineMemos, growthReports, diaryLocked
+        query, items, contentMemos, diaries, todos, books, routines, routineMemos, growthReports, goalTimeLogs, diaryLocked
     ) {
         AppSearch.search(
             query = query,
@@ -91,7 +94,8 @@ fun SearchScreen(
             books = books,
             routines = routines,
             routineMemos = routineMemos,
-            growthReports = if (diaryLocked) emptyList() else growthReports
+            growthReports = if (diaryLocked) emptyList() else growthReports,
+            goalTimeLogs = goalTimeLogs
         )
     }
 

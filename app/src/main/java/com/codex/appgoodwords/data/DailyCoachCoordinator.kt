@@ -347,7 +347,9 @@ class DailyCoachCoordinator(
             includeGoals = includeGoals,
             talk = state.conversation,
             askCount = state.askCount,
-            zoneId = zoneId
+            zoneId = zoneId,
+            // 목표를 보내지 않으면 들인 시간도 읽지 않습니다.
+            goalTimeLogs = if (includeGoals) database.goalTimeLogDao().getAll() else emptyList()
         )
     }
 

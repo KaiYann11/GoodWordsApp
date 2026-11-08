@@ -24,14 +24,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -41,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,11 +56,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentMemoEntity
 import com.codex.appgoodwords.data.ContentType
+import com.codex.appgoodwords.data.GoalTime
+import com.codex.appgoodwords.data.GoalTimeLogEntity
+import com.codex.appgoodwords.data.GoalTimer
 import com.codex.appgoodwords.data.GoalTrack
 import com.codex.appgoodwords.data.HomeGoalLine
 import com.codex.appgoodwords.data.RoutineEntity
@@ -65,6 +74,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal fun goalTabTag(tab: GoalTab): String = "goal_tab_" + tab.name.lowercase()
@@ -84,6 +94,17 @@ internal fun goalRoutineCheckTag(syncId: String): String = "goal_routine_check_$
 internal const val goalRoutinesSaveTag = "goal_routines_save"
 internal const val homeGoalLineTag = "home_goal_line"
 internal const val goalDetailListTag = "goal_detail_list"
+internal fun goalTimeQuickTag(minutes: Int): String = "goal_time_quick_$minutes"
+internal const val goalTimeManualTag = "goal_time_manual"
+internal const val goalTimeHoursTag = "goal_time_hours"
+internal const val goalTimeMinutesTag = "goal_time_minutes"
+internal const val goalTimeNoteTag = "goal_time_note"
+internal const val goalTimeSaveTag = "goal_time_save"
+internal const val goalTimerStartTag = "goal_timer_start"
+internal const val goalTimerStopTag = "goal_timer_stop"
+internal const val goalTimerDiscardTag = "goal_timer_discard"
+internal const val goalTimeAllTag = "goal_time_all"
+internal fun goalCardTimerTag(id: Long): String = "goal_card_timer_$id"
 
 /**
  * 목표 탭의 세 칸 — 되고 싶은 나, 이루고 싶은 것, 닮고 싶은 사람(사용자가 정함, 2026-10-29).
@@ -119,7 +140,7 @@ enum class GoalTab(
     GOAL(
         type = ContentType.GOAL,
         label = "목표",
-        intro = "이루고 싶은 것. 기한이나 숫자로 재지 않고, 되새긴 기록과 이어 둔 루틴으로 따라갑니다.",
+        intro = "이루고 싶은 것. 기한이나 목표치로 재지 않고, 들인 시간·되새긴 기록·이어 둔 루틴으로 따라갑니다.",
         titleLabel = "목표",
         titlePlaceholder = "예: 올해 하프 마라톤 완주",
         bodyLabel = "왜 이루고 싶은가요 (선택)",
@@ -150,7 +171,9 @@ fun GoalTabsScreen(
     tracks: List<GoalTrack>,
     onOpen: (Long) -> Unit,
     onSave: suspend (id: Long, type: ContentType, title: String, body: String) -> Result<Long>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 이 기기에서 재고 있는(또는 막 끝낸) 타이머. 그 목표의 카드에 보입니다. */
+    goalTimer: GoalTimer? = null
 ) {
     var selected by rememberSaveable { mutableStateOf(GoalTab.VISION) }
     var adding by rememberSaveable { mutableStateOf<GoalTab?>(null) }
@@ -198,7 +221,8 @@ fun GoalTabsScreen(
                         // 홈에 두기를 고른 것이 먼저, 그다음 적은 차례입니다.
                         .sortedWith(compareByDescending<GoalTrack> { it.goal.isFavorite }.thenBy { it.goal.createdAt }),
                     onAdd = { adding = selected },
-                    onOpen = onOpen
+                    onOpen = onOpen,
+                    goalTimer = goalTimer
                 )
             }
         }
@@ -210,7 +234,8 @@ private fun GoalList(
     tab: GoalTab,
     tracks: List<GoalTrack>,
     onAdd: () -> Unit,
-    onOpen: (Long) -> Unit
+    onOpen: (Long) -> Unit,
+    goalTimer: GoalTimer? = null
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -233,14 +258,18 @@ private fun GoalList(
             item(key = "empty") { EmptyCard(title = "아직 적어 둔 것이 없습니다", body = tab.emptyBody) }
         }
         items(tracks, key = { it.goal.id }) { track ->
-            GoalCard(track = track, onOpen = { onOpen(track.goal.id) })
+            GoalCard(
+                track = track,
+                onOpen = { onOpen(track.goal.id) },
+                timer = goalTimer?.takeIf { it.goalSyncId == track.goal.syncId }
+            )
         }
     }
 }
 
 /** 목록의 카드 한 장. 무엇을 적었는지와, 그쪽으로 얼마나 다가가고 있는지를 한 줄씩. */
 @Composable
-private fun GoalCard(track: GoalTrack, onOpen: () -> Unit) {
+private fun GoalCard(track: GoalTrack, onOpen: () -> Unit, timer: GoalTimer? = null) {
     val goal = track.goal
     Card(
         modifier = Modifier
@@ -279,8 +308,44 @@ private fun GoalCard(track: GoalTrack, onOpen: () -> Unit) {
                 )
             }
             GoalPulse(track = track)
+            timer?.let { TimerBadge(timer = it, modifier = Modifier.testTag(goalCardTimerTag(goal.id))) }
         }
     }
+}
+
+/** 목표 카드의 타이머 한 줄. 재는 중이면 흐르는 시간, 끝냈으면 남기기를 기다리는 잰 시간. */
+@Composable
+private fun TimerBadge(timer: GoalTimer, modifier: Modifier = Modifier) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Outlined.Timer,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = if (timer.running) {
+                "재는 중 ${GoalTime.clock(tickingNow(timer.startedAt) - timer.startedAt)}"
+            } else {
+                "잰 시간 ${GoalTime.format(timer.measuredMinutes ?: 0)} · 남기기를 기다립니다"
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+/** 1초마다 지금. 재는 시간을 흐르게 보입니다(걷기 카드와 같은 방식). */
+@Composable
+private fun tickingNow(key: Any?): Long {
+    val now by produceState(System.currentTimeMillis(), key) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    return now
 }
 
 /**
@@ -299,6 +364,8 @@ private fun GoalPulse(track: GoalTrack) {
             add("루틴 ${track.routines.size}개 · 최근 4주에 ${track.recentActiveDays}일 움직임")
         }
         if (track.quotes.isNotEmpty()) add("글귀 ${track.quotes.size}개")
+        // 쌓은 것만 말합니다. 목표 시간이나 "부족"은 없습니다([GoalTime]).
+        if (track.totalMinutes > 0) add("들인 시간 ${GoalTime.format(track.totalMinutes)}")
     }
     Text(
         text = parts.joinToString("  ·  "),
@@ -327,11 +394,21 @@ fun GoalDetailScreen(
     onOpenQuote: (ContentItemEntity) -> Unit,
     onOpenRoutines: () -> Unit,
     onMessage: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 이 기기에서 재고 있는(또는 막 끝낸) 타이머. 다른 목표의 것일 수 있습니다 — 한 번에 하나입니다. */
+    timer: GoalTimer? = null,
+    /** 타이머가 다른 목표의 것이면 그 목표의 이름. */
+    timerGoalTitle: String? = null,
+    onAddTime: suspend (minutes: Int, note: String) -> Result<Long> = { _, _ -> Result.success(0L) },
+    onDeleteTime: suspend (Long) -> Result<Int> = { Result.success(0) },
+    onStartTimer: () -> Unit = {},
+    onStopTimer: () -> Unit = {},
+    onDiscardTimer: () -> Unit = {}
 ) {
     val goal = track.goal
     val tab = GoalTab.of(goal.type)
     val scope = rememberCoroutineScope()
+    var showAllTime by rememberSaveable(goal.id) { mutableStateOf(false) }
     var editing by rememberSaveable { mutableStateOf(false) }
     var linking by rememberSaveable { mutableStateOf(false) }
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
@@ -359,7 +436,13 @@ fun GoalDetailScreen(
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
             title = { Text("${tab.label} 지우기") },
-            text = { Text("'${goal.title}' — 되새긴 기록 ${track.reflections.size}개까지 함께 지울까요? 이어 둔 루틴은 그대로 남습니다.") },
+            text = {
+                val also = buildList {
+                    add("되새긴 기록 ${track.reflections.size}개")
+                    if (track.timeLogs.isNotEmpty()) add("시간 기록 ${track.timeLogs.size}개")
+                }.joinToString("와 ")
+                Text("'${goal.title}' — ${also}까지 함께 지울까요? 이어 둔 루틴은 그대로 남습니다.")
+            },
             confirmButton = {
                 TextButton(
                     modifier = Modifier.testTag(goalConfirmDeleteTag),
@@ -441,6 +524,22 @@ fun GoalDetailScreen(
             }
         }
 
+        // 들인 시간(사용자가 정함, 2026-11-08). 되새기기와 따로 둡니다 — 목업에서 "따로 '쓴 시간' 칸"을 골랐습니다.
+        if (goal.type == ContentType.GOAL) {
+            item(key = "time") {
+                GoalTimeSection(
+                    track = track,
+                    timer = timer,
+                    timerGoalTitle = timerGoalTitle,
+                    onAddTime = onAddTime,
+                    onStartTimer = onStartTimer,
+                    onStopTimer = onStopTimer,
+                    onDiscardTimer = onDiscardTimer,
+                    onMessage = onMessage
+                )
+            }
+        }
+
         item(key = "routines") {
             DetailSection(title = "이어 둔 루틴") {
                 if (track.routines.isEmpty()) {
@@ -518,6 +617,35 @@ fun GoalDetailScreen(
             }
         }
 
+        if (track.timeLogs.isNotEmpty()) {
+            item(key = "time-title") {
+                Text(
+                    text = "시간 기록 ${track.timeLogs.size}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            // 날마다 쌓이면 되새긴 기록이 한참 아래로 밀립니다. 최근 몇 개만 펼쳐 둡니다.
+            val shown = if (showAllTime) track.timeLogs else track.timeLogs.take(TIME_LOGS_SHOWN)
+            items(shown, key = { "time-${it.id}" }) { log ->
+                TimeLogRow(
+                    log = log,
+                    onDelete = {
+                        scope.launch {
+                            onDeleteTime(log.id).onFailure { onMessage(it.message ?: "지우지 못했습니다.") }
+                        }
+                    }
+                )
+            }
+            if (track.timeLogs.size > TIME_LOGS_SHOWN) {
+                item(key = "time-all") {
+                    TextButton(onClick = { showAllTime = !showAllTime }, modifier = Modifier.testTag(goalTimeAllTag)) {
+                        Text(if (showAllTime) "최근 ${TIME_LOGS_SHOWN}개만 보기" else "시간 기록 모두 보기 (${track.timeLogs.size}개)")
+                    }
+                }
+            }
+        }
+
         item(key = "history-title") {
             Text(
                 text = if (track.reflections.isEmpty()) "되새긴 기록" else "되새긴 기록 ${track.reflections.size}",
@@ -558,6 +686,230 @@ private fun DetailSection(title: String, content: @Composable () -> Unit) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             content()
+        }
+    }
+}
+
+/**
+ * 쓴 시간 — 고르거나 적은 시간, 또는 타이머로 잰 시간과 그때 한 것을 남깁니다(사용자가 정함, 2026-11-08).
+ *
+ * 타이머는 한 번에 하나이고 이 기기에만 있습니다. 끝내면 잰 시간이 칸에 채워지고, 고쳐서 남길 수 있습니다.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GoalTimeSection(
+    track: GoalTrack,
+    timer: GoalTimer?,
+    timerGoalTitle: String?,
+    onAddTime: suspend (minutes: Int, note: String) -> Result<Long>,
+    onStartTimer: () -> Unit,
+    onStopTimer: () -> Unit,
+    onDiscardTimer: () -> Unit,
+    onMessage: (String) -> Unit
+) {
+    val goal = track.goal
+    val scope = rememberCoroutineScope()
+    var quick by rememberSaveable(goal.id) { mutableStateOf<Int?>(null) }
+    var manual by rememberSaveable(goal.id) { mutableStateOf(false) }
+    var hoursText by rememberSaveable(goal.id) { mutableStateOf("") }
+    var minutesText by rememberSaveable(goal.id) { mutableStateOf("") }
+    var note by rememberSaveable(goal.id) { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    // 칸에 채운 잰 시간이 어느 타이머의 것인지. 한 번만 채웁니다 — 화면을 다시 그릴 때마다 덮으면 고친 것이 사라집니다.
+    var filledFor by rememberSaveable(goal.id) { mutableStateOf<Long?>(null) }
+    val mine = timer?.takeIf { it.goalSyncId == goal.syncId }
+    val measured = mine?.measuredMinutes
+
+    LaunchedEffect(mine?.stoppedAt) {
+        val stoppedAt = mine?.stoppedAt ?: return@LaunchedEffect
+        val minutes = measured ?: return@LaunchedEffect
+        if (filledFor == stoppedAt) return@LaunchedEffect
+        filledFor = stoppedAt
+        quick = null
+        manual = true
+        hoursText = if (minutes >= 60) (minutes / 60).toString() else ""
+        minutesText = (minutes % 60).toString()
+    }
+
+    val minutes = if (manual) GoalTime.parse(hoursText, minutesText) else quick
+
+    DetailSection(title = "쓴 시간") {
+        Text(
+            text = if (track.totalMinutes > 0) {
+                "누적 ${GoalTime.format(track.totalMinutes)} · 최근 4주 ${GoalTime.format(track.recentMinutes)}"
+            } else {
+                "이 목표에 들인 시간과 그때 한 것을 남기면 여기에 쌓입니다."
+            },
+            style = if (track.totalMinutes > 0) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+            color = if (track.totalMinutes > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        when {
+            mine != null && mine.running -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${GoalTime.clock(tickingNow(mine.startedAt) - mine.startedAt)} 재는 중",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(onClick = onStopTimer, modifier = Modifier.testTag(goalTimerStopTag)) { Text("끝내기") }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "앱을 닫아도 계속 잽니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDiscardTimer, modifier = Modifier.testTag(goalTimerDiscardTag)) {
+                        Text("그만두기", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            mine != null -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "잰 시간 ${GoalTime.format(measured ?: 0)}. 아래에서 고쳐 남길 수 있습니다.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDiscardTimer, modifier = Modifier.testTag(goalTimerDiscardTag)) {
+                        Text("버리기", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            timer != null -> Text(
+                text = if (timer.running) {
+                    "'${timerGoalTitle ?: "다른 목표"}'에서 재는 중입니다. 타이머는 한 번에 하나입니다."
+                } else {
+                    "'${timerGoalTitle ?: "다른 목표"}'에서 잰 시간이 남기기를 기다립니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            else -> OutlinedButton(onClick = onStartTimer, modifier = Modifier.testTag(goalTimerStartTag)) {
+                Icon(Icons.Outlined.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("타이머 시작")
+            }
+        }
+
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GoalTime.QUICK_MINUTES.forEach { value ->
+                FilterChip(
+                    selected = !manual && quick == value,
+                    onClick = {
+                        quick = if (!manual && quick == value) null else value
+                        manual = false
+                    },
+                    label = { Text(GoalTime.format(value)) },
+                    modifier = Modifier.testTag(goalTimeQuickTag(value))
+                )
+            }
+            FilterChip(
+                selected = manual,
+                onClick = {
+                    manual = !manual
+                    if (manual) quick = null
+                },
+                label = { Text("직접") },
+                modifier = Modifier.testTag(goalTimeManualTag)
+            )
+        }
+        if (manual) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = hoursText,
+                    onValueChange = { hoursText = it.filter(Char::isDigit).take(2) },
+                    label = { Text("시간") },
+                    singleLine = true,
+                    enabled = !saving,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f).testTag(goalTimeHoursTag)
+                )
+                OutlinedTextField(
+                    value = minutesText,
+                    onValueChange = { minutesText = it.filter(Char::isDigit).take(4) },
+                    label = { Text("분") },
+                    singleLine = true,
+                    enabled = !saving,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f).testTag(goalTimeMinutesTag)
+                )
+            }
+            if (hoursText.isNotBlank() || minutesText.isNotBlank()) {
+                if (minutes == null) {
+                    Text(
+                        text = "1분부터 24시간까지 남길 수 있습니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it },
+            placeholder = { Text("무엇을 했나요 (선택)") },
+            minLines = 2,
+            enabled = !saving,
+            modifier = Modifier.fillMaxWidth().testTag(goalTimeNoteTag)
+        )
+        Button(
+            onClick = {
+                val chosen = minutes ?: return@Button
+                saving = true
+                scope.launch {
+                    onAddTime(chosen, note.trim())
+                        .onSuccess {
+                            quick = null
+                            manual = false
+                            hoursText = ""
+                            minutesText = ""
+                            note = ""
+                            onMessage("${GoalTime.format(chosen)}을 남겼습니다.")
+                        }
+                        .onFailure { onMessage(it.message ?: "남기지 못했습니다.") }
+                    saving = false
+                }
+            },
+            enabled = minutes != null && !saving,
+            modifier = Modifier.testTag(goalTimeSaveTag)
+        ) { Text(if (saving) "남기는 중…" else "남기기") }
+    }
+}
+
+@Composable
+private fun TimeLogRow(log: GoalTimeLogEntity, onDelete: () -> Unit) {
+    var confirming by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.medium)
+            .padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "${formatDay(log.loggedAt)} · ${GoalTime.format(log.minutes)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            if (log.note.isNotBlank()) {
+                Text(log.note, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        if (confirming) {
+            TextButton(onClick = { confirming = false; onDelete() }) {
+                Text("정말 지우기", color = MaterialTheme.colorScheme.error)
+            }
+        } else {
+            TextButton(onClick = { confirming = true }) { Text("지우기", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }
@@ -770,3 +1122,6 @@ private fun formatDay(millis: Long): String =
 
 /** 롤모델 화면에 다 펼쳐 둘 글귀 수. 나머지는 보관함에서 봅니다. */
 private const val MAX_QUOTES = 5
+
+/** 목표 화면에 펼쳐 둘 시간 기록 수. 나머지는 "시간 기록 모두 보기"로 펼칩니다. */
+private const val TIME_LOGS_SHOWN = 5

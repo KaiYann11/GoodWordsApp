@@ -122,19 +122,68 @@ class BookScreenTest {
 
     @Test
     fun recordingProgressPassesTheTypedPage() {
-        var progress: Pair<Long, Int>? = null
+        var progress: Triple<Long, Int, String>? = null
         compose.setContent {
             bookScreen(
                 books = listOf(book(id = 5, title = "진도 책", totalPages = 300)),
-                onUpdateProgress = { id, page -> progress = id to page }
+                onUpdateProgress = { id, page, note -> progress = Triple(id, page, note) }
             )
         }
 
         compose.onNodeWithTag(bookProgressButtonTag(5)).performClick()
         compose.onNodeWithText("읽은 쪽").performTextInput("77")
-        compose.onNodeWithText("저장").performClick()
+        compose.onNodeWithTag(bookProgressSaveTag).performClick()
 
-        assertEquals(5L to 77, progress)
+        // 남길 말은 고르는 것입니다. 안 적으면 메모는 그대로입니다.
+        assertEquals(Triple(5L, 77, ""), progress)
+    }
+
+    @Test
+    fun aProgressNoteIsPassedAlong() {
+        var progress: Triple<Long, Int, String>? = null
+        compose.setContent {
+            bookScreen(
+                books = listOf(book(id = 5, title = "진도 책", totalPages = 300)),
+                onUpdateProgress = { id, page, note -> progress = Triple(id, page, note) }
+            )
+        }
+
+        compose.onNodeWithTag(bookProgressButtonTag(5)).performClick()
+        compose.onNodeWithText("읽은 쪽").performTextInput("120")
+        compose.onNodeWithTag(bookProgressNoteInputTag).performTextInput("주인공의 선택이 보인다")
+        compose.onNodeWithTag(bookProgressSaveTag).performClick()
+
+        assertEquals(Triple(5L, 120, "주인공의 선택이 보인다"), progress)
+    }
+
+    @Test
+    fun aLongMemoShowsTheLastTwoLinesUntilOpened() {
+        val note = listOf(
+            "11월 1일 · 10쪽 — 첫 기록",
+            "11월 3일 · 40쪽 — 둘째 기록",
+            "11월 5일 · 96쪽 — 초반은 느리다",
+            "11월 8일 · 120쪽 — 주인공의 선택"
+        ).joinToString("\n")
+        compose.setContent { bookScreen(books = listOf(book(id = 3, title = "메모 쌓인 책", note = note))) }
+
+        // 끝의 두 줄만 보이고 앞의 것은 접혀 있습니다. 쌓일수록 카드가 길어지면 다른 책이 밀려납니다.
+        compose.onNodeWithText("11월 5일 · 96쪽 — 초반은 느리다").assertIsDisplayed()
+        compose.onNodeWithText("11월 8일 · 120쪽 — 주인공의 선택").assertIsDisplayed()
+        compose.onNodeWithText("첫 기록", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("메모 전체 보기 (4줄)").assertIsDisplayed()
+
+        compose.onNodeWithTag(bookNoteToggleTag(3)).performClick()
+
+        compose.onNodeWithText("첫 기록", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("접기").assertIsDisplayed()
+    }
+
+    @Test
+    fun aShortMemoHasNothingToOpen() {
+        compose.setContent { bookScreen(books = listOf(book(id = 3, title = "책", note = "11월 8일 · 120쪽 — 좋다"))) }
+
+        compose.onNodeWithText("11월 8일 · 120쪽 — 좋다").assertIsDisplayed()
+        compose.onNodeWithTag(bookNoteToggleTag(3)).assertDoesNotExist()
     }
 
     private fun book(
@@ -143,14 +192,16 @@ class BookScreenTest {
         syncId: String = "book-$id",
         totalPages: Int = 0,
         currentPage: Int = 0,
-        status: BookStatus = BookStatus.READING
+        status: BookStatus = BookStatus.READING,
+        note: String = ""
     ) = BookEntity(
         id = id,
         syncId = syncId,
         title = title,
         totalPages = totalPages,
         currentPage = currentPage,
-        status = status.name
+        status = status.name,
+        note = note
     )
 
     @androidx.compose.runtime.Composable
@@ -159,7 +210,7 @@ class BookScreenTest {
         quoteCountBySyncId: Map<String, Int> = emptyMap(),
         readingDaysBySyncId: Map<String, Int> = emptyMap(),
         onSaveBook: (BookDraft) -> Unit = {},
-        onUpdateProgress: (Long, Int) -> Unit = { _, _ -> },
+        onUpdateProgress: (Long, Int, String) -> Unit = { _, _, _ -> },
         onExtractQuote: (Long, String, Int) -> Unit = { _, _, _ -> }
     ) {
         BookScreen(

@@ -27,7 +27,8 @@ class AppRepository(
     private val bookDao: BookDao? = null,
     private val growthReportDao: GrowthReportDao? = null,
     private val moodLogDao: MoodLogDao? = null,
-    private val bookReadingLogDao: BookReadingLogDao? = null
+    private val bookReadingLogDao: BookReadingLogDao? = null,
+    private val goalTimeLogDao: GoalTimeLogDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -120,6 +121,42 @@ class AppRepository(
         )
     }
 
+    fun observeGoalTimeLogs(): Flow<List<GoalTimeLogEntity>> =
+        goalTimeLogDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /**
+     * 목표에 들인 시간과 그때 한 것을 남깁니다(사용자가 정함, 2026-11-08). 목표 칸에만 남깁니다 — 이상향·롤모델은 들인
+     * 시간으로 따라가는 것이 아닙니다.
+     *
+     * @param loggedAt 그 시간을 들인 때. 타이머로 쟀으면 잰 것을 시작한 때입니다.
+     * @return 남긴 기록의 id.
+     */
+    suspend fun addGoalTime(goalId: Long, minutes: Int, note: String, loggedAt: Long = System.currentTimeMillis()): Long {
+        val dao = goalTimeLogDao ?: error("시간을 남길 수 없습니다.")
+        val goal = contentItemDao.getById(goalId) ?: error("목표를 찾을 수 없습니다.")
+        require(goal.type == ContentType.GOAL) { "들인 시간은 목표에만 남깁니다." }
+        require(minutes in 1..GoalTime.MAX_MINUTES) { "1분부터 24시간까지 남길 수 있습니다." }
+        val now = System.currentTimeMillis()
+        return dao.insert(
+            GoalTimeLogEntity(
+                goalSyncId = goal.syncId,
+                minutes = minutes,
+                note = note.trim(),
+                loggedAt = loggedAt,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+    }
+
+    suspend fun deleteGoalTime(id: Long): Int {
+        val dao = goalTimeLogDao ?: return 0
+        val existing = dao.getById(id)
+        val removed = dao.deleteById(id)
+        existing?.let { recordDeletion(it.syncId, SyncEntityType.GOAL_TIME_LOG) }
+        return removed
+    }
+
     /** 이 이상향·목표·롤모델을 위해 하는 루틴을 바꿉니다. 루틴의 syncId로 가리킵니다. */
     suspend fun setGoalRoutines(id: Long, routineSyncIds: List<String>) {
         val existing = contentItemDao.getById(id) ?: error("목표를 찾을 수 없습니다.")
@@ -206,10 +243,16 @@ class AppRepository(
         // 글귀를 지우면 옆에 달아 둔 메모도 함께 사라지므로 표식을 함께 남긴다.
         // 빠뜨리면 지운 메모가 다음 병합에서 되살아나 주인 없는 메모로 떠돈다.
         val memos = contentMemoDao.getByContentItemId(id)
+        // 목표면 들인 시간도 함께 지웁니다. 메모와 같은 까닭으로 표식을 남깁니다.
+        val timeLogs = existing?.syncId?.takeIf { it.isNotBlank() }
+            ?.let { goalTimeLogDao?.getByGoalSyncId(it) }
+            .orEmpty()
         contentItemDao.deleteById(id)
         memos.forEach { contentMemoDao.deleteById(it.id) }
+        timeLogs.forEach { goalTimeLogDao?.deleteById(it.id) }
         existing?.let { recordDeletion(it.syncId, SyncEntityType.CONTENT_ITEM) }
         memos.forEach { recordDeletion(it.syncId, SyncEntityType.CONTENT_MEMO) }
+        timeLogs.forEach { recordDeletion(it.syncId, SyncEntityType.GOAL_TIME_LOG) }
     }
 
     /**
@@ -754,11 +797,16 @@ class AppRepository(
         return book.copy(id = if (book.id == 0L) id else book.id)
     }
 
-    /** 읽은 쪽수만 고칩니다. 다 읽으면 상태도 함께 넘깁니다. */
+    /**
+     * 읽은 쪽수를 고칩니다. 다 읽으면 상태도 함께 넘깁니다.
+     *
+     * [note]를 적었으면 책 메모 끝에 `11월 8일 · 120쪽 — 글` 한 줄로 이어 붙입니다([BookNotes], 사용자가 정함, 2026-11-08).
+     */
     suspend fun updateBookProgress(
         id: Long,
         currentPage: Int,
-        today: LocalDate = LocalDate.now()
+        today: LocalDate = LocalDate.now(),
+        note: String = ""
     ): BookEntity? = database.withTransaction {
         val dao = bookDao ?: return@withTransaction null
         val existing = dao.getById(id) ?: return@withTransaction null
@@ -767,8 +815,10 @@ class AppRepository(
         }
         // 마지막 쪽에 닿으면 다 읽은 것으로 봅니다. 따로 한 번 더 누르게 하지 않습니다.
         val finished = existing.totalPages > 0 && page >= existing.totalPages
+        val noteEntry = BookNotes.entry(today, page, note)
         val updated = existing.copy(
             currentPage = page,
+            note = noteEntry?.let { BookNotes.append(existing.note, it) } ?: existing.note,
             updatedAt = System.currentTimeMillis(),
             status = if (finished) BookStatus.FINISHED.name else BookStatus.READING.name,
             finishedAt = if (finished) existing.finishedAt ?: System.currentTimeMillis() else null

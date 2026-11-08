@@ -48,6 +48,31 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun goalTimeGoesAsNumbersOnlyAndOnlyWhenGoalsAreShared() {
+        // 사용자가 정함(2026-11-08): 목표를 보내기로 했을 때만 누적·최근 4주 시간이 붙고, 그때 한 것의 글은 나가지 않습니다.
+        val goal = ContentItemEntity(id = 61, syncId = "g-1", type = ContentType.GOAL, title = "하프 마라톤 완주", body = "")
+        val vision = ContentItemEntity(id = 62, syncId = "v-1", type = ContentType.VISION, title = "아침을 지배하는 사람", body = "")
+        val logs = listOf(
+            GoalTimeLogEntity(goalSyncId = "g-1", minutes = 90, note = "무릎이 아파 걷다 뛰다 했다", loggedAt = millis(today)),
+            GoalTimeLogEntity(goalSyncId = "g-1", minutes = 60, note = "", loggedAt = millis(today.minusDays(40))),
+            // 이상향에는 시간이 붙지 않습니다.
+            GoalTimeLogEntity(goalSyncId = "v-1", minutes = 30, note = "", loggedAt = millis(today))
+        )
+        val checks = listOf(check(1, today))
+        val routines = listOf(RoutineEntity(id = 1, syncId = "r1", title = "아침 달리기"))
+
+        val on = digest(routines = routines, checks = checks, items = listOf(goal, vision), includeDiaryBody = false, includeGoals = true, goalTimeLogs = logs)
+        val off = digest(routines = routines, checks = checks, items = listOf(goal, vision), includeDiaryBody = false, goalTimeLogs = logs)
+
+        assertEquals(
+            listOf("되고 싶은 나: 아침을 지배하는 사람", "목표: 하프 마라톤 완주 · 들인 시간: 누적 2시간 30분, 최근 4주 1시간 30분"),
+            on.directionLines
+        )
+        assertFalse("시간 기록의 글이 나갔습니다.", GrowthPrompt.userPrompt(on).contains("무릎이 아파"))
+        assertFalse(GrowthPrompt.userPrompt(off).contains("들인 시간"))
+    }
+
+    @Test
     fun theDiaryBodyStaysOnThisDeviceUnlessAsked() {
         val digest = digest(diaries = listOf(diary), includeDiaryBody = false)
         val prompt = GrowthPrompt.userPrompt(digest)
@@ -289,7 +314,8 @@ class GrowthPromptTest {
         items: List<ContentItemEntity> = emptyList(),
         previous: GrowthReportEntity? = null,
         includeDiaryBody: Boolean,
-        includeGoals: Boolean = false
+        includeGoals: Boolean = false,
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
     ) = GrowthPrompt.digest(
         period = period,
         today = today,
@@ -304,7 +330,8 @@ class GrowthPromptTest {
         includeDiaryBody = includeDiaryBody,
         previousReport = previous,
         includeGoals = includeGoals,
-        zoneId = zone
+        zoneId = zone,
+        goalTimeLogs = goalTimeLogs
     )
 
     private fun millis(date: LocalDate): Long =
