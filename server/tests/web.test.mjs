@@ -302,3 +302,49 @@ test("웹의 길 풀이는 구글 polyline과 같고 깨진 길에서는 멈춘�
   assert.deepEqual(plain(decode(" !!")), []);
   assert.match(html, /아직 걷기 기록이 없습니다/);
 });
+
+/** 목표 탭을 그려, 목표에 들인 시간이 앱과 같은 셈으로 보이는지 봅니다. */
+async function renderGoals(snapshot) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const app = { innerHTML: "" };
+  const context = vm.createContext({
+    app,
+    state: { snapshot: { items: [], routines: [], contentMemos: [], goalTimeLogs: [], ...snapshot }, editingContentId: null },
+    findById: (items, id) => items.find((item) => item.id === id),
+    goalTypes: ["VISION", "GOAL", "ROLE_MODEL"],
+    typeLabel: (type) => ({ VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델" })[type],
+    formatDate: (timestamp) => new Date(timestamp).toISOString().slice(5, 10),
+    todayIso: () => "2026-11-08",
+    empty: (value) => value,
+  });
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  context.attr = context.escapeHtml;
+  const start = source.indexOf("function formatMinutes(");
+  const end = source.indexOf("function renderPrinciples(");
+  assert.ok(start >= 0 && end > start, "목표 화면 토막을 찾지 못했습니다.");
+  vm.runInContext(source.slice(start, end), context);
+  context.renderGoals();
+  return app.innerHTML;
+}
+
+test("목표에 들인 시간은 누적과 최근 4주로 보이고, 적은 글은 HTML로 실행되지 않는다", async () => {
+  const goal = { id: 1, syncId: "goal-1", type: "GOAL", title: "하프 마라톤 완주", body: "", createdAt: 1 };
+  const vision = { id: 2, syncId: "vision-1", type: "VISION", title: "아침을 지배하는 사람", body: "", createdAt: 2 };
+  const at = (day) => new Date(`${day}T09:00:00`).getTime();
+  const html = await renderGoals({
+    items: [goal, vision],
+    goalTimeLogs: [
+      { syncId: "a", goalSyncId: "goal-1", minutes: 90, note: "5km 템포런", loggedAt: at("2026-11-08") },
+      { syncId: "b", goalSyncId: "goal-1", minutes: 45, note: "<b>스트레칭</b>", loggedAt: at("2026-11-01") },
+      // 4주보다 오래된 것은 누적에만 듭니다.
+      { syncId: "c", goalSyncId: "goal-1", minutes: 60, note: "", loggedAt: at("2026-09-20") },
+      // 목표가 아닌 칸에는 시간이 붙지 않습니다.
+      { syncId: "d", goalSyncId: "vision-1", minutes: 30, note: "", loggedAt: at("2026-11-08") },
+    ],
+  });
+  assert.match(html, /누적 3시간 15분 · 최근 4주 2시간 15분/);
+  assert.match(html, /1시간 30분 — 5km 템포런/);
+  assert.match(html, /45분 — &lt;b&gt;스트레칭&lt;\/b&gt;/);
+  assert.doesNotMatch(html, /<b>스트레칭/);
+  assert.equal((html.match(/쓴 시간/g) || []).length, 1, "이상향에는 쓴 시간이 없어야 합니다.");
+});

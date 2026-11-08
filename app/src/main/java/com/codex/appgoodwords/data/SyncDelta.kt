@@ -27,6 +27,7 @@ object SyncDelta {
             // 걷기는 지나온 길을 싣고 있어 매번 다 보내면 무겁습니다. 걸음 수도 날마다 하나씩 쌓입니다.
             stepCounts = snapshot.stepCounts.filter { it.updatedAt > since },
             walks = snapshot.walks.filter { it.updatedAt > since },
+            goalTimeLogs = snapshot.goalTimeLogs.filter { it.updatedAt > since },
             // 이력과 체크는 한 번 생기면 바뀌지 않으므로 생긴 시각으로 봅니다.
             events = snapshot.events.filter { it.occurredAt > since },
             routineChecks = snapshot.routineChecks.filter { it.checkedAt > since },

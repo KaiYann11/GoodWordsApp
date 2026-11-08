@@ -168,7 +168,9 @@ class GrowthFeedbackCoordinator(
             stepCounts = database.stepCountDao().getAll(),
             walks = database.walkDao().getFinished(),
             goalSteps = settingsStore.getWalkGoalSteps()
-        )
+        ),
+        // 목표를 보내지 않으면 들인 시간도 읽지 않습니다.
+        goalTimeLogs = if (includeGoals) database.goalTimeLogDao().getAll() else emptyList()
     )
 
     companion object {

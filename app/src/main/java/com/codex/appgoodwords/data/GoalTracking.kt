@@ -1,12 +1,13 @@
 package com.codex.appgoodwords.data
 
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 이상향·목표·롤모델 하나를 어떻게 따라가고 있는지.
  *
  * **기한이나 숫자로 재지 않습니다**(사용자가 정함, 2026-10-29). 되새긴 기록과, 이어 둔 루틴을 실제로 밟은 날로
- * 봅니다. 그리고 **저장하지 않고 그때그때 셉니다** — 연속 날수·점수와 같은 이유로, 체크를 고치거나 다른 기기와
+ * 봅니다. 목표에는 들인 시간도 쌓이지만(2026-11-08) **쌓은 것만** 셉니다 — 목표치·%·"부족"이 없습니다([GoalTime]). 그리고 **저장하지 않고 그때그때 셉니다** — 연속 날수·점수와 같은 이유로, 체크를 고치거나 다른 기기와
  * 합치면 저장해 둔 숫자와 기록이 어긋납니다.
  *
  * 못 한 것은 세지 않습니다. "28일 중 16일 빠짐"이 아니라 "최근 4주에 12일"입니다.
@@ -20,7 +21,13 @@ data class GoalTrack(
     /** 이어 둔 루틴을 하나라도 밟은 날이 최근 [GoalTracking.RECENT_DAYS]일 중 며칠인지. 같은 날 여럿 밟아도 하루입니다. */
     val recentActiveDays: Int,
     /** 롤모델이면 보관함에서 저자가 같은 글귀. 다른 종류는 비어 있습니다. */
-    val quotes: List<ContentItemEntity>
+    val quotes: List<ContentItemEntity>,
+    /** 들인 시간. 최근 것이 먼저입니다. 목표 칸에만 쌓입니다([GoalTime]). */
+    val timeLogs: List<GoalTimeLogEntity> = emptyList(),
+    /** 들인 시간 모두(분). */
+    val totalMinutes: Int = 0,
+    /** 최근 [GoalTracking.RECENT_DAYS]일에 들인 시간(분). */
+    val recentMinutes: Int = 0
 ) {
     val lastReflectedAt: Long?
         get() = reflections.firstOrNull()?.createdAt
@@ -51,9 +58,12 @@ object GoalTracking {
         routines: List<RoutineEntity>,
         routineStats: Map<Long, RoutineStatsReport>,
         items: List<ContentItemEntity>,
-        today: LocalDate
+        today: LocalDate,
+        timeLogs: List<GoalTimeLogEntity> = emptyList(),
+        zoneId: ZoneId = ZoneId.systemDefault()
     ): List<GoalTrack> {
         val routinesBySyncId = routines.associateBy { it.syncId }
+        val timeByGoal = timeLogs.groupBy { it.goalSyncId }
         val memosByGoal = memos.groupBy { it.contentItemSyncId.ifBlank { "#${it.contentItemId}" } }
         val from = today.minusDays(RECENT_DAYS - 1L)
         return goals.filter { it.type.isGoal }.map { goal ->
@@ -79,7 +89,15 @@ object GoalTracking {
                 routines = rows,
                 recentActiveDays = activeDays.size,
                 quotes = if (goal.type == ContentType.ROLE_MODEL) quotesOf(goal.title, items) else emptyList()
-            )
+            ).let { track ->
+                val logs = timeByGoal[goal.syncId].orEmpty().sortedWith(compareByDescending<GoalTimeLogEntity> { it.loggedAt }.thenByDescending { it.id })
+                if (logs.isEmpty()) track
+                else track.copy(
+                    timeLogs = logs,
+                    totalMinutes = GoalTime.total(logs),
+                    recentMinutes = GoalTime.recent(logs, today, zoneId)
+                )
+            }
         }
     }
 

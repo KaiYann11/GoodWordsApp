@@ -46,15 +46,42 @@ class GoalTrackingTest {
         checks: List<RoutineCheckEntity> = emptyList(),
         memos: List<ContentMemoEntity> = emptyList(),
         items: List<ContentItemEntity> = emptyList(),
-        routines: List<RoutineEntity> = listOf(walk, read)
+        routines: List<RoutineEntity> = listOf(walk, read),
+        timeLogs: List<GoalTimeLogEntity> = emptyList()
     ) = GoalTracking.build(
         goals = goals,
         memos = memos,
         routines = routines,
         routineStats = RoutineStatsCalculator.buildAll(routines, checks, today, zone),
         items = items,
-        today = today
+        today = today,
+        timeLogs = timeLogs,
+        zoneId = zone
     )
+
+    @Test
+    fun timeSpentStaysWithItsGoalNewestFirst() {
+        // 들인 시간은 쌓은 것만 셉니다(사용자가 정함, 2026-11-08). 다른 목표의 시간이 섞이면 안 됩니다.
+        fun log(goal: String, minutes: Int, day: LocalDate) = GoalTimeLogEntity(
+            syncId = "$goal-$day", goalSyncId = goal, minutes = minutes,
+            loggedAt = day.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        )
+        val tracks = build(
+            goals = listOf(goal(10), goal(11)),
+            timeLogs = listOf(
+                log("goal-10", 30, today.minusDays(40)),
+                log("goal-10", 90, today),
+                log("goal-10", 45, today.minusDays(3)),
+                log("goal-11", 20, today)
+            )
+        )
+
+        val first = tracks.single { it.goal.id == 10L }
+        assertEquals(165, first.totalMinutes)
+        assertEquals(135, first.recentMinutes)
+        assertEquals(listOf(90, 45, 30), first.timeLogs.map { it.minutes })
+        assertEquals(20, tracks.single { it.goal.id == 11L }.totalMinutes)
+    }
 
     @Test
     fun aDayCountsOnceEvenWhenTwoLinkedRoutinesWereDone() {

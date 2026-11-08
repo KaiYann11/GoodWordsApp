@@ -118,10 +118,11 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 이어 온 날수 · 하루 점수·오늘 한 것 · 하루의 걸음 | `DayStreak` · `DayScoreCalculator.digest` · `DailyLoopCalculator` |
 | 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴 · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
-| 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄) | `GoalTracking` |
+| 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄·들인 시간) | `GoalTracking` |
+| 목표에 들인 시간(분 표시·누적·최근 4주·직접 적은 시간·타이머로 잰 분 — 사용자가 정함, 2026-11-08) | 앱 `GoalTime` · 웹 `formatMinutes`·`recentGoalMinutes` |
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
 | 담기 전 다듬기 · 읽음으로 세지 않는 종류 · AI 추천 글귀의 갈래 | `ContentNormalizer` · `ContentType.personalTypes` · `AI_CATEGORY` |
-| AI에 일기·목표가 어디까지 나가는지 | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
+| AI에 일기·목표가 어디까지 나가는지(목표에 들인 시간은 숫자만, 글은 안 감) | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
 | 오늘 나눈 말·앞서 받은 말을 AI에 다시 싣는 범위 | `DailyCoachPrompt.talkLines`·`givenTipLines`·`givenQuoteLines` (공통 `sharedTalk`·`DailyCoachSharing` — 받을 때 허용했던 범위를 지금 끄면 제외) |
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
@@ -149,6 +150,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
 | 걸음 수·걷기 합치기 | 같은 날 걸음 수는 **걸음이 많은 쪽**이 남습니다(앱 `SyncDeduplicator`의 `winner` · 서버 `moreSteps`). 걷기는 시작한 밀리초가 같으면 같은 것입니다(`walkFingerprint`) |
+| 목표에 들인 시간(`goalTimeLogs`) | 같은 목표·같은 밀리초면 같은 것(앱·서버 `goalTimeLogFingerprint`), 목표가 합쳐지면 남은 목표로 옮김(앱 `SyncDeduplicator`·서버 `deduplicate`), 목표를 지우면 함께 지우고 표식(앱 `AppRepository.deleteContent`·서버 `DELETE /api/content/{id}`) |
 | 글 쌓이는 새 자리 | `AppSearch`에 찾을 길(딸린 글은 부모에 얹기) |
 | `routineChecks`를 "실천했다"로 세는 곳 | `DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt` · `DailyCoachPrompt` · `RoutineNudge` |
 | 홈 목록의 줄(`HomeScreen`) | `QUOTE_ITEM_INDEX`·`TAB_ROW_ITEM_INDEX`·`PAGES_ITEM_INDEX` |
@@ -193,6 +195,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - **지도는 OpenStreetMap 타일을 앱이 직접 받습니다**(`AppContainer.mapTileImageLoader` — 앱을 밝히는 User-Agent, 한 서버에 동시에
   둘, 디스크 캐시, 보이는 칸만). 지도 귀퉁이의 "© OpenStreetMap"은 쓰는 조건이라 지우지 않습니다. **웹은 타일을 부르지 않고 길의
   모양만 그립니다** — 브라우저가 바깥 타일 서버에 청하면 이 서버의 주소(Tailscale 이름)가 함께 갑니다.
+- **목표 타이머는 이 기기에만 있습니다**(`SettingsStore.goalTimerFlow` — 시작한 때만 적어 두고 그때그때 빼서 셉니다). 남기기를
+  눌러야 기록(`GoalTimeLogEntity`)이 되어 동기화됩니다. 한 번에 하나이고, 끝낸 뒤에도 남기기 전까지 잰 시간을 들고 있습니다. 타이머의
+  목표가 (다른 기기에서) 지워지면 없는 것으로 봅니다 — 남길 곳 없는 타이머가 새 타이머를 막지 않게(`AppGoodWordsApp`).
 - **위치는 AI에 가지 않습니다**(사용자가 정함, 2026-11-07). AI가 보는 하루(`DayDigest`)에는 길을 뺀 `WalkSummary`만 담기고, AI에
   가는 걷기는 `Walking.factLine`의 숫자뿐입니다(`WalkPromptTest`가 길·좌표가 섞이지 않는지 봅니다).
 - **자판이 올라와도 창은 줄지 않습니다**(가장자리까지 그리는 창 — Android 15 에뮬레이터에서 확인, `adjustResize`는 자판 높이만
@@ -204,7 +209,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 어기면 기능이 아니라 잔소리가 됩니다.
 
 - **못 한 것을 세지 않습니다.** "0일 연속"·빠진 날·남은 개수 대신 **다음 하나**와 한 것만 말합니다.
-- **셈한 것은 저장하지 않고 기록에서 다시 셉니다**(연속·점수·통계·목표의 실천).
+- **셈한 것은 저장하지 않고 기록에서 다시 셉니다**(연속·점수·통계·목표의 실천·목표에 들인 시간).
+- **목표에 들인 시간은 쌓은 것만 말합니다**(사용자가 정함, 2026-11-08) — 목표치·%·"부족"이 없습니다. 목표 탭은 기한이나 목표치로
+  재지 않습니다.
 - 하루 점수에 기분을 넣지 않습니다. 걷기는 넣되 **걸음 수가 아니라 걸은 날인지로** 셉니다(덤도 하나) — 많이 걸은 날 하나로
   덤이 차지 않고, 모자란 걸음을 세지 않습니다.
 - **값이 드는 일은 사용자가 정하고 몰래 돌지 않습니다** — 횟수·주기·배경 스위치가 설정에 보입니다. 알리기만 하는 것은 아무것도

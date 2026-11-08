@@ -22,9 +22,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MoodLogEntity::class,
         BookReadingLogEntity::class,
         StepCountEntity::class,
-        WalkEntity::class
+        WalkEntity::class,
+        GoalTimeLogEntity::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -44,8 +45,35 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookReadingLogDao(): BookReadingLogDao
     abstract fun stepCountDao(): StepCountDao
     abstract fun walkDao(): WalkDao
+    abstract fun goalTimeLogDao(): GoalTimeLogDao
 
     companion object {
+        /**
+         * 목표에 들인 시간을 담을 자리를 만듭니다(사용자가 정함, 2026-11-08). 기존 표는 건드리지 않습니다.
+         *
+         * 옮겨 올 것이 없습니다 — 이제부터 쌓습니다. 칸·인덱스 이름은 [GoalTimeLogEntity]와 정확히 같아야 합니다.
+         */
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS goal_time_logs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "goalSyncId TEXT NOT NULL, " +
+                        "minutes INTEGER NOT NULL, " +
+                        "note TEXT NOT NULL, " +
+                        "loggedAt INTEGER NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_goal_time_logs_syncId ON goal_time_logs (syncId)")
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_goal_time_logs_goalSyncId_loggedAt ON goal_time_logs (goalSyncId, loggedAt)"
+                )
+            }
+        }
+
         /**
          * 하루 걸음 수와 걷기를 담을 자리를 만듭니다(사용자가 정함, 2026-11-07). 기존 표는 건드리지 않습니다.
          *

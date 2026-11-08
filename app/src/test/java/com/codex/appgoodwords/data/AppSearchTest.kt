@@ -109,6 +109,19 @@ class AppSearchTest {
     }
 
     @Test
+    fun aGoalIsFoundByWhatWasDoneInItsTime() {
+        // 시간 기록에 적은 글은 그 목표에 얹혀 찾아집니다. 딸린 글을 따로 찾게 하면 어느 목표의 것인지 잃습니다.
+        val goal = ContentItemEntity(id = 30, syncId = "g-30", type = ContentType.GOAL, title = "하프 마라톤 완주", body = "")
+        val log = GoalTimeLogEntity(goalSyncId = "g-30", minutes = 40, note = "인터벌 400m 여섯 번")
+
+        val hits = AppSearch.search(query = "인터벌", items = listOf(goal), goalTimeLogs = listOf(log)).hits
+
+        assertEquals(SearchKind.GOAL, hits.single().kind)
+        assertEquals(30L, hits.single().id)
+        assertTrue(hits.single().snippet.contains("인터벌"))
+    }
+
+    @Test
     fun theSearchIgnoresCase() {
         val item = quote.copy(id = 9, syncId = "q9", title = "Atomic Habits", body = "본문")
 

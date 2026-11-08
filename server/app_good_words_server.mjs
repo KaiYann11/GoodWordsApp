@@ -9,9 +9,13 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 걸음 수(stepCounts)와 걷기(walks)가 생겼습니다(사용자가 정함, 2026-11-07). 옛 앱·서버는 둘을 몰라 받아도 버리므로
-// 형식을 올립니다. 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-const schemaVersion = 25;
+// 목표에 들인 시간(goalTimeLogs)이 생겼습니다(사용자가 정함, 2026-11-08). 옛 앱·서버는 몰라 받아도 버리므로 형식을
+// 올립니다. 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 26;
+/** 한 번에 남길 수 있는 들인 시간(분). 앱 `GoalTime.MAX_MINUTES`와 같다 — 타이머를 잊어도 하루를 넘겨 쌓이지 않게. */
+const maxGoalTimeMinutes = 24 * 60;
+/** 시간 기록에 적은 글(과정)의 길이 한도. 하루치 일기보다 길 까닭이 없다. */
+const maxGoalTimeNoteLength = 10_000;
 /** 이 기간보다 오래 꺼져 있던 기기가 다시 붙으면, 그 사이 지운 항목이 되살아날 수 있다. */
 const deletionRetentionDays = 90;
 /** 걷기의 지나온 길(polyline)이 이보다 길면 버린다. 몇 시간을 걸어도 수십 KB다. */
@@ -100,6 +104,7 @@ const deletionEntityTypes = new Set([
   "BOOK_READING_LOG",
   "STEP_COUNT",
   "WALK",
+  "GOAL_TIME_LOG",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
@@ -376,6 +381,7 @@ async function routeContentMember(method, parts, request, response) {
   }
   if (method === "DELETE" && !action) {
     const result = await withDb((db) => {
+      const goal = db.items.find((item) => item.id === itemId);
       const deleted = deleteWithTombstone(db, db.items, [itemId], "CONTENT_ITEM").deleted;
       // 표식을 안 남기면 지운 메모가 다음 병합에 되살아나 주인 없는 메모로 떠돈다.
       deleteWithTombstone(
@@ -384,6 +390,15 @@ async function routeContentMember(method, parts, request, response) {
         db.contentMemos.filter((memo) => memo.contentItemId === itemId).map((memo) => memo.id),
         "CONTENT_MEMO",
       );
+      // 목표면 들인 시간도 같다(앱 AppRepository.deleteContent와 같게).
+      if (goal?.syncId) {
+        deleteWithTombstone(
+          db,
+          db.goalTimeLogs,
+          db.goalTimeLogs.filter((log) => log.goalSyncId === goal.syncId).map((log) => log.id),
+          "GOAL_TIME_LOG",
+        );
+      }
       return { deleted };
     });
     sendJson(response, 200, { deleted: result.deleted });
@@ -1303,6 +1318,7 @@ const revisionedCollections = [
   "bookReadingLogs",
   "stepCounts",
   "walks",
+  "goalTimeLogs",
 ];
 
 async function withDb(mutator) {
@@ -1389,6 +1405,7 @@ function emptyDb() {
     bookReadingLogs: [],
     stepCounts: [],
     walks: [],
+    goalTimeLogs: [],
   };
 }
 
@@ -1415,6 +1432,7 @@ function normalizeDb(db) {
     bookReadingLogs: normalizeList(db?.bookReadingLogs, normalizeBookReadingLog),
     stepCounts: normalizeList(db?.stepCounts, normalizeStepCount),
     walks: normalizeList(db?.walks, normalizeWalk),
+    goalTimeLogs: normalizeList(db?.goalTimeLogs, normalizeGoalTimeLog),
   };
 }
 
@@ -1477,6 +1495,7 @@ function snapshot(db, since = 0, epoch = null) {
     bookReadingLogCount: normalized.bookReadingLogs.length,
     stepCountCount: normalized.stepCounts.length,
     walkCount: normalized.walks.length,
+    goalTimeLogCount: normalized.goalTimeLogs.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -1495,6 +1514,7 @@ function snapshot(db, since = 0, epoch = null) {
     bookReadingLogs: only(sortDesc(normalized.bookReadingLogs, "createdAt")),
     stepCounts: only(sortDesc(normalized.stepCounts, "updatedAt")),
     walks: only(sortDesc(normalized.walks, "startedAt")),
+    goalTimeLogs: only(sortDesc(normalized.goalTimeLogs, "loggedAt")),
   };
 }
 
@@ -1524,6 +1544,7 @@ function mergeSnapshot(db, payload) {
     bookReadingLogs: payload?.bookReadingLogs,
     stepCounts: payload?.stepCounts,
     walks: payload?.walks,
+    goalTimeLogs: payload?.goalTimeLogs,
   });
   const current = normalizeDb(db);
 
@@ -1551,6 +1572,7 @@ function mergeSnapshot(db, payload) {
   // 같은 기록의 사본이면 나중에 읽은 쪽이다(그날 걸음은 저녁까지 는다). 다른 기기가 읽은 같은 날은 합치기에서 큰 쪽을 남긴다.
   db.stepCounts = mergeMutable(current.stepCounts, incoming.stepCounts, deletedAt);
   db.walks = mergeMutable(current.walks, incoming.walks, deletedAt);
+  db.goalTimeLogs = mergeMutable(current.goalTimeLogs, incoming.goalTimeLogs, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -1590,6 +1612,7 @@ function deduplicate(db) {
   // 같은 날을 두 기기가 각각 읽었으면 걸음이 많은 쪽이다. 앱 SyncDeduplicator와 같은 차례여야 한다.
   const stepCounts = resolveDuplicates(db.stepCounts, stepCountFingerprint, moreSteps);
   const walks = resolveDuplicates(db.walks, walkFingerprint);
+  const goalTimeLogs = resolveDuplicates(db.goalTimeLogs, goalTimeLogFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   // 목표에 이어 둔 루틴도 남은 루틴으로 옮긴다. 둘이 하나로 합쳐졌으면 한 번만 남긴다(앱 SyncDeduplicator와 같게).
@@ -1618,6 +1641,11 @@ function deduplicate(db) {
   );
   db.stepCounts = stepCounts.kept;
   db.walks = walks.kept;
+  // 사라진 목표를 가리키던 시간은 남은 목표로 옮겨 붙인다(앱 SyncDeduplicator와 같게).
+  db.goalTimeLogs = goalTimeLogs.kept.map((log) => ({
+    ...log,
+    goalSyncId: items.movedTo.get(log.goalSyncId) || log.goalSyncId,
+  }));
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -1633,6 +1661,7 @@ function deduplicate(db) {
     [readingLogs.movedTo, "BOOK_READING_LOG"],
     [stepCounts.movedTo, "STEP_COUNT"],
     [walks.movedTo, "WALK"],
+    [goalTimeLogs.movedTo, "GOAL_TIME_LOG"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1777,6 +1806,15 @@ function walkFingerprint(walk) {
 }
 
 /**
+ * 같은 목표에 같은 순간(밀리초) 남긴 시간이면 같은 기록이다. 다른 syncId로 다시 올려도 한 번만 센다.
+ * 앱 `SyncDeduplicator.goalTimeLogFingerprint`와 같아야 한다.
+ */
+function goalTimeLogFingerprint(log) {
+  const goal = text(log.goalSyncId);
+  return goal && log.loggedAt > 0 ? `${goal}|${log.loggedAt}` : "";
+}
+
+/**
  * 같은 기간을 두고 받은 피드백은 한 편만 남긴다.
  *
  * 두 기기에서 같은 주를 각각 돌리면 글은 조금씩 달라도 말하는 바는 같다.
@@ -1880,6 +1918,8 @@ function reindex(db) {
   // 걸음 수와 걷기는 딸린 것도 가리키는 것도 없어 번호만 보면 된다.
   db.stepCounts = withStableIds(db.stepCounts);
   db.walks = withStableIds(db.walks);
+  // 목표에 들인 시간은 그 목표 안에서만 보인다. 붙을 목표가 없으면 어디에도 그릴 수 없다(글귀 메모와 같다).
+  db.goalTimeLogs = withStableIds(db.goalTimeLogs.filter((log) => itemIds.has(log.goalSyncId)));
 
   return db;
 }
@@ -2011,6 +2051,9 @@ function replaceSnapshot(db, payload) {
     : [];
   db.stepCounts = Array.isArray(payload.stepCounts) ? payload.stepCounts.map(normalizeStepCount).filter(Boolean) : [];
   db.walks = Array.isArray(payload.walks) ? payload.walks.map(normalizeWalk).filter(Boolean) : [];
+  db.goalTimeLogs = Array.isArray(payload.goalTimeLogs)
+    ? payload.goalTimeLogs.map(normalizeGoalTimeLog).filter(Boolean)
+    : [];
   return db;
 }
 
@@ -2718,6 +2761,27 @@ function normalizeWalk(walk) {
     steps: positiveInt(walk.steps),
     path: path.length <= maxWalkPathLength && /^[\x3f-\x7e]*$/.test(path) ? path : "",
     createdAt: integer(walk.createdAt, nowMs()),
+  };
+}
+
+/**
+ * 목표에 들인 시간 한 번(사용자가 정함, 2026-11-08). 어느 목표의 것인지 모르거나 들인 시간이 없으면 버린다.
+ */
+function normalizeGoalTimeLog(log) {
+  if (!log) return null;
+  const goalSyncId = text(log.goalSyncId);
+  const minutes = integer(log.minutes, 0);
+  if (!goalSyncId || minutes < 1 || minutes > maxGoalTimeMinutes) return null;
+  const createdAt = integer(log.createdAt, nowMs());
+  return {
+    id: positiveInt(log.id),
+    syncId: syncId(log.syncId),
+    updatedAt: integer(log.updatedAt, createdAt),
+    goalSyncId,
+    minutes,
+    note: (typeof log.note === "string" ? log.note : "").slice(0, maxGoalTimeNoteLength),
+    loggedAt: integer(log.loggedAt, 0) > 0 ? integer(log.loggedAt, 0) : createdAt,
+    createdAt,
   };
 }
 

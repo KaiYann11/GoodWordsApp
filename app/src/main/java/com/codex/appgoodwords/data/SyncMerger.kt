@@ -131,6 +131,13 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            goalTimeLogs = mergeMutable(
+                local = local.goalTimeLogs,
+                remote = remote.goalTimeLogs,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }

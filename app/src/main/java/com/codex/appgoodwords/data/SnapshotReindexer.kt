@@ -80,7 +80,9 @@ object SnapshotReindexer {
             },
             // 걸음 수와 걷기는 딸린 것도 가리키는 것도 없어 번호만 다시 매기면 됩니다.
             stepCounts = snapshot.stepCounts.mapIndexed { index, count -> count.copy(id = index + 1L) },
-            walks = snapshot.walks.mapIndexed { index, walk -> walk.copy(id = index + 1L) }
+            walks = snapshot.walks.mapIndexed { index, walk -> walk.copy(id = index + 1L) },
+            // 목표에 들인 시간은 목표를 syncId로만 가리켜 번호만 다시 매기면 됩니다.
+            goalTimeLogs = snapshot.goalTimeLogs.mapIndexed { index, log -> log.copy(id = index + 1L) }
         )
     }
 

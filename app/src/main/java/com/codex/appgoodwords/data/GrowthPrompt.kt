@@ -129,7 +129,9 @@ object GrowthPrompt {
         includeGoals: Boolean = false,
         /** 걸음 수와 걷기. 숫자만 실립니다. */
         walkRecords: WalkRecords = WalkRecords(),
-        zoneId: ZoneId = ZoneId.systemDefault()
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        /** 목표에 들인 시간. [includeGoals]일 때 시간 숫자만 실립니다([directionLines]). */
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
     ): GrowthDigest {
         val from = today.minusDays((period.days - 1).toLong())
         val inRange = { millis: Long -> toDate(millis, zoneId).let { !it.isBefore(from) && !it.isAfter(today) } }
@@ -225,7 +227,7 @@ object GrowthPrompt {
             walkLines = walkLines,
             ownedQuoteLines = ownedQuoteLines,
             moodLines = moodLines,
-            directionLines = if (includeGoals) directionLines(items, routines) else emptyList(),
+            directionLines = if (includeGoals) directionLines(items, routines, goalTimeLogs, today, zoneId) else emptyList(),
             previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
             previousAdviceOn = previousOn,
             previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) }
@@ -280,9 +282,19 @@ object GrowthPrompt {
      * 오늘의 한마디([DailyCoachPrompt])도 이 함수를 씁니다. 무엇이 나가는지를 정하는 자리는 하나여야 합니다
      * ([diaryLine]과 같은 이유). 제목과 적어 둔 설명, 이어 둔 루틴의 이름까지만 나갑니다. **되새긴 기록(덧메모)은
      * 싣지 않습니다** — 그때그때 적은 속마음이라 일기만큼 사적입니다.
+     *
+     * 목표에 들인 시간은 **숫자만** 붙습니다(사용자가 정함, 2026-11-08 — "누적 시간 숫자만"). 그때 한 것(과정)의 글은
+     * 되새긴 기록처럼 싣지 않습니다.
      */
-    fun directionLines(items: List<ContentItemEntity>, routines: List<RoutineEntity>): List<String> {
+    fun directionLines(
+        items: List<ContentItemEntity>,
+        routines: List<RoutineEntity>,
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList(),
+        today: LocalDate = LocalDate.now(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): List<String> {
         val routineTitles = routines.associate { it.syncId to it.title.trim() }
+        val timeByGoal = goalTimeLogs.groupBy { it.goalSyncId }
         return ContentType.goalTypes.flatMap { type ->
             val label = when (type) {
                 ContentType.VISION -> "되고 싶은 나"
@@ -296,6 +308,11 @@ object GrowthPrompt {
                     append("$label: ${item.title.trim()}")
                     if (body.isNotBlank()) append(" — $body")
                     if (linked.isNotEmpty()) append(" (이어 둔 루틴: ${linked.joinToString(", ")})")
+                    val logs = if (type == ContentType.GOAL) timeByGoal[item.syncId].orEmpty() else emptyList()
+                    if (logs.isNotEmpty()) {
+                        append(" · 들인 시간: 누적 ${GoalTime.format(GoalTime.total(logs))}, ")
+                        append("최근 4주 ${GoalTime.format(GoalTime.recent(logs, today, zoneId))}")
+                    }
                 }
             }
         }.take(MAX_DIRECTION_LINES)

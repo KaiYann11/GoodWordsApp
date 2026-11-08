@@ -82,7 +82,8 @@ class AppDataSnapshotCountTest {
                 distanceMeters = 830,
                 path = WalkPath.encode(listOf(GeoPoint(37.5665, 126.978), GeoPoint(37.57, 126.98)))
             )
-        )
+        ),
+        goalTimeLogs = listOf(GoalTimeLogEntity(id = 1, syncId = "gt1", goalSyncId = "i1", minutes = 90, note = "5km"))
     )
 
     @Test
@@ -109,12 +110,13 @@ class AppDataSnapshotCountTest {
         assertEquals("i1", restored.contentMemos.single().contentItemSyncId)
         assertEquals("걸음 수가 파일에 담기지 않았습니다.", 6_240, restored.stepCounts.single().steps)
         assertEquals("걷기가 파일에 담기지 않았습니다.", 2, WalkPath.decode(restored.walks.single().path).size)
+        assertEquals("목표에 들인 시간이 파일에 담기지 않았습니다.", 90, restored.goalTimeLogs.single().minutes)
     }
 
     @Test
     fun theCountAddsUpEveryKind() {
         // 새 종류를 만들고 recordCount에 더하지 않으면 여기서 걸립니다.
-        assertEquals(14, snapshot.recordCount)
+        assertEquals(15, snapshot.recordCount)
     }
 
     @Test

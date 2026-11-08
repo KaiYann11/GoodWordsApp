@@ -275,6 +275,7 @@ fun AppGoodWordsApp(
     var capturingIdea by remember { mutableStateOf(false) }
     val homeQuote by viewModel.homeQuote.collectAsStateWithLifecycle()
     val goalTracks by viewModel.goalTracks.collectAsStateWithLifecycle()
+    val goalTimer by viewModel.goalTimer.collectAsStateWithLifecycle()
     val homeGoalLine by viewModel.homeGoalLine.collectAsStateWithLifecycle()
     val openDailyCoachRequest by viewModel.openDailyCoachRequest.collectAsStateWithLifecycle()
     val openDailyCoachTalkRequest by viewModel.openDailyCoachTalkRequest.collectAsStateWithLifecycle()
@@ -1555,6 +1556,7 @@ fun AppGoodWordsApp(
                             routines = routines,
                             routineMemos = routineMemos,
                             growthReports = growthReports,
+                            goalTimeLogs = goalTracks.flatMap { it.timeLogs },
                             onOpenHit = { hit ->
                                 if (hit.kind in listOf(SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT)) {
                                     openItemDetail(AppTab.SEARCH, hit.id)
@@ -1590,7 +1592,8 @@ fun AppGoodWordsApp(
                             modifier = Modifier.padding(innerPadding),
                             tracks = goalTracks,
                             onOpen = { id -> pushRoute(goalRoute(id)) },
-                            onSave = viewModel::saveGoal
+                            onSave = viewModel::saveGoal,
+                            goalTimer = goalTimer
                         )
 
                         AppTab.GOAL_DETAIL -> {
@@ -1602,9 +1605,18 @@ fun AppGoodWordsApp(
                                     popRoute()
                                 }
                             } else {
+                                // 타이머의 목표가 (다른 기기에서) 지워졌으면 없는 것으로 봅니다. 남길 곳 없는 타이머가 새 타이머를 막으면 안 됩니다.
+                                val timerGoal = goalTimer?.let { timer -> goalTracks.firstOrNull { it.goal.syncId == timer.goalSyncId } }
                                 GoalDetailScreen(
                                     modifier = Modifier.padding(innerPadding),
                                     track = track,
+                                    timer = goalTimer.takeIf { timerGoal != null },
+                                    timerGoalTitle = timerGoal?.goal?.title,
+                                    onAddTime = { minutes, note -> viewModel.addGoalTime(track.goal.id, minutes, note) },
+                                    onDeleteTime = { id -> viewModel.deleteGoalTime(id) },
+                                    onStartTimer = { viewModel.startGoalTimer(track.goal.syncId) },
+                                    onStopTimer = { viewModel.stopGoalTimer() },
+                                    onDiscardTimer = { viewModel.discardGoalTimer() },
                                     routines = routines,
                                     onSaveText = { title, body -> viewModel.saveGoal(track.goal.id, track.goal.type, title, body) },
                                     onSetRoutines = { ids -> viewModel.setGoalRoutines(track.goal.id, ids) },
