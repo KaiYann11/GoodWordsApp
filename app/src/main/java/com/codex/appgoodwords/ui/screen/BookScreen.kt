@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -32,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -40,22 +43,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.BookEntity
+import com.codex.appgoodwords.data.BookNotes
 
 internal const val bookAddButtonTag = "book_add_button"
 internal const val bookTitleInputTag = "book_title_input"
 internal const val bookSaveButtonTag = "book_save_button"
 internal const val bookQuoteBodyTag = "book_quote_body"
 internal const val bookQuoteSaveTag = "book_quote_save"
+internal const val bookProgressNoteInputTag = "book_progress_note_input"
+internal const val bookProgressSaveTag = "book_progress_save"
 
 internal fun bookExtractButtonTag(bookId: Long) = "book_extract_$bookId"
 
 internal fun bookProgressButtonTag(bookId: Long) = "book_progress_$bookId"
 
 internal fun bookReviewButtonTag(bookId: Long) = "book_review_$bookId"
+
+/** 책 카드의 "메모 전체 보기"/"접기". */
+internal fun bookNoteToggleTag(bookId: Long) = "book_note_toggle_$bookId"
 
 /** 진도 줄을 눌러 날짜별 보기로 들어가는 자리. 진도를 적는 `bookProgressButtonTag`와 다릅니다. */
 internal fun bookProgressOpenTag(bookId: Long) = "book_progress_open_$bookId"
@@ -70,7 +80,8 @@ internal fun bookProgressOpenTag(bookId: Long) = "book_progress_open_$bookId"
 fun BookScreen(
     books: List<BookEntity>,
     onSaveBook: (BookDraft) -> Unit,
-    onUpdateProgress: (Long, Int) -> Unit,
+    /** 책·읽은 쪽·그때 남긴 말. 남긴 말이 있으면 책 메모 끝에 한 줄로 붙습니다([BookNotes]). */
+    onUpdateProgress: (Long, Int, String) -> Unit,
     onToggleFinished: (Long) -> Unit,
     onDeleteBook: (Long) -> Unit,
     onExtractQuote: (Long, String, Int) -> Unit,
@@ -209,8 +220,8 @@ fun BookScreen(
         ProgressDialog(
             book = book,
             onDismiss = { progressTarget = null },
-            onSave = { page ->
-                onUpdateProgress(book.id, page)
+            onSave = { page, note ->
+                onUpdateProgress(book.id, page, note)
                 progressTarget = null
             }
         )
@@ -336,7 +347,7 @@ private fun BookCard(
             }
 
             if (book.note.isNotBlank()) {
-                Text(book.note, style = MaterialTheme.typography.bodyMedium)
+                BookNote(bookId = book.id, note = book.note)
             }
             if (quoteCount > 0 || readingDays > 0) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -387,6 +398,59 @@ private fun BookCard(
                 TextButton(onClick = onToggleFinished) {
                     Text(if (book.isFinished) "다시 읽는 중" else "다 읽음")
                 }
+            }
+        }
+    }
+}
+
+/** 접어 둘 때 한 기록이 차지할 수 있는 줄. 넘으면 그 기록도 잘리고 "메모 전체 보기"가 나옵니다. */
+private const val NOTE_ENTRY_MAX_LINES = 3
+
+/**
+ * 책 메모. 진도를 적을 때 남긴 말이 끝에 한 줄씩 쌓이므로([BookNotes]) 끝의 두 줄만 보이고 눌러서 펼칩니다
+ * (사용자가 정함, 2026-11-08). 다 보이면 메모가 쌓일수록 카드가 길어져 다른 책이 밀려납니다.
+ */
+@Composable
+private fun BookNote(bookId: Long, note: String) {
+    val lines = remember(note) { BookNotes.lines(note) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    // 아주 긴 한 줄도 접힙니다. 잘렸는지는 그려 봐야 알아서, 그린 뒤에 알게 되면 펼칠 길을 엽니다.
+    var clipped by remember(note) { mutableStateOf(false) }
+    val hidden = (lines.size - BookNotes.COLLAPSED_LINES).coerceAtLeast(0)
+    val expandable = hidden > 0 || clipped
+
+    Column {
+        if (expanded && expandable) {
+            Text(note.trim(), style = MaterialTheme.typography.bodyMedium)
+        } else {
+            if (hidden > 0) {
+                Text(
+                    text = "…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            lines.takeLast(BookNotes.COLLAPSED_LINES).forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = NOTE_ENTRY_MAX_LINES,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { if (it.hasVisualOverflow) clipped = true }
+                )
+            }
+        }
+        if (expandable) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.testTag(bookNoteToggleTag(bookId))
+            ) {
+                Text(if (expanded) "접기" else "메모 전체 보기 (${lines.size}줄)")
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -480,15 +544,19 @@ private fun BookEditDialog(
 private fun ProgressDialog(
     book: BookEntity,
     onDismiss: () -> Unit,
-    onSave: (Int) -> Unit
+    onSave: (Int, String) -> Unit
 ) {
     var pageText by remember { mutableStateOf(if (book.currentPage > 0) book.currentPage.toString() else "") }
+    var note by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("어디까지 읽었나요?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = pageText,
                     onValueChange = { pageText = it.digitsOnly() },
@@ -504,10 +572,29 @@ private fun ProgressDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("메모에 남길 말 (선택)") },
+                    minLines = 2,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(bookProgressNoteInputTag)
+                )
+                Text(
+                    text = "적으면 날짜·쪽과 함께 책 메모 끝에 한 줄로 붙습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(pageText.trim().toIntOrNull() ?: 0) }) { Text("저장") }
+            TextButton(
+                onClick = { onSave(pageText.trim().toIntOrNull() ?: 0, note) },
+                modifier = Modifier.testTag(bookProgressSaveTag)
+            ) {
+                Text("저장")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )

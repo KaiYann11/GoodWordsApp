@@ -105,6 +105,22 @@ class BookRepositoryTest {
     }
 
     @Test
+    fun aProgressNoteIsAddedToTheEndOfTheMemo() = runBlocking {
+        val book = repository.saveBook(BookDraft(title = "메모 쌓을 책", totalPagesText = "400", note = "빌린 책"))
+
+        repository.updateBookProgress(book.id, 96, LocalDate.of(2026, 11, 5), note = "초반은 느리다")
+        // 쪽이 끝을 넘으면 깎인 쪽이 적힙니다. 메모의 쪽이 카드의 진도와 달라 보이면 안 됩니다.
+        repository.updateBookProgress(book.id, 999, LocalDate.of(2026, 11, 8), note = "다 읽었다")
+        // 남길 말이 없으면 메모는 그대로입니다.
+        val last = repository.updateBookProgress(book.id, 400, LocalDate.of(2026, 11, 9))
+
+        assertEquals(
+            "빌린 책\n11월 5일 · 96쪽 — 초반은 느리다\n11월 8일 · 400쪽 — 다 읽었다",
+            last?.note
+        )
+    }
+
+    @Test
     fun progressNeverPassesTheLastPage() = runBlocking {
         val book = repository.saveBook(BookDraft(title = "쪽수 있는 책", totalPagesText = "100"))
 

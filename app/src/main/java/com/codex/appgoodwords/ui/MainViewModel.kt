@@ -1131,6 +1131,13 @@ class MainViewModel(
         result
     }
 
+    /** 백업 하나를 지웁니다. 이미 없던 것이면 false입니다. 어느 쪽이든 목록은 새로 읽습니다. */
+    suspend fun deleteSyncBackup(backup: SyncBackup): Result<Boolean> = runCatching {
+        val deleted = container.syncBackupStore.delete(backup)
+        reloadSyncBackups()
+        deleted
+    }
+
     // ---- 일기 ----
 
     suspend fun getDiary(id: Long): DiaryEntity? = container.repository.getDiaryById(id)
@@ -1151,8 +1158,8 @@ class MainViewModel(
         Unit
     }
 
-    suspend fun updateBookProgress(id: Long, currentPage: Int): Result<Unit> = runCatching {
-        container.repository.updateBookProgress(id, currentPage)
+    suspend fun updateBookProgress(id: Long, currentPage: Int, note: String = ""): Result<Unit> = runCatching {
+        container.repository.updateBookProgress(id, currentPage, note = note)
         Unit
     }
 

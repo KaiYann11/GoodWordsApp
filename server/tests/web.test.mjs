@@ -213,6 +213,13 @@ test("쪽수 없는 완료는 책 카드와 날짜별 보기에 읽은 날로 �
   assert.match(html, /data-action="toggle-book-finished"[\s\S]*?다시 읽는 중/);
 });
 
+test("책 메모는 쌓인 줄을 살리고 HTML로 실행되지 않는다", async () => {
+  // 앱에서 진도를 적을 때 남긴 말이 메모 끝에 한 줄씩 붙습니다. 줄을 살리지 않으면 한 문단으로 뭉칩니다.
+  const note = "11월 5일 · 96쪽 — 초반은 느리다\n11월 8일 · 120쪽 — <b>좋다</b>";
+  const html = await renderBooks({ ...finishedBook, note }, [readingDay]);
+  assert.match(html, /<p style="white-space:pre-wrap;[^"]*">11월 5일 · 96쪽 — 초반은 느리다\n11월 8일 · 120쪽 — &lt;b&gt;좋다&lt;\/b&gt;<\/p>/);
+});
+
 test("마지막 쪽에서 완료한 날은 진도 되돌림으로 보이지 않는다", async () => {
   const html = await renderBooks(
     { ...finishedBook, totalPages: 200, currentPage: 200 },

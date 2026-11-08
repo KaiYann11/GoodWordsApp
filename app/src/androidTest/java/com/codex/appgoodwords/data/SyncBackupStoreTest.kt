@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -64,6 +65,33 @@ class SyncBackupStoreTest {
         val backup = store.save(SyncBackupKind.BEFORE_MERGE, snapshot)
 
         assertEquals("백업에 담긴 글귀", store.load(backup).items.single().title)
+    }
+
+    @Test
+    fun deletingRemovesOnlyThatBackup() = runBlocking {
+        val kept = store.save(SyncBackupKind.BEFORE_UPLOAD, emptySnapshot())
+        val removed = store.save(SyncBackupKind.BEFORE_MERGE, emptySnapshot())
+
+        assertTrue(store.delete(removed))
+
+        assertEquals(listOf(kept.fileName), store.list().map { it.fileName })
+        // 이미 지운 것을 또 지우면(두 화면에서 눌렀을 때) 실패가 아니라 "없었음"입니다.
+        assertFalse(store.delete(removed))
+    }
+
+    @Test
+    fun aNameOutsideTheBackupFolderIsRefused() = runBlocking {
+        val outside = File(File(store.directoryPath()).parentFile, "sync-before-merge-outside.json")
+        outside.writeText("{}")
+        try {
+            for (name in listOf("../sync-before-merge-outside.json", "notes.json", "..")) {
+                val result = runCatching { store.delete(SyncBackup(name, SyncBackupKind.BEFORE_MERGE, 0L, 0L)) }
+                assertTrue("$name 을(를) 받아들였습니다.", result.isFailure)
+            }
+            assertTrue("백업 폴더 밖의 파일이 지워졌습니다.", outside.exists())
+        } finally {
+            outside.delete()
+        }
     }
 
     private fun emptySnapshot() = AppDataSnapshot(
