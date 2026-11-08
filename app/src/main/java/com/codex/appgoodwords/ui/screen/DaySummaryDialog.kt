@@ -2,6 +2,7 @@ package com.codex.appgoodwords.ui.screen
 
 import android.app.DatePickerDialog
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.DayDigest
+import com.codex.appgoodwords.data.WalkSummary
+import com.codex.appgoodwords.data.Walking
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -57,7 +60,9 @@ fun DaySummaryDialog(
     onDismiss: () -> Unit,
     /** 오늘 뒤로는 갈 수 없습니다. 오지 않은 날에 점수를 매길 수는 없습니다. */
     today: LocalDate = LocalDate.now(),
-    onDeleteMood: ((String) -> Unit)? = null
+    onDeleteMood: ((String) -> Unit)? = null,
+    /** 그날 걷기를 누르면 그 길을 지도에 펼칩니다. */
+    onOpenWalk: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val date = digest.score.date
@@ -167,6 +172,7 @@ fun DaySummaryDialog(
                     DigestSection(label = "읽은 글귀", items = digest.quoteTitles)
                     // 쪽수를 몰라도 읽은 책은 한 일입니다. 홈의 독서 걸음과 같은 기록을 보여 줍니다.
                     DigestSection(label = "읽은 책", items = digest.bookTitles)
+                    WalkSection(steps = digest.score.walkSteps, walked = digest.score.walked, walks = digest.walks, onOpen = onOpenWalk)
                 }
             }
         },
@@ -198,6 +204,29 @@ fun DaySummaryDialog(
             }
         }
     )
+}
+
+/** 그날 걸음 수와 기록한 걷기. 걸은 날이 아니면 걸음 수만 조용히 둡니다 — 모자란 수는 세지 않습니다. */
+@Composable
+private fun WalkSection(steps: Int?, walked: Boolean, walks: List<WalkSummary>, onOpen: ((String) -> Unit)?) {
+    if (steps == null && walks.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = if (walked) "걸은 날" else "걷기",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        steps?.let { Text(text = "· ${Walking.formatSteps(it)}", style = MaterialTheme.typography.bodyMedium) }
+        walks.forEach { walk ->
+            Text(
+                text = "· ${walkClock(walk.startedAt)} ${Walking.formatDistance(walk.distanceMeters)} " +
+                    "${Walking.formatDuration(walk.durationMillis)}" + if (onOpen != null) "  지도 ›" else "",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = if (onOpen != null) Modifier.clickable { onOpen(walk.syncId) } else Modifier
+            )
+        }
+    }
 }
 
 @Composable

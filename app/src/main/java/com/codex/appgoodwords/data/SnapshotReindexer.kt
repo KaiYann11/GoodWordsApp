@@ -77,7 +77,10 @@ object SnapshotReindexer {
             // 그래서 이력처럼 부모를 못 찾아도 버리지 않고 숫자 id만 0으로 끊습니다.
             bookReadingLogs = snapshot.bookReadingLogs.mapIndexed { index, log ->
                 log.copy(id = index + 1L, bookId = bookIdBySyncId[log.bookSyncId] ?: 0L)
-            }
+            },
+            // 걸음 수와 걷기는 딸린 것도 가리키는 것도 없어 번호만 다시 매기면 됩니다.
+            stepCounts = snapshot.stepCounts.mapIndexed { index, count -> count.copy(id = index + 1L) },
+            walks = snapshot.walks.mapIndexed { index, walk -> walk.copy(id = index + 1L) }
         )
     }
 

@@ -162,7 +162,13 @@ class GrowthFeedbackCoordinator(
         // 지난번에 권한 것을 함께 실어야 고리가 닫힙니다. 이것이 없으면 매번 처음 만난 사람처럼
         // 말하고, 사용자는 같은 조언을 몇 번이고 다시 받습니다.
         previousReport = database.growthReportDao().getLatest(),
-        includeGoals = includeGoals
+        includeGoals = includeGoals,
+        // 걷기는 숫자만 갑니다(사용자가 정함, 2026-11-07). 걷는 중인 길은 아직 기록이 아닙니다.
+        walkRecords = WalkRecords(
+            stepCounts = database.stepCountDao().getAll(),
+            walks = database.walkDao().getFinished(),
+            goalSteps = settingsStore.getWalkGoalSteps()
+        )
     )
 
     companion object {

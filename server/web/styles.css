@@ -471,3 +471,17 @@ button.ghost {
     align-items: flex-start;
   }
 }
+
+/* 걷기: 지나온 길의 모양(지도 타일 없음). */
+.walk {
+  margin-top: 8px;
+}
+
+.walkSketch {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  background: #f1f5f9;
+  border-radius: 10px;
+}

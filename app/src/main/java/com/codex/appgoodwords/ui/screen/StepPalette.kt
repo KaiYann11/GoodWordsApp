@@ -10,6 +10,8 @@ import com.codex.appgoodwords.ui.theme.Mint
 import com.codex.appgoodwords.ui.theme.MintSoft
 import com.codex.appgoodwords.ui.theme.Rose
 import com.codex.appgoodwords.ui.theme.RoseSoft
+import com.codex.appgoodwords.ui.theme.Sky
+import com.codex.appgoodwords.ui.theme.SkySoft
 import com.codex.appgoodwords.ui.theme.Violet
 import com.codex.appgoodwords.ui.theme.VioletSoft
 
@@ -29,5 +31,6 @@ fun stepColors(step: DailyStep): StepColors = when (step) {
     DailyStep.ROUTINE -> StepColors(Mint, MintSoft)
     DailyStep.TODO -> StepColors(Amber, AmberSoft)
     DailyStep.READING -> StepColors(Violet, VioletSoft)
+    DailyStep.WALK -> StepColors(Sky, SkySoft)
     DailyStep.DIARY -> StepColors(Rose, RoseSoft)
 }

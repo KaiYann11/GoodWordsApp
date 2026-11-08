@@ -1,6 +1,7 @@
 package com.codex.appgoodwords.work
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -21,6 +22,7 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.Walking
 
 object AppNotifications {
     const val contentChannelId = "daily_good_words_sound"
@@ -29,6 +31,9 @@ object AppNotifications {
     const val summarySilentChannelId = "daily_good_words_summary_silent"
     const val todoChannelId = "good_words_todo_alarm"
     const val coachChannelId = "good_words_daily_coach"
+    /** 걷기를 기록하는 동안 떠 있는 알림. 소리 없이 자리만 지킵니다. */
+    const val walkChannelId = "good_words_walk"
+    const val walkNotificationId = 9_010
     /** 일일 집계 알림. 날마다 같은 자리에 덮어써서 어제 것이 쌓이지 않습니다. */
     const val dailySummaryNotificationId = 9_002
     const val actionMarkRead = "com.codex.appgoodwords.action.MARK_READ"
@@ -43,6 +48,8 @@ object AppNotifications {
     const val extraCaptureIdea = "extra_capture_idea"
     /** 오늘의 한마디 알림. 홈의 한마디 칸까지 데려갑니다. */
     const val extraOpenDailyCoach = "extra_open_daily_coach"
+    /** 걷기 기록 알림. 걷기 화면으로 데려갑니다. */
+    const val extraOpenWalk = "extra_open_walk"
     /** 내 말에 코치가 답한 알림. 그 대화 화면까지 데려갑니다. */
     const val extraOpenDailyCoachTalk = "extra_open_daily_coach_talk"
 
@@ -116,6 +123,58 @@ object AppNotifications {
         manager.createNotificationChannel(summarySilentChannel)
         manager.createNotificationChannel(todoChannel)
         manager.createNotificationChannel(coachChannel)
+
+        // 걷는 동안 내내 떠 있으므로 낮게 둡니다. 기록 중이라는 것과 끝내는 단추만 있으면 됩니다.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                walkChannelId,
+                "${context.getString(R.string.app_name)} 걷기 기록",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "걷기를 기록하는 동안 거리와 시간을 보여 주는 알림"
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            }
+        )
+    }
+
+    /**
+     * 걷기를 기록하는 동안의 알림. 기록 서비스가 앞에 띄워 두는 자리라([com.codex.appgoodwords.work.WalkRecordingService])
+     * 지울 수 없고, 누르면 걷기 화면, **끝내기**로 기록을 마칩니다.
+     */
+    fun walkRecordingNotification(
+        context: Context,
+        distanceMeters: Int,
+        elapsedMillis: Long,
+        stopIntent: PendingIntent
+    ): Notification {
+        val openIntent = PendingIntent.getActivity(
+            context,
+            9_011,
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(extraOpenWalk, true),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(context, walkChannelId)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle("걷기 기록 중")
+            .setContentText("${Walking.formatDistance(distanceMeters)} · ${Walking.formatDuration(elapsedMillis)}")
+            .setContentIntent(openIntent)
+            .addAction(android.R.drawable.ic_media_pause, "끝내기", stopIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .build()
+    }
+
+    /** 걷는 동안 알림의 거리·시간을 고칩니다. 알림 권한이 없으면 조용히 넘어갑니다(기록은 그대로 됩니다). */
+    fun updateWalkRecordingNotification(context: Context, notification: Notification) {
+        if (!hasNotificationPermission(context)) return
+        NotificationManagerCompat.from(context).notify(walkNotificationId, notification)
     }
 
     /**

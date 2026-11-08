@@ -24,6 +24,14 @@ enum class DailyStep(val label: String, val hint: String) {
      * 날짜는 [BookReadingLogEntity]에 쌓입니다.
      */
     READING("독서", "읽은 쪽까지 기록해 보세요"),
+    /**
+     * 정한 걸음 수를 넘었거나 걷기를 기록한 날입니다([Walking.walkedDays], 사용자가 정함, 2026-11-07).
+     *
+     * 쓰던 사람의 하루에 저절로 끼어들지 않습니다. Health Connect를 처음 잇거나 첫 걷기를 기록할 때 한 번만
+     * 하루의 걸음에 넣습니다([SettingsStore.addWalkStepOnce]) — 기록이 들어오기 전에 넣으면 지난날 점수가
+     * 근거 없이 내려갑니다.
+     */
+    WALK("걷기", "조금이라도 걸어 보세요"),
     DIARY("일기", "오늘을 한 줄이라도 남겨 보세요");
 
     companion object {
@@ -49,6 +57,16 @@ enum class DailyStep(val label: String, val hint: String) {
             .ifEmpty { DEFAULTS }
 
         fun store(steps: List<DailyStep>): String = steps.distinct().joinToString(",") { it.name }
+
+        /**
+         * 걷기를 넣은 차례. 일기 앞에 둡니다 — 하루를 걷고 나서 적는 차례입니다. 이미 있으면 그대로입니다
+         * ([SettingsStore.addWalkStepOnce]).
+         */
+        fun withWalk(steps: List<DailyStep>): List<DailyStep> {
+            if (WALK in steps) return steps
+            val diaryAt = steps.indexOf(DIARY)
+            return if (diaryAt < 0) steps + WALK else steps.subList(0, diaryAt) + WALK + steps.subList(diaryAt, steps.size)
+        }
     }
 }
 
@@ -125,6 +143,7 @@ object DailyLoopCalculator {
         /** 하루의 축으로 삼기로 한 걸음들. 비어 있으면 [DailyStep.DEFAULTS]로 셉니다. */
         steps: List<DailyStep> = DailyStep.DEFAULTS,
         readingLogs: List<BookReadingLogEntity> = emptyList(),
+        walkRecords: WalkRecords = WalkRecords(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): DailyProgress {
         val chosen = steps.distinct().ifEmpty { DailyStep.DEFAULTS }
@@ -140,7 +159,9 @@ object DailyLoopCalculator {
             },
             DailyStep.DIARY to diaries.mapNotNullTo(mutableSetOf()) { parseDate(it.entryDate) },
             // 진도나 다 읽음을 남긴 날입니다. 쪽수가 늘지 않은 날도 책을 펴 본 것으로 셉니다.
-            DailyStep.READING to readingLogs.mapNotNullTo(mutableSetOf()) { parseDate(it.readDate) }
+            DailyStep.READING to readingLogs.mapNotNullTo(mutableSetOf()) { parseDate(it.readDate) },
+            // 걸은 날은 한 곳에서 정합니다. 점수와 이 카드가 다른 날을 걸은 날이라고 말하면 안 됩니다.
+            DailyStep.WALK to Walking.walkedDays(walkRecords, zoneId).toMutableSet()
         )
 
         val doneSteps = chosen.filterTo(mutableSetOf()) { today in daysByStep.getValue(it) }

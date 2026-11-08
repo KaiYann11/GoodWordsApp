@@ -150,6 +150,8 @@ fun HomeScreen(
     dailyLoop: DailyProgress? = null,
     /** 걸음을 누르면 그 화면으로 데려갑니다. 알려만 주면 다시 찾아 들어가야 합니다. */
     onOpenStep: (DailyStep) -> Unit = {},
+    /** 걸음 카드 바로 아래의 걷기 카드([WalkCard]). 홈은 무엇을 담는지 모르고 자리만 냅니다. */
+    walkCard: (@Composable () -> Unit)? = null,
     /** 가장 최근에 AI가 써 준 돌아보기. 없으면 권하는 카드만 둡니다. */
     latestReport: GrowthReportEntity? = null,
     onOpenGrowth: () -> Unit = {},
@@ -306,6 +308,8 @@ fun HomeScreen(
                                     }
                                 )
                             }
+                            // 걸음 카드 바로 아래입니다(사용자가 고름, 2026-11-07). 걸음 수와 걷기 기록 시작이 한자리에 있습니다.
+                            walkCard?.invoke()
                             // 3초짜리라 걸음 바로 아래에 둡니다. 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
                             TodayMoodCard(mood = todayMood, logs = todayMoodLogs, onPick = onPickMood, onClear = onClearMood)
                         }

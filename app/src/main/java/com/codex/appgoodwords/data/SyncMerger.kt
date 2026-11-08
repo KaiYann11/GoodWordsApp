@@ -115,6 +115,22 @@ object SyncMerger {
                 deletedAtBySyncId = deletedAtBySyncId,
                 syncId = { it.syncId },
                 updatedAt = { it.updatedAt }
+            ),
+            // 같은 기록의 사본이면 나중에 읽은 쪽입니다 — 그날 걸음은 저녁까지 늘어납니다. 다른 기기가 읽은 같은 날은
+            // 합치기에서 큰 쪽을 남깁니다(SyncDeduplicator.stepCountFingerprint).
+            stepCounts = mergeMutable(
+                local = local.stepCounts,
+                remote = remote.stepCounts,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
+            ),
+            walks = mergeMutable(
+                local = local.walks,
+                remote = remote.walks,
+                deletedAtBySyncId = deletedAtBySyncId,
+                syncId = { it.syncId },
+                updatedAt = { it.updatedAt }
             )
         )
     }
