@@ -1389,7 +1389,8 @@ function bookCard(book, quoteCount, readingDayCount) {
   const finished = book.status === "FINISHED";
   // 전체 쪽수를 모르면 막대를 그리지 않습니다. 0%라고 단정하면 안 읽은 것처럼 보입니다.
   const ratio = book.totalPages > 0 ? Math.min(1, book.currentPage / book.totalPages) : null;
-  // 메모에는 앱에서 진도를 적을 때 남긴 말이 한 줄씩 쌓입니다. 줄을 살리지 않으면 한 문단으로 뭉칩니다.
+  // 메모는 여러 줄일 수 있습니다(앱 1.21.0은 진도를 적을 때 남긴 말을 여기 한 줄씩 쌓았습니다 — 이제는 독후감에 붙습니다).
+  // 줄을 살리지 않으면 한 문단으로 뭉칩니다.
   const note = book.note ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(book.note)}</p>` : "";
   const progressText =
     book.totalPages > 0

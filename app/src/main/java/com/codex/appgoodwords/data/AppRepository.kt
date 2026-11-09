@@ -800,13 +800,14 @@ class AppRepository(
     /**
      * 읽은 쪽수를 고칩니다. 다 읽으면 상태도 함께 넘깁니다.
      *
-     * [note]를 적었으면 책 메모 끝에 `11월 8일 · 120쪽 — 글` 한 줄로 이어 붙입니다([BookNotes], 사용자가 정함, 2026-11-08).
+     * [reviewNote]를 적었으면 독후감 끝에 `11월 9일 · 120쪽` 머리와 함께 붙입니다([BookNotes], 사용자가 정함, 2026-11-09).
+     * 책 메모는 건드리지 않습니다.
      */
     suspend fun updateBookProgress(
         id: Long,
         currentPage: Int,
         today: LocalDate = LocalDate.now(),
-        note: String = ""
+        reviewNote: String = ""
     ): BookEntity? = database.withTransaction {
         val dao = bookDao ?: return@withTransaction null
         val existing = dao.getById(id) ?: return@withTransaction null
@@ -815,10 +816,10 @@ class AppRepository(
         }
         // 마지막 쪽에 닿으면 다 읽은 것으로 봅니다. 따로 한 번 더 누르게 하지 않습니다.
         val finished = existing.totalPages > 0 && page >= existing.totalPages
-        val noteEntry = BookNotes.entry(today, page, note)
+        val reviewEntry = BookNotes.entry(today, page, reviewNote)
         val updated = existing.copy(
             currentPage = page,
-            note = noteEntry?.let { BookNotes.append(existing.note, it) } ?: existing.note,
+            review = reviewEntry?.let { BookNotes.append(existing.review, it) } ?: existing.review,
             updatedAt = System.currentTimeMillis(),
             status = if (finished) BookStatus.FINISHED.name else BookStatus.READING.name,
             finishedAt = if (finished) existing.finishedAt ?: System.currentTimeMillis() else null

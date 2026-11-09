@@ -105,19 +105,32 @@ class BookRepositoryTest {
     }
 
     @Test
-    fun aProgressNoteIsAddedToTheEndOfTheMemo() = runBlocking {
-        val book = repository.saveBook(BookDraft(title = "메모 쌓을 책", totalPagesText = "400", note = "빌린 책"))
+    fun aProgressNoteIsAddedToTheEndOfTheReview() = runBlocking {
+        val book = repository.saveBook(BookDraft(title = "독후감 쌓을 책", totalPagesText = "400", note = "빌린 책"))
+        repository.saveBookReview(book.id, "써 둔 독후감")
 
-        repository.updateBookProgress(book.id, 96, LocalDate.of(2026, 11, 5), note = "초반은 느리다")
-        // 쪽이 끝을 넘으면 깎인 쪽이 적힙니다. 메모의 쪽이 카드의 진도와 달라 보이면 안 됩니다.
-        repository.updateBookProgress(book.id, 999, LocalDate.of(2026, 11, 8), note = "다 읽었다")
-        // 남길 말이 없으면 메모는 그대로입니다.
+        repository.updateBookProgress(book.id, 96, LocalDate.of(2026, 11, 5), reviewNote = "초반은 느리다")
+        // 쪽이 끝을 넘으면 깎인 쪽이 적힙니다. 머리 줄의 쪽이 카드의 진도와 달라 보이면 안 됩니다.
+        repository.updateBookProgress(book.id, 999, LocalDate.of(2026, 11, 8), reviewNote = "다 읽었다\n마지막 장이 좋다")
+        // 남길 말이 없으면 독후감은 그대로입니다.
         val last = repository.updateBookProgress(book.id, 400, LocalDate.of(2026, 11, 9))
 
         assertEquals(
-            "빌린 책\n11월 5일 · 96쪽 — 초반은 느리다\n11월 8일 · 400쪽 — 다 읽었다",
-            last?.note
+            "써 둔 독후감\n\n11월 5일 · 96쪽\n초반은 느리다\n\n11월 8일 · 400쪽\n다 읽었다\n마지막 장이 좋다",
+            last?.review
         )
+        // 독후감에만 붙습니다(사용자가 정함, 2026-11-09). 같은 말이 메모에도 남으면 한쪽을 고쳐도 다른 쪽이 그대로입니다.
+        assertEquals("빌린 책", last?.note)
+    }
+
+    @Test
+    fun theFirstProgressNoteStartsAnEmptyReview() = runBlocking {
+        val book = repository.saveBook(BookDraft(title = "첫 생각 남길 책"))
+
+        val updated = repository.updateBookProgress(book.id, 12, LocalDate.of(2026, 11, 9), reviewNote = "첫 장부터 좋다")
+
+        assertEquals("11월 9일 · 12쪽\n첫 장부터 좋다", updated?.review)
+        assertEquals("", updated?.note)
     }
 
     @Test

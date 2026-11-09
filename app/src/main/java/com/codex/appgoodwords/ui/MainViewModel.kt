@@ -1169,8 +1169,8 @@ class MainViewModel(
         Unit
     }
 
-    suspend fun updateBookProgress(id: Long, currentPage: Int, note: String = ""): Result<Unit> = runCatching {
-        container.repository.updateBookProgress(id, currentPage, note = note)
+    suspend fun updateBookProgress(id: Long, currentPage: Int, reviewNote: String = ""): Result<Unit> = runCatching {
+        container.repository.updateBookProgress(id, currentPage, reviewNote = reviewNote)
         Unit
     }
 

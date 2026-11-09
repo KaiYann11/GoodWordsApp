@@ -80,7 +80,7 @@ internal fun bookProgressOpenTag(bookId: Long) = "book_progress_open_$bookId"
 fun BookScreen(
     books: List<BookEntity>,
     onSaveBook: (BookDraft) -> Unit,
-    /** 책·읽은 쪽·그때 남긴 말. 남긴 말이 있으면 책 메모 끝에 한 줄로 붙습니다([BookNotes]). */
+    /** 책·읽은 쪽·그때 남긴 말. 남긴 말이 있으면 날짜·쪽 머리와 함께 독후감 끝에 붙습니다([BookNotes]). */
     onUpdateProgress: (Long, Int, String) -> Unit,
     onToggleFinished: (Long) -> Unit,
     onDeleteBook: (Long) -> Unit,
@@ -220,8 +220,8 @@ fun BookScreen(
         ProgressDialog(
             book = book,
             onDismiss = { progressTarget = null },
-            onSave = { page, note ->
-                onUpdateProgress(book.id, page, note)
+            onSave = { page, reviewNote ->
+                onUpdateProgress(book.id, page, reviewNote)
                 progressTarget = null
             }
         )
@@ -407,8 +407,10 @@ private fun BookCard(
 private const val NOTE_ENTRY_MAX_LINES = 3
 
 /**
- * 책 메모. 진도를 적을 때 남긴 말이 끝에 한 줄씩 쌓이므로([BookNotes]) 끝의 두 줄만 보이고 눌러서 펼칩니다
- * (사용자가 정함, 2026-11-08). 다 보이면 메모가 쌓일수록 카드가 길어져 다른 책이 밀려납니다.
+ * 책 메모. 끝의 두 줄만 보이고 눌러서 펼칩니다(사용자가 정함, 2026-11-08). 다 보이면 메모가 길수록 카드가 길어져 다른 책이 밀려납니다.
+ *
+ * 진도를 적을 때 남긴 말은 이제 독후감에 붙어([BookNotes], 2026-11-09) 메모는 수정 창에서 적은 것뿐이지만,
+ * 1.21.0이 한 줄씩 쌓아 둔 메모가 남아 있어 접는 것은 그대로 둡니다.
  */
 @Composable
 private fun BookNote(bookId: Long, note: String) {
@@ -547,7 +549,7 @@ private fun ProgressDialog(
     onSave: (Int, String) -> Unit
 ) {
     var pageText by remember { mutableStateOf(if (book.currentPage > 0) book.currentPage.toString() else "") }
-    var note by remember { mutableStateOf("") }
+    var reviewNote by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -573,16 +575,16 @@ private fun ProgressDialog(
                     )
                 }
                 OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("메모에 남길 말 (선택)") },
+                    value = reviewNote,
+                    onValueChange = { reviewNote = it },
+                    label = { Text("독후감에 남길 말 (선택)") },
                     minLines = 2,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag(bookProgressNoteInputTag)
                 )
                 Text(
-                    text = "적으면 날짜·쪽과 함께 책 메모 끝에 한 줄로 붙습니다.",
+                    text = "적으면 날짜·쪽과 함께 독후감 끝에 붙습니다.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -590,7 +592,7 @@ private fun ProgressDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(pageText.trim().toIntOrNull() ?: 0, note) },
+                onClick = { onSave(pageText.trim().toIntOrNull() ?: 0, reviewNote) },
                 modifier = Modifier.testTag(bookProgressSaveTag)
             ) {
                 Text("저장")

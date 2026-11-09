@@ -28,10 +28,13 @@ data class BookEntity(
     val totalPages: Int = 0,
     val currentPage: Int = 0,
     val status: String = BookStatus.READING.name,
-    /** 메모. 진도를 적을 때 남긴 말이 끝에 한 줄씩 쌓입니다([BookNotes]). 카드에는 끝의 두 줄만 보입니다. */
+    /**
+     * 메모. 책 수정 창에서 적는 짧은 글이고, 카드에는 끝의 두 줄만 보입니다([BookNotes]).
+     * 1.21.0에서는 진도를 적을 때 남긴 말이 여기 한 줄씩 쌓였습니다 — 이제는 [review]에 붙습니다.
+     */
     val note: String = "",
     /**
-     * 독후감. 읽으며 적어 두는 긴 글입니다.
+     * 독후감. 읽으며 적어 두는 긴 글입니다. 진도를 적을 때 남긴 말이 날짜·쪽 머리와 함께 끝에 붙습니다([BookNotes]).
      *
      * [note]와 자리를 나눈 이유가 있습니다. 메모는 목록에서 한눈에 보는 짧은 줄들이고, 독후감은
      * 따로 펼쳐 읽고 고치는 글입니다. 한 칸에 합치면 책 카드가 글 전체를 싣고 길어져,
