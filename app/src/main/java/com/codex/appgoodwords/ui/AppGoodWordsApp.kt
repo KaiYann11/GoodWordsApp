@@ -1254,13 +1254,16 @@ fun AppGoodWordsApp(
                                             )
                                         }
                                     },
-                                    onUpdateProgress = { id, page, note ->
+                                    onUpdateProgress = { id, page, reviewNote ->
                                         coroutineScope.launch {
-                                            val result = viewModel.updateBookProgress(id, page, note)
+                                            val result = viewModel.updateBookProgress(id, page, reviewNote)
                                             if (result.isFailure) {
                                                 snackbarHostState.showSnackbar(
                                                     result.exceptionOrNull()?.message ?: "진도를 기록하지 못했습니다."
                                                 )
+                                            } else if (reviewNote.isNotBlank()) {
+                                                // 독후감은 카드에 보이지 않아서, 남긴 말이 어디로 갔는지 알려 줍니다.
+                                                snackbarHostState.showSnackbar("진도를 적고 독후감에 붙였습니다.")
                                             }
                                         }
                                     },

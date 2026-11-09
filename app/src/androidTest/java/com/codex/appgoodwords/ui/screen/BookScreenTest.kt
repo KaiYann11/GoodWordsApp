@@ -134,7 +134,7 @@ class BookScreenTest {
         compose.onNodeWithText("읽은 쪽").performTextInput("77")
         compose.onNodeWithTag(bookProgressSaveTag).performClick()
 
-        // 남길 말은 고르는 것입니다. 안 적으면 메모는 그대로입니다.
+        // 남길 말은 고르는 것입니다. 안 적으면 독후감은 그대로입니다.
         assertEquals(Triple(5L, 77, ""), progress)
     }
 
@@ -149,11 +149,14 @@ class BookScreenTest {
         }
 
         compose.onNodeWithTag(bookProgressButtonTag(5)).performClick()
+        // 어디에 붙는지 창에서 말해 둡니다. 독후감은 카드에 보이지 않아서, 말하지 않으면 남긴 말이 사라진 것처럼 보입니다.
+        compose.onNodeWithText("적으면 날짜·쪽과 함께 독후감 끝에 붙습니다.").assertIsDisplayed()
         compose.onNodeWithText("읽은 쪽").performTextInput("120")
-        compose.onNodeWithTag(bookProgressNoteInputTag).performTextInput("주인공의 선택이 보인다")
+        compose.onNodeWithTag(bookProgressNoteInputTag).performTextInput("주인공의 선택이 보인다\n오래 남는다")
         compose.onNodeWithTag(bookProgressSaveTag).performClick()
 
-        assertEquals(Triple(5L, 120, "주인공의 선택이 보인다"), progress)
+        // 줄바꿈은 적은 그대로 넘깁니다. 다듬는 것은 BookNotes 한 곳입니다.
+        assertEquals(Triple(5L, 120, "주인공의 선택이 보인다\n오래 남는다"), progress)
     }
 
     @Test

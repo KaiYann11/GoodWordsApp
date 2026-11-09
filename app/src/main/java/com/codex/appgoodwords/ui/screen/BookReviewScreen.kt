@@ -138,7 +138,7 @@ fun BookReviewScreen(
             value = draft,
             onValueChange = { draft = it },
             label = { Text("독후감") },
-            placeholder = { Text("읽으며 남기고 싶은 것을 적어 두세요. 다 읽고 한 번에 쓰지 않아도 됩니다.") },
+            placeholder = { Text("읽으며 남기고 싶은 것을 적어 두세요. 진도 기록에 남긴 말도 날짜·쪽과 함께 여기에 붙습니다.") },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

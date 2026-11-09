@@ -6,14 +6,14 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BookNotesTest {
-    private val today = LocalDate.of(2026, 11, 8)
+    private val today = LocalDate.of(2026, 11, 9)
 
-    @Test fun anEntryCarriesTheDateAndPage() {
-        assertEquals("11월 8일 · 120쪽 — 주인공의 선택이 보인다", BookNotes.entry(today, 120, "  주인공의 선택이 보인다 "))
+    @Test fun anEntryStartsWithTheDateAndPage() {
+        assertEquals("11월 9일 · 120쪽\n주인공의 선택이 보인다", BookNotes.entry(today, 120, "  주인공의 선택이 보인다 "))
     }
 
     @Test fun anUnknownPageIsLeftOut() {
-        assertEquals("11월 8일 — 초반은 느리다", BookNotes.entry(today, 0, "초반은 느리다"))
+        assertEquals("11월 9일\n초반은 느리다", BookNotes.entry(today, 0, "초반은 느리다"))
     }
 
     @Test fun nothingWrittenMeansNoEntry() {
@@ -21,15 +21,16 @@ class BookNotesTest {
         assertNull(BookNotes.entry(today, 120, " \n\t "))
     }
 
-    @Test fun aMultiLineNoteBecomesOneLine() {
-        // 한 기록이 두 줄로 갈리면 카드의 "끝의 두 줄"에 앞날의 끝줄과 오늘 것이 섞여 보입니다.
-        assertEquals("11월 8일 · 5쪽 — 첫 줄 둘째 줄", BookNotes.entry(today, 5, "첫 줄\n\n  둘째 줄"))
+    @Test fun lineBreaksStayAsWritten() {
+        // 독후감은 문단으로 읽는 글입니다. 한 줄로 이으면 길게 적은 생각이 한 덩어리가 됩니다.
+        assertEquals("11월 9일 · 5쪽\n첫 줄\n\n  둘째 줄", BookNotes.entry(today, 5, "\n첫 줄  \n\n  둘째 줄 \n"))
     }
 
-    @Test fun appendingKeepsTheExistingMemo() {
-        assertEquals("새 줄", BookNotes.append("", "새 줄"))
-        assertEquals("새 줄", BookNotes.append("  \n", "새 줄"))
-        assertEquals("손으로 적은 메모\n새 줄", BookNotes.append("손으로 적은 메모\n\n", "새 줄"))
+    @Test fun appendingLeavesABlankLineAfterTheReview() {
+        val entry = "11월 9일 · 5쪽\n새 생각"
+        assertEquals(entry, BookNotes.append("", entry))
+        assertEquals(entry, BookNotes.append("  \n", entry))
+        assertEquals("써 둔 독후감\n\n$entry", BookNotes.append("써 둔 독후감\n\n\n", entry))
     }
 
     @Test fun blankLinesAreNotCounted() {
