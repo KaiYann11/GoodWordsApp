@@ -69,6 +69,28 @@ class WalkingTest {
     }
 
     @Test
+    fun aTypedGoalIsReadOnlyWithinTheRange() {
+        // 네 칸에 없는 수를 직접 적습니다(사용자가 정함, 2026-11-11). 몇십 걸음이면 아무 날이나 걸은 날이 됩니다.
+        assertEquals(6_500, Walking.parseGoalSteps("6500"))
+        assertEquals(1_000, Walking.parseGoalSteps(" 1000 "))
+        assertEquals(30_000, Walking.parseGoalSteps("30000"))
+        assertNull(Walking.parseGoalSteps("999"))
+        assertNull(Walking.parseGoalSteps("30001"))
+        assertNull(Walking.parseGoalSteps(""))
+        assertNull(Walking.parseGoalSteps("육천"))
+    }
+
+    @Test
+    fun aTypedGoalDecidesTheWalkedDayLikeAChip() {
+        val records = WalkRecords(
+            stepCounts = listOf(count(today, 6_500), count(today.minusDays(1), 6_499)),
+            goalSteps = 6_500
+        )
+
+        assertEquals(setOf(today), Walking.walkedDays(records, zone))
+    }
+
+    @Test
     fun numbersReadNaturally() {
         assertEquals("850m", Walking.formatDistance(850))
         assertEquals("1.0km", Walking.formatDistance(1_000))
