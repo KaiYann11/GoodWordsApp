@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1191,7 +1193,11 @@ private fun DailyStepsSection(
  *
  * 걸음 수를 넘었거나 걷기를 기록한 날이 걸은 날입니다. 기준을 바꾸면 지난날도 새 기준으로 다시 셉니다 — 걸은 날은
  * 어디에도 적어 두지 않고 그때그때 셉니다([Walking]).
+ *
+ * 네 칸에 없는 수는 "직접"을 눌러 적습니다(사용자가 정함, 2026-11-11, 목업으로 고름). 적은 수는 그 칩에 `직접 6,500`처럼
+ * 보입니다. 칩이 다섯이라 좁은 화면에서는 줄을 넘깁니다.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WalkGoalSection(
     goalSteps: Int,
@@ -1199,6 +1205,8 @@ private fun WalkGoalSection(
     connection: HealthConnection,
     onConnectHealth: () -> Unit
 ) {
+    var typing by rememberSaveable { mutableStateOf(false) }
+    val typed = goalSteps !in Walking.GOAL_CHOICES
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1210,15 +1218,21 @@ private fun WalkGoalSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Walking.GOAL_CHOICES.forEach { choice ->
                     FilterChip(
                         selected = goalSteps == choice,
                         onClick = { onGoalChanged(choice) },
-                        label = { Text(String.format(java.util.Locale.KOREA, "%,d", choice)) },
+                        label = { Text(formatGoalSteps(choice)) },
                         modifier = Modifier.testTag(walkGoalChipTag(choice))
                     )
                 }
+                FilterChip(
+                    selected = typed,
+                    onClick = { typing = true },
+                    label = { Text(if (typed) "직접 ${formatGoalSteps(goalSteps)}" else "직접") },
+                    modifier = Modifier.testTag(walkGoalCustomTag)
+                )
             }
             Text(
                 text = when (connection) {
@@ -1238,9 +1252,66 @@ private fun WalkGoalSection(
             }
         }
     }
+    if (typing) {
+        WalkGoalDialog(
+            // 이미 직접 적은 수면 그것을 고치게 두고, 네 칸 중 하나면 빈칸에서 시작합니다.
+            initial = if (typed) goalSteps.toString() else "",
+            onDismiss = { typing = false },
+            onSave = { steps ->
+                typing = false
+                onGoalChanged(steps)
+            }
+        )
+    }
 }
 
+/** 걸은 날 기준을 직접 적는 창. 범위 밖이면 저장을 막습니다([Walking.parseGoalSteps]). */
+@Composable
+private fun WalkGoalDialog(initial: String, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(initial) }
+    val steps = Walking.parseGoalSteps(text)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("걸은 날로 셀 걸음 수") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { value -> text = value.filter(Char::isDigit).take(5) },
+                label = { Text("걸음 수") },
+                singleLine = true,
+                isError = text.isNotEmpty() && steps == null,
+                supportingText = {
+                    Text("${formatGoalSteps(Walking.MIN_GOAL_STEPS)}~${formatGoalSteps(Walking.MAX_GOAL_STEPS)} 사이로 적어 주세요")
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(walkGoalCustomFieldTag)
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { steps?.let(onSave) },
+                enabled = steps != null,
+                modifier = Modifier.testTag(walkGoalCustomSaveTag)
+            ) {
+                Text("저장")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        }
+    )
+}
+
+private fun formatGoalSteps(steps: Int): String = String.format(java.util.Locale.KOREA, "%,d", steps)
+
 internal fun walkGoalChipTag(steps: Int): String = "walk_goal_$steps"
+internal const val walkGoalCustomTag = "walk_goal_custom"
+internal const val walkGoalCustomFieldTag = "walk_goal_custom_field"
+internal const val walkGoalCustomSaveTag = "walk_goal_custom_save"
 
 /** 한 자리 옮깁니다. 줄 밖을 가리키면 그대로 둡니다. */
 private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {

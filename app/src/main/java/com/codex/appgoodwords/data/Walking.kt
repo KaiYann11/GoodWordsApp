@@ -33,6 +33,17 @@ object Walking {
     val GOAL_CHOICES = listOf(3_000, 5_000, 7_000, 10_000)
 
     /**
+     * 네 칸 뒤의 "직접"으로 적을 수 있는 범위(사용자가 정함, 2026-11-11). 몇십 걸음으로 적으면 아무 날이나 걸은 날이 되고,
+     * 너무 크게 적으면 걸은 날이 기록한 날뿐이 됩니다.
+     */
+    const val MIN_GOAL_STEPS = 1_000
+    const val MAX_GOAL_STEPS = 30_000
+
+    /** "직접"에 적은 수. 범위 밖이거나 수가 아니면 null입니다. */
+    fun parseGoalSteps(text: String): Int? =
+        text.trim().toIntOrNull()?.takeIf { it in MIN_GOAL_STEPS..MAX_GOAL_STEPS }
+
+    /**
      * 날짜별 걸음 수. 같은 날이 둘이면(다른 기기에서 읽어 아직 합쳐지지 않았으면) 큰 쪽입니다 —
      * 같은 하루를 각자 읽은 것이라 더하면 겹쳐 셉니다.
      */
