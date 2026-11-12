@@ -82,7 +82,9 @@ object SnapshotReindexer {
             stepCounts = snapshot.stepCounts.mapIndexed { index, count -> count.copy(id = index + 1L) },
             walks = snapshot.walks.mapIndexed { index, walk -> walk.copy(id = index + 1L) },
             // 목표에 들인 시간은 목표를 syncId로만 가리켜 번호만 다시 매기면 됩니다.
-            goalTimeLogs = snapshot.goalTimeLogs.mapIndexed { index, log -> log.copy(id = index + 1L) }
+            goalTimeLogs = snapshot.goalTimeLogs.mapIndexed { index, log -> log.copy(id = index + 1L) },
+            // 이은 줄은 양쪽 기록을 syncId로만 가리켜 번호만 다시 매기면 됩니다.
+            recordLinks = snapshot.recordLinks.mapIndexed { index, link -> link.copy(id = index + 1L) }
         )
     }
 

@@ -312,12 +312,14 @@ async function renderGoals(snapshot) {
     state: { snapshot: { items: [], routines: [], contentMemos: [], goalTimeLogs: [], ...snapshot }, editingContentId: null },
     findById: (items, id) => items.find((item) => item.id === id),
     goalTypes: ["VISION", "GOAL", "ROLE_MODEL"],
-    typeLabel: (type) => ({ VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델" })[type],
     formatDate: (timestamp) => new Date(timestamp).toISOString().slice(5, 10),
     todayIso: () => "2026-11-08",
     empty: (value) => value,
   });
   vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  // 종류 이름은 실제 app.js의 것을 씁니다. 시험에서 따로 지어 넣으면 app.js에 없는 이름을 불러도 통과합니다
+  // (예전에 목표 탭이 없는 typeLabel을 불러 브라우저에서 그려지지 않았습니다).
+  vm.runInContext(source.slice(source.indexOf("function labelForType("), source.indexOf("function labelForEvent(")), context);
   context.attr = context.escapeHtml;
   const start = source.indexOf("function formatMinutes(");
   const end = source.indexOf("function renderPrinciples(");
@@ -347,4 +349,53 @@ test("목표에 들인 시간은 누적과 최근 4주로 보이고, 적은 글�
   assert.match(html, /45분 — &lt;b&gt;스트레칭&lt;\/b&gt;/);
   assert.doesNotMatch(html, /<b>스트레칭/);
   assert.equal((html.match(/쓴 시간/g) || []).length, 1, "이상향에는 쓴 시간이 없어야 합니다.");
+});
+
+/** 행복 탭을 그려, 이은 줄·이름이 나온 순간이 앱과 같은 규칙으로 보이는지 봅니다. */
+async function renderHappy(snapshot) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const app = { innerHTML: "" };
+  const context = vm.createContext({
+    app,
+    state: { snapshot: { items: [], recordLinks: [], ...snapshot } },
+    likeCategories: ["음식", "음악", "장소", "사람", "활동", "물건", "작품"],
+    pad2: (value) => String(value).padStart(2, "0"),
+    attachmentMedia: (uri) => `<img data-uri="${uri}">`,
+    hydrateAttachments: () => {},
+    empty: (value) => value,
+  });
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  const start = source.indexOf("function renderHappy(");
+  const end = source.indexOf("function renderPrinciples(");
+  assert.ok(start >= 0 && end > start, "행복 화면 토막을 찾지 못했습니다.");
+  vm.runInContext(source.slice(start, end), context);
+  context.renderHappy();
+  return { html: app.innerHTML, context };
+}
+
+test("행복 탭은 이은 좋아하는 것을 순간 옆에, 이어 두었거나 이름이 나온 순간 수를 좋아하는 것 옆에 보인다", async () => {
+  const at = (day) => new Date(`${day}T20:00:00`).getTime();
+  const moment = { id: 1, syncId: "m-1", type: "HAPPY_MOMENT", title: "퇴근길 노을", body: "퇴근길 노을이 너무 예뻤다", createdAt: at("2026-11-11") };
+  // 이어 두지 않았지만 글에 이름(띄어쓰기는 상관없이)이 나온 순간.
+  const named = { id: 2, syncId: "m-2", type: "HAPPY_MOMENT", title: "주말", body: "한강에서 노 을 보며 <b>산책</b>", createdAt: at("2026-11-09") };
+  const sunset = { id: 3, syncId: "l-1", type: "LIKE", title: "노을", body: "하루가 끝나는 색", category: "장소", createdAt: 1 };
+  const coffee = { id: 4, syncId: "l-2", type: "LIKE", title: "커피", body: "", category: "", createdAt: 2 };
+  const { html, context } = await renderHappy({
+    items: [moment, named, sunset, coffee],
+    // 줄에는 방향이 없습니다 — 좋아하는 것에서 순간으로 이어도 같습니다.
+    recordLinks: [{ syncId: "x", fromKind: "CONTENT_ITEM", fromSyncId: "l-1", toKind: "CONTENT_ITEM", toSyncId: "m-1" }],
+  });
+
+  assert.match(html, /행복한 순간 2개/);
+  assert.ok(html.indexOf("2026-11-11") < html.indexOf("2026-11-09"), "최근 날이 먼저여야 합니다.");
+  assert.match(html, /♡ 노을/);
+  assert.match(html, /<strong>노을<\/strong> — 하루가 끝나는 색 <span class="muted">· 행복한 순간 2개<\/span>/);
+  // 있었던 순간이 없으면 아무 숫자도 말하지 않습니다(못 한 것을 세지 않습니다).
+  assert.match(html, /<strong>커피<\/strong><\/li>/);
+  assert.ok(html.indexOf("장소") < html.indexOf("갈래 없음"), "갈래 없음은 맨 뒤여야 합니다.");
+  assert.match(html, /&lt;b&gt;산책&lt;\/b&gt;/);
+  assert.doesNotMatch(html, /<b>산책/);
+  // 한 글자 이름은 아무 글에나 걸려 보지 않습니다(앱 Mentions.MIN_NAME_LENGTH).
+  assert.equal(context.mentions("책을 읽었다", "책"), false);
+  assert.equal(context.mentions("아이유 노래", "아이유노래"), true);
 });

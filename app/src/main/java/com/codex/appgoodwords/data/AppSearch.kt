@@ -6,6 +6,9 @@ enum class SearchKind(val label: String) {
     MEMO("메모"),
     CONCEPT("개념"),
     INBOX("임시저장소"),
+    /** 보관함 "행복" 칸(사용자가 정함, 2026-11-12). 고르면 그 기록의 화면으로 갑니다. */
+    HAPPY_MOMENT("행복한 순간"),
+    LIKE("좋아하는 것"),
     DIARY("일기"),
     TODO("할 일"),
     BOOK("독서"),
@@ -89,6 +92,8 @@ object AppSearch {
                     ContentType.NOT_TO_DO -> SearchKind.NOT_TO_DO
                     ContentType.PRINCIPLE -> SearchKind.PRINCIPLE
                     ContentType.VISION, ContentType.GOAL, ContentType.ROLE_MODEL -> SearchKind.GOAL
+                    ContentType.HAPPY_MOMENT -> SearchKind.HAPPY_MOMENT
+                    ContentType.LIKE -> SearchKind.LIKE
                     else -> SearchKind.QUOTE
                 }
             }
@@ -101,12 +106,14 @@ object AppSearch {
                                 attachedTexts(item)
                         }
                     ) { item ->
+                        // 행복한 순간은 이름이 글의 첫 줄이라, 조각에는 그 뒤만 둡니다(같은 말이 두 번 보이지 않게 — 지난해 오늘과 같게).
+                        val body = if (item.type == ContentType.HAPPY_MOMENT) item.body.trim().removePrefix(item.title).trim() else item.body
                         SearchHit(
                             kind = kind,
                             id = item.id,
                             title = item.title.ifBlank { item.body.take(30) },
                             snippet = snippetOf(
-                                (listOf(item.body) + attachedTexts(item)).joinToString(" "),
+                                (listOf(body) + attachedTexts(item)).joinToString(" "),
                                 terms
                             ),
                             meta = listOfNotNull(

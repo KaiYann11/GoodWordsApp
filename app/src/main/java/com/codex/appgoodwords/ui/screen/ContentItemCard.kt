@@ -247,19 +247,5 @@ private fun InfoText(text: String) {
     )
 }
 
-private fun ContentType.displayLabel(): String {
-    return when (this) {
-        ContentType.QUOTE -> "글귀"
-        ContentType.LINK -> "링크"
-        ContentType.VIDEO -> "영상"
-        ContentType.IDEA -> "아이디어"
-        ContentType.INBOX -> "임시저장소"
-        ContentType.MEMO -> "메모"
-        ContentType.NOT_TO_DO -> "하지 않을 일"
-        ContentType.PRINCIPLE -> "원칙"
-        ContentType.CONCEPT -> "개념"
-        ContentType.VISION -> "이상향"
-        ContentType.GOAL -> "목표"
-        ContentType.ROLE_MODEL -> "롤모델"
-    }
-}
+// 이름은 한 곳(`ContentType.label`)에서 정합니다. 따로 적어 두면 종류가 늘 때 한쪽만 빠집니다.
+private fun ContentType.displayLabel(): String = label

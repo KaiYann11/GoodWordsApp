@@ -37,6 +37,7 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.LinkMetadata
 import com.codex.appgoodwords.data.MoodPractice
 import com.codex.appgoodwords.data.OnThisDay
+import com.codex.appgoodwords.data.RecordRef
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
@@ -184,6 +185,10 @@ class MainViewModel(
 
     /** 글귀 옆에 덧붙여 둔 메모. 상세 화면이 자기 글귀 것만 골라 씁니다. */
     val contentMemos = container.repository.observeContentMemos()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 기록끼리 이은 줄(사용자가 정함, 2026-11-12). 어떤 기록과 이어졌는지는 화면이 [com.codex.appgoodwords.data.RecordIndex]로 셉니다. */
+    val recordLinks = container.repository.observeRecordLinks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -462,6 +467,41 @@ class MainViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** 펼친 행복한 순간의 날. 그 화면의 "같은 날"이 이날을 봅니다. */
+    private val _happyDay = MutableStateFlow<LocalDate?>(null)
+
+    /**
+     * 행복한 순간의 "같은 날" — 그날 요약과 같은 셈입니다([DayScoreCalculator.digest]). 따로 세면 두 화면이 다른 하루를
+     * 말합니다. 순간 화면을 열 때 [showHappyDay]로 날을 정합니다.
+     */
+    val happyDayDigest = combine(
+        _happyDay,
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
+        },
+        moodLogs,
+        container.settingsStore.dailyStepsFlow,
+        walkRecords
+    ) { date, inputs, logs, steps, walking ->
+        date?.let {
+            DayScoreCalculator.digest(
+                date = it,
+                events = inputs.events,
+                routineChecks = inputs.routineChecks,
+                todos = inputs.todos,
+                diaries = inputs.diaries,
+                moodLogs = logs,
+                steps = steps,
+                readingLogs = inputs.readingLogs,
+                walkRecords = walking
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun showHappyDay(date: LocalDate?) {
+        _happyDay.value = date?.let { minOf(it, LocalDate.now()) }
+    }
+
     fun openDay(date: LocalDate) {
         // 오지 않은 날에 점수를 매길 수는 없습니다.
         _openedDay.value = minOf(date, LocalDate.now())
@@ -534,7 +574,9 @@ class MainViewModel(
 
     val categories = allItems
         .map { items ->
-            items.map { it.category.trim() }
+            // 좋아하는 것의 갈래(음식·음악…)는 글귀의 카테고리가 아닙니다. 섞이면 알림에 보낼 카테고리에 끼어듭니다.
+            items.filterNot { it.type.isHappy }
+                .map { it.category.trim() }
                 .filter { it.isNotBlank() }
                 .distinct()
                 .sorted()
@@ -1614,6 +1656,30 @@ class MainViewModel(
     suspend fun deleteContent(itemId: Long): Result<Unit> = runCatching {
         container.repository.deleteContent(itemId)
         _confirmedTodayIds.value = _confirmedTodayIds.value - itemId
+    }
+
+    /** 행복한 순간을 적거나 고칩니다. [likeSyncIds]는 이어 둘 좋아하는 것 전부입니다. */
+    suspend fun saveHappyMoment(
+        id: Long,
+        text: String,
+        date: LocalDate,
+        imageUris: List<String>,
+        likeSyncIds: List<String>
+    ): Result<Long> = runCatching {
+        container.repository.saveHappyMoment(id, text, date, imageUris, likeSyncIds)
+    }
+
+    /** 좋아하는 것을 적거나 고칩니다. 같은 이름이 이미 있으면 그것의 id를 돌려줍니다. */
+    suspend fun saveLike(id: Long, name: String, category: String, why: String, imageUris: List<String>): Result<Long> =
+        runCatching { container.repository.saveLike(id, name, category, why, imageUris) }
+
+    /** 두 기록을 잇습니다. 이미 이어져 있으면 false입니다. */
+    suspend fun linkRecords(a: RecordRef, b: RecordRef): Result<Boolean> = runCatching {
+        container.repository.linkRecords(a, b)
+    }
+
+    suspend fun unlinkRecords(a: RecordRef, b: RecordRef): Result<Int> = runCatching {
+        container.repository.unlinkRecords(a, b)
     }
 
     /** 이상향·목표·롤모델을 적거나 고칩니다. 되새긴 기록·이어 둔 루틴·홈에 두기는 그대로 둡니다. */

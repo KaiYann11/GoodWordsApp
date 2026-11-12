@@ -287,7 +287,8 @@ class ServerSyncClientIntegrationTest {
         diaries: List<DiaryEntity> = emptyList(),
         todos: List<TodoEntity> = emptyList(),
         bookReadingLogs: List<BookReadingLogEntity> = emptyList(),
-        books: List<BookEntity> = emptyList()
+        books: List<BookEntity> = emptyList(),
+        recordLinks: List<RecordLinkEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = emptyList(),
@@ -300,8 +301,45 @@ class ServerSyncClientIntegrationTest {
         diaries = diaries,
         todos = todos,
         bookReadingLogs = bookReadingLogs,
-        books = books
+        books = books,
+        recordLinks = recordLinks
     )
+
+    @Test
+    fun mergeSnapshot_carriesHappyRecordsAndLinks() = runBlocking {
+        // 행복 칸과 이은 줄(사용자가 정함, 2026-11-12). 옛 서버는 모르는 종류를 글귀로 바꾸고 줄을 버립니다 — 형식 27 서버는
+        // 그대로 돌려줘야 합니다. 서버 상태를 공유하므로 식별자와 글을 매번 다르게 씁니다(같은 내용 합치기에 걸리지 않게).
+        val id = SyncIdentity.newId()
+        val now = System.currentTimeMillis()
+        val moment = ContentItemEntity(
+            syncId = "e2e-moment-$id", type = ContentType.HAPPY_MOMENT, title = "노을 $id", body = "퇴근길 노을 $id", updatedAt = now
+        )
+        val like = ContentItemEntity(
+            syncId = "e2e-like-$id", type = ContentType.LIKE, title = "노을 좋아함 $id", body = "", category = "장소", updatedAt = now
+        )
+        val link = RecordLinkEntity(
+            syncId = "e2e-link-$id",
+            fromKind = RecordKind.CONTENT_ITEM.name,
+            fromSyncId = moment.syncId,
+            toKind = RecordKind.CONTENT_ITEM.name,
+            toSyncId = like.syncId,
+            createdAt = now,
+            updatedAt = now
+        )
+
+        val merged = client.mergeSnapshot(settings, snapshotWith(items = listOf(moment, like), recordLinks = listOf(link)))
+        assertEquals(ContentType.HAPPY_MOMENT, merged.items.single { it.syncId == moment.syncId }.type)
+        assertEquals("장소", merged.items.single { it.syncId == like.syncId }.category)
+        assertEquals(like.syncId, merged.recordLinks.single { it.syncId == link.syncId }.toSyncId)
+
+        // 줄을 풀면 표식이 서버에 남아, 옛 사본을 다시 올려도 줄이 돌아오지 않습니다.
+        client.mergeSnapshot(
+            settings,
+            snapshotWith(deletions = listOf(DeletionEntity(syncId = link.syncId, entityType = SyncEntityType.RECORD_LINK, deletedAt = now + 1)))
+        )
+        val after = client.mergeSnapshot(settings, snapshotWith(recordLinks = listOf(link)))
+        assertTrue(after.recordLinks.none { it.syncId == link.syncId })
+    }
 
     @Test
     fun testConnection_reportsMatchingSchemaVersion() = runBlocking {

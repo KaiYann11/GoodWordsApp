@@ -23,9 +23,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookReadingLogEntity::class,
         StepCountEntity::class,
         WalkEntity::class,
-        GoalTimeLogEntity::class
+        GoalTimeLogEntity::class,
+        RecordLinkEntity::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -46,8 +47,35 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stepCountDao(): StepCountDao
     abstract fun walkDao(): WalkDao
     abstract fun goalTimeLogDao(): GoalTimeLogDao
+    abstract fun recordLinkDao(): RecordLinkDao
 
     companion object {
+        /**
+         * 기록끼리 잇는 줄을 담을 자리를 만듭니다(사용자가 정함, 2026-11-12). 기존 표는 건드리지 않습니다.
+         *
+         * 행복한 순간·좋아하는 것은 보관함 종류라 표가 따로 없습니다(`content_items`의 `type`이 이름으로 담깁니다).
+         * 옮겨 올 것이 없습니다 — 이제부터 쌓습니다. 칸·인덱스 이름은 [RecordLinkEntity]와 정확히 같아야 합니다.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS record_links (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "syncId TEXT NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "fromKind TEXT NOT NULL, " +
+                        "fromSyncId TEXT NOT NULL, " +
+                        "toKind TEXT NOT NULL, " +
+                        "toSyncId TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL" +
+                        ")"
+                )
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_record_links_syncId ON record_links (syncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_record_links_fromSyncId ON record_links (fromSyncId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_record_links_toSyncId ON record_links (toSyncId)")
+            }
+        }
+
         /**
          * 목표에 들인 시간을 담을 자리를 만듭니다(사용자가 정함, 2026-11-08). 기존 표는 건드리지 않습니다.
          *

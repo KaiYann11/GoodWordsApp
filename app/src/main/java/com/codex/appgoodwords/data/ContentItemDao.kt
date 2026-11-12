@@ -99,8 +99,9 @@ interface ContentItemDao {
     @Query("UPDATE content_items SET lastShownAt = NULL, showCount = 0, updatedAt = :updatedAt")
     suspend fun resetReadCounts(updatedAt: Long): Int
 
-    @Query("UPDATE content_items SET category = '', updatedAt = :updatedAt WHERE category = :category")
-    suspend fun clearCategory(category: String, updatedAt: Long): Int
+    /** [kept] 종류는 이름이 같아도 그대로 둡니다(좋아하는 것의 갈래는 글귀의 카테고리와 다른 것입니다). */
+    @Query("UPDATE content_items SET category = '', updatedAt = :updatedAt WHERE category = :category AND type NOT IN (:kept)")
+    suspend fun clearCategory(category: String, updatedAt: Long, kept: List<ContentType>): Int
 
     @Query("SELECT * FROM content_items")
     suspend fun getAll(): List<ContentItemEntity>

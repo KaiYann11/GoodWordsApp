@@ -28,6 +28,7 @@ object SyncDelta {
             stepCounts = snapshot.stepCounts.filter { it.updatedAt > since },
             walks = snapshot.walks.filter { it.updatedAt > since },
             goalTimeLogs = snapshot.goalTimeLogs.filter { it.updatedAt > since },
+            recordLinks = snapshot.recordLinks.filter { it.updatedAt > since },
             // 이력과 체크는 한 번 생기면 바뀌지 않으므로 생긴 시각으로 봅니다.
             events = snapshot.events.filter { it.occurredAt > since },
             routineChecks = snapshot.routineChecks.filter { it.checkedAt > since },

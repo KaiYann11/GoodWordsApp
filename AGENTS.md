@@ -99,6 +99,12 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 
 - 서명 정보(`keystore.properties`·`*.jks`), AI 열쇠, 서버 접속 키, 페어링 링크, Tailscale 이름·IP는 커밋·PR·문서·로그에
   넣지 않습니다. 열쇠는 기기(`SettingsStore`)나 서버 환경 변수에만 둡니다.
+- **AI에게도 보이지 않게 합니다**(사용자가 정함, 2026-11-12). 이 저장소에서 일하는 Claude·Codex 같은 도구가 읽는 명령 출력도
+  기록입니다 — 한 번 찍히면 거둘 수 없습니다. 위의 것은 화면에 찍거나 파일을 열어 읽지 않고, 열쇠·토큰은 파일에서 파일로만
+  넘깁니다(경로로 넘기고, 스크립트는 바이트 수·예/아니요·해시만 찍음). `tailscale`·`orca`·원격 로그처럼 이름(`*.ts.net`)이나
+  IP(`100.x`)가 섞일 수 있는 출력은 가린 뒤에 봅니다 — `tailscale serve status`는 기기 이름을, 꺼진 PC에 닿지 못한 `orca` 오류는
+  그 PC의 IP를 그대로 찍습니다. 원격에서 올려 보내는 로그도 보내기 전에 가립니다. (`100.100.100.100`은 Tailscale의 공용 DNS
+  주소라 비밀이 아닙니다.)
 - **CLI 공급자는 서버가 돌립니다(`askCli`).** 물음을 명령줄 인자로 넘기지 않고(표준 입력·임시 파일), **도구 없이·빈 임시
   폴더에서·대화를 남기지 않고** 돌립니다. 하나라도 풀면 기록 속 문장이 서버 파일을 읽게 하거나 일기가 디스크에 쌓입니다.
 - **AI에 무엇이 나가는지는 사용자가 정합니다** — 일기 본문(`includeDiaryBody`)·목표 탭(`includeGoals`) 모두 **기본 꺼짐,
@@ -129,6 +135,8 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |
 | 걸은 날(정한 걸음 수 이상 **또는** 걷기를 기록한 날 — 사용자가 정함, 2026-11-07) | `Walking`(`walkedDays`·`stepsByDate`·AI에 가는 한 줄 `factLine`). 하루의 걸음·점수·연속·홈 카드·AI가 모두 여기서 셉니다 |
 | 지나온 길의 꼴(구글 polyline, 소수 다섯째 자리) | 앱 `WalkPath` · 웹 `decodePolyline` · 서버 `normalizeWalk`(글자만 확인) |
+| 이어진 기록 — 직접 이은 것·이름이 나온 곳(좋아하는 것·롤모델·책·루틴의 이름만, 두 글자 이상 — 사용자가 정함, 2026-11-12) | `RecordIndex.connectionsOf` · 줄 셈 `RecordLinks` · 이름 견주기 앱 `Mentions`·웹 `mentions` |
+| 행복한 순간의 날짜·이름 · 좋아하는 것의 갈래 차례·있었던 순간 수 | 앱 `Happy`(`momentTime`·`titleOf`·`groupLikes`·`momentCounts`) · 웹 `likeGroups`. 순간 화면의 "같은 날"은 그날 요약과 같은 `DayScoreCalculator.digest`입니다 |
 
 ## 함께 고쳐야 하는 것
 
@@ -144,12 +152,13 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
 | 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |
-| 같은 내용 합치기(기분 `moodLogFingerprint` 포함) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
+| 같은 내용 합치기(기분 `moodLogFingerprint` 포함, 행복한 순간은 `itemFingerprint`에 `createdAt`까지) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
 | 걸음 수·걷기 합치기 | 같은 날 걸음 수는 **걸음이 많은 쪽**이 남습니다(앱 `SyncDeduplicator`의 `winner` · 서버 `moreSteps`). 걷기는 시작한 밀리초가 같으면 같은 것입니다(`walkFingerprint`) |
+| 이은 줄(`recordLinks`) | 같은 두 기록이면 한 줄(방향 없음 — 앱 `RecordLinks.fingerprint`·서버 `recordLinkFingerprint`), 합치기로 기록이 줄면 끝을 남은 쪽으로 옮기고 제 자신을 잇게 된 줄은 버림(앱 `SyncDeduplicator`·서버 `deduplicate`, 같은 차례), 루틴 합치기(`AppRepository.mergeRoutines`), 이을 수 있는 종류(앱 `RecordKind`·서버 `recordKinds`) |
 | 목표에 들인 시간(`goalTimeLogs`) | 같은 목표·같은 밀리초면 같은 것(앱·서버 `goalTimeLogFingerprint`), 목표가 합쳐지면 남은 목표로 옮김(앱 `SyncDeduplicator`·서버 `deduplicate`), 목표를 지우면 함께 지우고 표식(앱 `AppRepository.deleteContent`·서버 `DELETE /api/content/{id}`) |
 | 글 쌓이는 새 자리 | `AppSearch`에 찾을 길(딸린 글은 부모에 얹기) |
 | `routineChecks`를 "실천했다"로 세는 곳 | `DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt` · `DailyCoachPrompt` · `RoutineNudge` |
@@ -166,8 +175,14 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   `DiaryAnswerConverters`).
 - 공유로 들어온 글(`ShareTargetActivity`)은 `documentLaunchMode="always"`와 `onNewIntent` 저장을 지키고, 토스트는 메인 스레드에서만.
 - 분류·설명은 같은 기록의 종류만 바꿉니다(새로 만들면 첨부·덧메모·syncId가 끊깁니다).
-- **탭 번호는 이름표일 뿐입니다** — 보관함 `LibraryTab`(메모·개념·임시저장소 번호는 노트 칸 알약), 홈 `HomeTab`. 검색이 번호로
-  짚어 오므로 차례에 맞춰 번호를 바꾸지 않습니다.
+- **탭 번호는 이름표일 뿐입니다** — 보관함 `LibraryTab`(메모·개념·임시저장소 번호는 노트 칸 알약, 행복한 순간·좋아하는 것은 행복
+  칸 알약), 홈 `HomeTab`. 검색이 번호로 짚어 오므로 차례에 맞춰 번호를 바꾸지 않습니다.
+- **지운 기록을 가리키는 이은 줄은 지우지 않습니다**(`RecordIndex.resolve`가 없는 기록을 화면에서만 뺍니다 — 목표에 이어 둔 루틴과
+  같은 규칙). 줄이 사라지는 것은 사용자가 풀 때뿐이고 그때는 표식(`RECORD_LINK`)을 남깁니다. 행복한 순간을 고칠 때 칩이 다루는 것은
+  좋아하는 것과의 줄뿐입니다(`AppRepository.saveHappyMoment`) — 상세의 "기록 잇기"로 이은 일기·책 줄을 칩이 지우면 안 됩니다.
+- **좋아하는 것의 갈래는 글귀의 카테고리가 아닙니다.** 알림에 보낼 카테고리 목록(`MainViewModel.categories`)과 카테고리 지우기
+  (`ContentItemDao.clearCategory`의 `kept`)가 행복 칸을 뺍니다 — 섞이면 "음식"이 알림 카테고리에 끼고, 글귀 카테고리를 지울 때
+  같은 이름의 갈래가 함께 지워집니다.
 - **정한 때에 오는 것은 알람이 깨웁니다** — 오늘의 한마디(`DailyCoachAlarm`), 일일 집계·AI 돌아보기 자동 실행·뜸할 때 알림
   (`DailyAlarm`), 할 일(`TodoAlarmScheduler`). 오래 걸리거나 인터넷이 드는 일은 울린 참에 곧바로 도는 일꾼에게 넘깁니다.
   WorkManager에 "주기 뒤"로 미루면 휴대폰을 내려놓은 동안 몇 시간씩 밀려 앱을 열 때만 왔습니다. **WorkManager 반복 예약을
@@ -218,8 +233,10 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   만들지 않고, 가벼운 쪽은 AI를 부르지 않습니다.
 - AI에 못 붙어도 막다른 길이 아닙니다 — 미리 보기와 복사되는 글은 같고, 붙여넣은 답은 형식이 어긋나도 버리지 않습니다.
 - 추천은 이미 가진 것을 되돌려 주지 않습니다(`ownedQuoteLines`). 지난 조언의 `strengths`·`guide`는 다시 싣지 않습니다.
-- **내가 쓴 것은 남의 좋은 말인 척 돌아오지 않습니다**(`personalTypes` — 메모·개념·원칙·이상향·목표·롤모델 등은 알림·위젯·
-  읽음·지난해 오늘·AI 추천 원문에서 빠집니다). 원칙에는 수행 버튼이 없습니다.
+- **내가 쓴 것은 남의 좋은 말인 척 돌아오지 않습니다**(`personalTypes` — 메모·개념·원칙·이상향·목표·롤모델·행복한 순간·좋아하는
+  것 등은 알림·위젯·읽음·AI 추천 원문에서 빠집니다). 원칙에는 수행 버튼이 없습니다. 이은 줄과 이름이 나온 곳도 AI에
+  가지 않습니다. 지난해 오늘(`OnThisDay`)은 따로 거릅니다 — 늘 거기 있는 것(기준·개념·목표 탭·좋아하는 것)은 빼고, 행복한
+  순간은 그날로 적은 것이라 그 순간의 화면으로 돌아옵니다(글귀 상세가 아니라 — 사용자가 정함, 2026-11-13).
 - 끈 기능을 켜 보라고 홈에 매일 띄우지 않습니다(한마디 칸·목표 한 줄은 켰거나 적었을 때만).
 - 진동은 무게 셋(`tap`·`commit`·`celebrate`)뿐이고 한 동작에 한 번입니다.
 

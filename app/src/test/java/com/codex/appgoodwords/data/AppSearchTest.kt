@@ -122,6 +122,31 @@ class AppSearchTest {
     }
 
     @Test
+    fun happyRecordsAreFoundUnderTheirOwnKinds() {
+        // 글귀로 묶이면 검색에서 고를 때 글귀 상세로 가 버립니다. 행복 칸의 기록은 그 기록의 화면으로 갑니다.
+        val moment = ContentItemEntity(id = 40, syncId = "m-40", type = ContentType.HAPPY_MOMENT, title = "퇴근길 노을", body = "퇴근길 노을이 너무 예뻤다")
+        val like = ContentItemEntity(id = 41, syncId = "l-41", type = ContentType.LIKE, title = "노을", body = "", category = "장소")
+
+        val kinds = AppSearch.search(query = "노을", items = listOf(moment, like)).hits.associate { it.id to it.kind }
+
+        assertEquals(mapOf(40L to SearchKind.HAPPY_MOMENT, 41L to SearchKind.LIKE), kinds)
+    }
+
+    @Test
+    fun aMomentDoesNotRepeatItsFirstLineInTheSnippet() {
+        // 순간의 이름은 글의 첫 줄입니다. 조각에 그 줄이 또 나오면 같은 말이 두 번 보입니다(에뮬레이터에서 본 것, 2026-11-13).
+        val oneLine = "퇴근길 노을이 너무 예뻤다"
+        val twoLines = "노을 보며 산책\n하늘이 분홍색이었다"
+        val moments = listOf(42L to oneLine, 43L to twoLines).map { (id, body) ->
+            ContentItemEntity(id = id, syncId = "m-$id", type = ContentType.HAPPY_MOMENT, title = Happy.titleOf(body), body = body)
+        }
+
+        val snippets = AppSearch.search(query = "노을", items = moments).hits.associate { it.id to it.snippet }
+
+        assertEquals(mapOf(42L to "", 43L to "하늘이 분홍색이었다"), snippets)
+    }
+
+    @Test
     fun theSearchIgnoresCase() {
         val item = quote.copy(id = 9, syncId = "q9", title = "Atomic Habits", body = "본문")
 

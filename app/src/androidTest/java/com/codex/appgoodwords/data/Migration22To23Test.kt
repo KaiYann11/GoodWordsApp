@@ -38,12 +38,17 @@ class Migration22To23Test {
             before.close()
         }
 
-        // 지금 판까지 잇습니다(Migration20To21Test와 같은 방식). 23→24·24→25는 표만 더하므로 여기서 본 것을 건드리지 않습니다.
+        // 지금 판까지 잇습니다(Migration20To21Test와 같은 방식). 23→24·24→25·25→26은 표만 더하므로 여기서 본 것을 건드리지 않습니다.
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_22_23, AppDatabase.MIGRATION_23_24, AppDatabase.MIGRATION_24_25)
+            .addMigrations(
+                AppDatabase.MIGRATION_22_23,
+                AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25,
+                AppDatabase.MIGRATION_25_26
+            )
             .build()
         try {
-            assertEquals(25, after.openHelper.writableDatabase.version)
+            assertEquals(26, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(quote, after.contentItemDao().getById(quote.id))
             assertEquals(1, after.contentMemoDao().getAll().size)
