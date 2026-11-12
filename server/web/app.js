@@ -780,7 +780,7 @@ function renderGoals() {
     const records = items.filter((item) => item.type === type)
       .sort((a, b) => Number(b.isFavorite) - Number(a.isFavorite) || a.createdAt - b.createdAt);
     return `
-      <h2 class="sectionTitle">${typeLabel(type)} ${records.length}개</h2>
+      <h2 class="sectionTitle">${labelForType(type)} ${records.length}개</h2>
       <div class="itemList">
         ${records.length ? records.map((item) => {
           const memos = memosOf(item);
@@ -810,7 +810,7 @@ function renderGoals() {
               </div>
             </form>
           </article>`;
-        }).join("") : empty(`아직 적어 둔 ${typeLabel(type)}이(가) 없습니다.`)}
+        }).join("") : empty(`아직 적어 둔 ${labelForType(type)}이(가) 없습니다.`)}
       </div>`;
   };
   app.innerHTML = `
@@ -822,7 +822,7 @@ function renderGoals() {
           <div class="field full">
             <label for="goalType">종류</label>
             <select id="goalType" name="type">
-              ${goalTypes.map((type) => `<option value="${type}" ${(editing.type || "VISION") === type ? "selected" : ""}>${typeLabel(type)}</option>`).join("")}
+              ${goalTypes.map((type) => `<option value="${type}" ${(editing.type || "VISION") === type ? "selected" : ""}>${labelForType(type)}</option>`).join("")}
             </select>
           </div>
           <div class="field full">

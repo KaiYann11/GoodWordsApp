@@ -312,12 +312,14 @@ async function renderGoals(snapshot) {
     state: { snapshot: { items: [], routines: [], contentMemos: [], goalTimeLogs: [], ...snapshot }, editingContentId: null },
     findById: (items, id) => items.find((item) => item.id === id),
     goalTypes: ["VISION", "GOAL", "ROLE_MODEL"],
-    typeLabel: (type) => ({ VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델" })[type],
     formatDate: (timestamp) => new Date(timestamp).toISOString().slice(5, 10),
     todayIso: () => "2026-11-08",
     empty: (value) => value,
   });
   vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("function attr(")), context);
+  // 종류 이름은 실제 app.js의 것을 씁니다. 시험에서 따로 지어 넣으면 app.js에 없는 이름을 불러도 통과합니다
+  // (예전에 목표 탭이 없는 typeLabel을 불러 브라우저에서 그려지지 않았습니다).
+  vm.runInContext(source.slice(source.indexOf("function labelForType("), source.indexOf("function labelForEvent(")), context);
   context.attr = context.escapeHtml;
   const start = source.indexOf("function formatMinutes(");
   const end = source.indexOf("function renderPrinciples(");
