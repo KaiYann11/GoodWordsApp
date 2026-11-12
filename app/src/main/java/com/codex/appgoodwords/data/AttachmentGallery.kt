@@ -55,7 +55,12 @@ object AttachmentGallery {
 
         val fromItems = items.flatMap { item ->
             shotsOf(
-                source = SearchKind.QUOTE,
+                // 행복 칸의 사진은 그 기록의 화면으로 엽니다(글귀 상세가 아니라).
+                source = when (item.type) {
+                    ContentType.HAPPY_MOMENT -> SearchKind.HAPPY_MOMENT
+                    ContentType.LIKE -> SearchKind.LIKE
+                    else -> SearchKind.QUOTE
+                },
                 sourceId = item.id,
                 date = toDate(item.createdAt, zoneId),
                 label = item.title.ifBlank { "글귀" },

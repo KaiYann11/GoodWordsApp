@@ -27,6 +27,9 @@ internal const val libraryQuoteTabTag = "library_tab_quote"
 internal const val libraryIdeaTabTag = "library_tab_idea"
 internal const val libraryBookTabTag = "library_tab_book"
 internal const val libraryNoteTabTag = "library_tab_note"
+internal const val libraryHappyTabTag = "library_tab_happy"
+internal const val libraryHappyMomentPillTag = "library_pill_happy_moment"
+internal const val libraryLikePillTag = "library_pill_like"
 
 // 아래 셋은 이제 노트 칸 안의 알약에 붙습니다. 탭이던 때의 이름을 그대로 두어 시험이 그대로 짚습니다.
 internal const val libraryInboxTabTag = "library_tab_inbox"
@@ -41,6 +44,7 @@ internal const val libraryConceptTabTag = "library_tab_concept"
  *
  * [MEMO]·[CONCEPT]·[INBOX]는 예전에는 탭이었고 지금은 [NOTE] 칸 안의 알약입니다. 번호를 그대로 두어서
  * 검색에서 메모를 고르면 여전히 [MEMO]로 짚어 오고, 노트 칸의 메모 알약이 열립니다.
+ * [HAPPY_MOMENT]·[LIKE]는 [HAPPY] 칸 안의 알약입니다(사용자가 정함, 2026-11-12).
  */
 internal object LibraryTab {
     const val QUOTE = 0
@@ -50,14 +54,18 @@ internal object LibraryTab {
     const val MEMO = 4
     const val CONCEPT = 5
     const val NOTE = 6
+    const val HAPPY = 7
+    const val HAPPY_MOMENT = 8
+    const val LIKE = 9
 
     /**
      * 탭 줄의 차례. 자주 보는 것이 앞입니다.
      *
      * 글귀가 이 앱의 첫 자리이고, 번뜩인 것과 책이 그 둘레입니다. 노트는 찾아볼 때 들르는 곳이라 맨 뒤입니다.
-     * 넷이라 한 줄에 다 보입니다 — 여섯이던 때는 옆으로 밀어야 메모와 임시저장소가 나왔습니다.
+     * 행복(순간·좋아하는 것)은 노트 앞입니다(사용자가 정함, 2026-11-12 — 목업으로 "'행복' 칸 + 알약 둘"을 고름).
+     * 다섯이라 한 줄에 다 보입니다 — 여섯이던 때는 옆으로 밀어야 메모와 임시저장소가 나왔습니다.
      */
-    val ORDER = listOf(QUOTE, IDEA, BOOK, NOTE)
+    val ORDER = listOf(QUOTE, IDEA, BOOK, HAPPY, NOTE)
 
     /**
      * 노트 칸 안의 알약 차례.
@@ -69,8 +77,15 @@ internal object LibraryTab {
      */
     val NOTE_PILLS = listOf(MEMO, CONCEPT, INBOX)
 
-    /** 탭 줄에서 켜질 칸. 노트 안 알약은 노트 칸입니다. */
-    fun tabOf(selected: Int): Int = if (selected in NOTE_PILLS) NOTE else selected
+    /** 행복 칸 안의 알약 차례. 순간이 먼저입니다 — 자주 적는 것이 순간이고, 좋아하는 것은 순간에서 이어 갑니다. */
+    val HAPPY_PILLS = listOf(HAPPY_MOMENT, LIKE)
+
+    /** 탭 줄에서 켜질 칸. 노트·행복 안 알약은 그 칸입니다. */
+    fun tabOf(selected: Int): Int = when (selected) {
+        in NOTE_PILLS -> NOTE
+        in HAPPY_PILLS -> HAPPY
+        else -> selected
+    }
 }
 
 /**
@@ -98,21 +113,28 @@ fun LibraryTabsScreen(
     conceptCount: Int = 0,
     inboxContent: @Composable () -> Unit = {},
     memoContent: @Composable () -> Unit = {},
-    conceptContent: @Composable () -> Unit = {}
+    conceptContent: @Composable () -> Unit = {},
+    happyMomentCount: Int = 0,
+    likeCount: Int = 0,
+    happyMomentContent: @Composable () -> Unit = {},
+    likeContent: @Composable () -> Unit = {}
 ) {
     // 화면을 돌려도 보던 쪽이 유지되어야 합니다. 노트를 보고 있으면 그 안의 알약 번호를 담습니다.
     var selected by rememberSaveable { mutableIntStateOf(LibraryTab.QUOTE) }
-    // 다른 탭에 다녀와도 노트는 보던 알약으로 열립니다.
+    // 다른 탭에 다녀와도 노트·행복은 보던 알약으로 열립니다.
     var lastNotePill by rememberSaveable { mutableIntStateOf(LibraryTab.MEMO) }
+    var lastHappyPill by rememberSaveable { mutableIntStateOf(LibraryTab.HAPPY_MOMENT) }
 
     // 검색에서 책을 골랐는데 글귀 쪽이 열려 있으면 찾던 것이 안 보입니다.
     LaunchedEffect(requestKey, requestedTab) {
         when (requestedTab) {
             null -> Unit
             LibraryTab.NOTE -> selected = lastNotePill
+            LibraryTab.HAPPY -> selected = lastHappyPill
             else -> {
                 selected = requestedTab
                 if (requestedTab in LibraryTab.NOTE_PILLS) lastNotePill = requestedTab
+                if (requestedTab in LibraryTab.HAPPY_PILLS) lastHappyPill = requestedTab
             }
         }
     }
@@ -137,6 +159,12 @@ fun LibraryTabsScreen(
                 onClick = { selected = LibraryTab.BOOK },
                 text = { Text("독서") },
                 modifier = Modifier.testTag(libraryBookTabTag)
+            )
+            Tab(
+                selected = currentTab == LibraryTab.HAPPY,
+                onClick = { selected = lastHappyPill },
+                text = { Text("행복") },
+                modifier = Modifier.testTag(libraryHappyTabTag)
             )
             Tab(
                 selected = currentTab == LibraryTab.NOTE,
@@ -167,6 +195,19 @@ fun LibraryTabsScreen(
                 conceptContent = conceptContent,
                 inboxContent = inboxContent
             )
+            LibraryTab.HAPPY -> PillContent(
+                pills = listOf(
+                    LibraryPill(LibraryTab.HAPPY_MOMENT, "행복한 순간", happyMomentCount, libraryHappyMomentPillTag),
+                    LibraryPill(LibraryTab.LIKE, "좋아하는 것", likeCount, libraryLikePillTag)
+                ),
+                selectedPill = selected,
+                onSelectPill = { pill ->
+                    selected = pill
+                    lastHappyPill = pill
+                }
+            ) { pill ->
+                if (pill == LibraryTab.LIKE) likeContent() else happyMomentContent()
+            }
             LibraryTab.IDEA -> ideaContent()
             LibraryTab.BOOK -> bookContent()
             else -> quoteContent()
@@ -221,6 +262,38 @@ private fun NoteContent(
                 LibraryTab.INBOX -> inboxContent()
                 else -> memoContent()
             }
+        }
+    }
+}
+
+/** 칸 안의 알약 하나 — 번호([LibraryTab])·이름·개수·시험 표식. */
+private class LibraryPill(val number: Int, val title: String, val count: Int, val tag: String)
+
+/** 알약 줄을 두고 고른 것의 목록을 아래에 보여 주는 칸. 행복 칸이 씁니다(노트 칸과 같은 모양). */
+@Composable
+private fun PillContent(
+    pills: List<LibraryPill>,
+    selectedPill: Int,
+    onSelectPill: (Int) -> Unit,
+    content: @Composable (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(pills, key = { it.number }) { pill ->
+                CountFilterPill(
+                    title = pill.title,
+                    count = pill.count,
+                    selected = selectedPill == pill.number,
+                    onClick = { onSelectPill(pill.number) },
+                    modifier = Modifier.testTag(pill.tag)
+                )
+            }
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            content(pills.firstOrNull { it.number == selectedPill }?.number ?: pills.first().number)
         }
     }
 }

@@ -372,7 +372,7 @@ snapshotFile.addEventListener("change", async () => {
 loadSnapshot();
 
 /** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`·서버 `personalContentTypes`와 같아야 합니다. */
-const personalTypes = ["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL"];
+const personalTypes = ["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL", "HAPPY_MOMENT", "LIKE"];
 
 /** 제 탭에서만 보는 기준. 보관함·홈의 목록에 섞이면 담아 둔 글귀가 밀려납니다. */
 const ruleTypes = ["NOT_TO_DO", "PRINCIPLE"];
@@ -380,8 +380,14 @@ const ruleTypes = ["NOT_TO_DO", "PRINCIPLE"];
 /** 목표 탭의 기록(이상향·목표·롤모델). 앱 `ContentType.goalTypes`와 같은 차례입니다. */
 const goalTypes = ["VISION", "GOAL", "ROLE_MODEL"];
 
+/** 보관함 행복 칸의 기록(행복한 순간·좋아하는 것). 앱 `ContentType.happyTypes`와 같은 차례입니다. */
+const happyTypes = ["HAPPY_MOMENT", "LIKE"];
+
+/** 좋아하는 것의 갈래 칩. 앱 `Happy.LIKE_CATEGORIES`와 같은 차례입니다. */
+const likeCategories = ["음식", "음악", "장소", "사람", "활동", "물건", "작품"];
+
 /** 보관함·홈 목록에 섞지 않고 제 탭에서만 보는 종류. */
-const ownTabTypes = [...ruleTypes, ...goalTypes];
+const ownTabTypes = [...ruleTypes, ...goalTypes, ...happyTypes];
 
 function emptySnapshot() {
   return {
@@ -400,6 +406,7 @@ function emptySnapshot() {
     stepCounts: [],
     walks: [],
     goalTimeLogs: [],
+    recordLinks: [],
     settings: {},
   };
 }
@@ -504,6 +511,7 @@ function render() {
   syncTabs();
   if (state.activeTab === "home") renderHome();
   if (state.activeTab === "library") renderLibrary();
+  if (state.activeTab === "happy") renderHappy();
   if (state.activeTab === "routines") renderRoutines();
   if (state.activeTab === "not-to-do") renderNotToDo();
   if (state.activeTab === "principles") renderPrinciples();
@@ -844,6 +852,113 @@ function renderGoals() {
       </section>
     </section>
   `;
+}
+
+/**
+ * 행복 탭 — 행복한 순간과 좋아하는 것(사용자가 정함, 2026-11-12). 보기만 합니다. 적고 잇는 것은 앱(보관함 → 행복)에서 합니다.
+ *
+ * 순간 옆의 "♡"는 직접 이은 줄(recordLinks)입니다. 좋아하는 것의 순간 수는 이어 두었거나 순간의 글에 이름이 나온 것으로
+ * 앱 `Happy.momentCounts`와 같은 규칙입니다(이름 견주기는 `mentions` — 앱 `Mentions`).
+ */
+function renderHappy() {
+  const items = state.snapshot.items;
+  const links = state.snapshot.recordLinks || [];
+  const moments = items.filter((item) => item.type === "HAPPY_MOMENT").sort((a, b) => b.createdAt - a.createdAt);
+  const likes = items.filter((item) => item.type === "LIKE");
+  const likeBySyncId = new Map(likes.map((like) => [like.syncId, like]));
+  const linkedLikes = (moment) => linkedSyncIds(links, "CONTENT_ITEM", moment.syncId)
+    .map((syncId) => likeBySyncId.get(syncId))
+    .filter(Boolean);
+  const momentCount = (like) => {
+    const linked = new Set(linkedSyncIds(links, "CONTENT_ITEM", like.syncId));
+    return moments.filter((moment) => linked.has(moment.syncId) || mentions(`${moment.title}\n${moment.body}`, like.title)).length;
+  };
+  const days = new Map();
+  for (const moment of moments) {
+    const day = localDay(moment.createdAt);
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(moment);
+  }
+  const groups = likeGroups(likes);
+  app.innerHTML = `
+    <section class="grid two">
+      <section>
+        <h2 class="sectionTitle">행복한 순간 ${moments.length}개</h2>
+        <p class="meta">적고 잇는 것은 앱(보관함 → 행복)에서 합니다.</p>
+        <div class="itemList">
+          ${moments.length ? [...days].map(([day, dayMoments]) => `
+            <article class="item">
+              <h3>${escapeHtml(day)}</h3>
+              ${dayMoments.map((moment) => {
+                const liked = linkedLikes(moment);
+                return `
+                <div>
+                  <p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(moment.body || moment.title)}</p>
+                  ${liked.length ? `<p class="muted">♡ ${liked.map((like) => escapeHtml(like.title)).join(" · ")}</p>` : ""}
+                  ${(moment.imageUris || []).length ? `<div class="attachmentGrid">${moment.imageUris.map(attachmentMedia).join("")}</div>` : ""}
+                </div>`;
+              }).join("")}
+            </article>`).join("") : empty("아직 적어 둔 순간이 없습니다.")}
+        </div>
+      </section>
+      <section>
+        <h2 class="sectionTitle">좋아하는 것 ${likes.length}개</h2>
+        <div class="itemList">
+          ${groups.length ? groups.map(([category, group]) => `
+            <article class="item">
+              <h3>${escapeHtml(category || "갈래 없음")}</h3>
+              <ul>${group.map((like) => {
+                const count = momentCount(like);
+                return `<li><strong>${escapeHtml(like.title)}</strong>${like.body ? ` — ${escapeHtml(like.body)}` : ""}${count ? ` <span class="muted">· 행복한 순간 ${count}개</span>` : ""}</li>`;
+              }).join("")}</ul>
+            </article>`).join("") : empty("아직 적어 둔 좋아하는 것이 없습니다.")}
+        </div>
+      </section>
+    </section>
+  `;
+  hydrateAttachments();
+}
+
+/** [kind, syncId] 기록과 이어진 기록들의 syncId. 줄에는 방향이 없습니다(앱 `RecordLinks.linkedTo`). */
+function linkedSyncIds(links, kind, syncId) {
+  const result = [];
+  for (const link of links) {
+    if (link.fromKind === kind && link.fromSyncId === syncId) result.push(link.toSyncId);
+    else if (link.toKind === kind && link.toSyncId === syncId) result.push(link.fromSyncId);
+  }
+  return [...new Set(result)];
+}
+
+/** 이름을 견주는 꼴 — 띄어쓰기를 지우고 소문자로(앱 `Mentions.key`와 같게). */
+function mentionKey(value) {
+  return String(value || "").replace(/\s+/g, "").toLowerCase();
+}
+
+/** 글에 그 이름이 나왔는지. 두 글자보다 짧은 이름은 보지 않습니다(앱 `Mentions.contains`와 같게). */
+function mentions(textValue, name) {
+  const needle = mentionKey(name);
+  return needle.length >= 2 && mentionKey(textValue).includes(needle);
+}
+
+/** 갈래별로 묶은 좋아하는 것 — 정해 둔 갈래 차례, 직접 적은 갈래는 글자 차례, 갈래 없음은 맨 뒤(앱 `Happy.groupLikes`). */
+function likeGroups(likes) {
+  const groups = new Map();
+  for (const like of likes) {
+    const key = String(like.category || "").trim();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(like);
+  }
+  const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const rank = (key) => (likeCategories.includes(key) ? likeCategories.indexOf(key) : Number.MAX_SAFE_INTEGER);
+  return [...groups.keys()]
+    .sort((a, b) => Number(a === "") - Number(b === "") || rank(a) - rank(b) || compareText(a, b))
+    .map((key) => [key, groups.get(key).sort((a, b) => compareText(String(a.title), String(b.title)))]);
+}
+
+/** 그 시각의 날짜(이 컴퓨터의 시간대). 행복한 순간은 만든 때가 그 순간의 날입니다(앱 `Happy.dateOf`). */
+function localDay(timestamp) {
+  const date = new Date(timestamp || 0);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function renderPrinciples() {
@@ -2043,7 +2158,7 @@ function formatDate(timestamp) {
 }
 
 function labelForType(type) {
-  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념", PRINCIPLE: "원칙", VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델" }[type] || type || "";
+  return { QUOTE: "글귀", IDEA: "아이디어", LINK: "링크", VIDEO: "영상", INBOX: "임시저장소", MEMO: "메모", NOT_TO_DO: "하지 않을 일", CONCEPT: "개념", PRINCIPLE: "원칙", VISION: "이상향", GOAL: "목표", ROLE_MODEL: "롤모델", HAPPY_MOMENT: "행복한 순간", LIKE: "좋아하는 것" }[type] || type || "";
 }
 
 function labelForEvent(type) {

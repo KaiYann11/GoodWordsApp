@@ -343,7 +343,7 @@ fun DiaryScreen(
  * 서버 첨부는 API 키가 필요해서 헤더를 실어 보냅니다. 주소에 키를 붙이면 기록에 남습니다.
  */
 @Composable
-private fun AttachmentThumbnails(
+internal fun AttachmentThumbnails(
     imageUris: List<String>,
     videoUris: List<String>,
     serverUrl: String,

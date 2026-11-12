@@ -29,16 +29,18 @@ class Migration24To25Test {
             before.walkDao().insert(walk)
             // Room이 만든 DB에는 이미 새 표가 있습니다. 24의 모양으로 되돌려 놓아야 CREATE가 실제로 걸리는 길을 시험합니다.
             before.openHelper.writableDatabase.execSQL("DROP TABLE goal_time_logs")
+            before.openHelper.writableDatabase.execSQL("DROP TABLE record_links")
             before.openHelper.writableDatabase.version = 24
         } finally {
             before.close()
         }
 
+        // 지금 판까지 잇습니다. 25→26은 표 하나만 더하므로 여기서 본 것을 건드리지 않습니다.
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_24_25)
+            .addMigrations(AppDatabase.MIGRATION_24_25, AppDatabase.MIGRATION_25_26)
             .build()
         try {
-            assertEquals(25, after.openHelper.writableDatabase.version)
+            assertEquals(26, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(goal, after.contentItemDao().getById(goal.id))
             assertEquals(1, after.contentMemoDao().getByContentItemId(goal.id).size)

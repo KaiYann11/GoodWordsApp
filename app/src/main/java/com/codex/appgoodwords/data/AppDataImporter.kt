@@ -20,7 +20,8 @@ data class AppImportResult(
     val bookReadingLogCount: Int = 0,
     val stepCountCount: Int = 0,
     val walkCount: Int = 0,
-    val goalTimeLogCount: Int = 0
+    val goalTimeLogCount: Int = 0,
+    val recordLinkCount: Int = 0
 )
 
 class AppDataImporter(
@@ -77,6 +78,7 @@ class AppDataImporter(
         val stepCountDao = database.stepCountDao()
         val walkDao = database.walkDao()
         val goalTimeLogDao = database.goalTimeLogDao()
+        val recordLinkDao = database.recordLinkDao()
 
         val previousReminders = database.todoDao().getPendingReminders()
         val deletedSyncIds = incoming.deletions.map { it.syncId }
@@ -100,6 +102,7 @@ class AppDataImporter(
                 stepCountDao.deleteBySyncIds(deletedSyncIds)
                 walkDao.deleteBySyncIds(deletedSyncIds)
                 goalTimeLogDao.deleteBySyncIds(deletedSyncIds)
+                recordLinkDao.deleteBySyncIds(deletedSyncIds)
             }
 
             val localItemIds = itemDao.getAll().associate { it.syncId to it.id }
@@ -195,6 +198,9 @@ class AppDataImporter(
 
             val localGoalTimeIds = goalTimeLogDao.getAll().associate { it.syncId to it.id }
             goalTimeLogDao.insertAll(incoming.goalTimeLogs.map { it.copy(id = localGoalTimeIds[it.syncId] ?: 0L) })
+
+            val localLinkIds = recordLinkDao.getAll().associate { it.syncId to it.id }
+            recordLinkDao.insertAll(incoming.recordLinks.map { it.copy(id = localLinkIds[it.syncId] ?: 0L) })
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 바뀌지 않습니다.
@@ -227,7 +233,8 @@ class AppDataImporter(
             bookReadingLogCount = incoming.bookReadingLogs.size,
             stepCountCount = incoming.stepCounts.size,
             walkCount = incoming.walks.size,
-            goalTimeLogCount = incoming.goalTimeLogs.size
+            goalTimeLogCount = incoming.goalTimeLogs.size,
+            recordLinkCount = incoming.recordLinks.size
         )
     }
 
@@ -250,6 +257,7 @@ class AppDataImporter(
         val ongoingWalks = database.walkDao().getUnfinished()
 
         database.withTransaction {
+            database.recordLinkDao().clearAll()
             database.goalTimeLogDao().clearAll()
             database.walkDao().clearAll()
             database.stepCountDao().clearAll()
@@ -333,6 +341,10 @@ class AppDataImporter(
             if (snapshot.goalTimeLogs.isNotEmpty()) {
                 database.goalTimeLogDao().insertAll(snapshot.goalTimeLogs)
             }
+
+            if (snapshot.recordLinks.isNotEmpty()) {
+                database.recordLinkDao().insertAll(snapshot.recordLinks)
+            }
         }
 
         // 예약은 DB 밖(AlarmManager)에 있어서 함께 지워지지 않는다.
@@ -373,7 +385,8 @@ class AppDataImporter(
             bookReadingLogCount = snapshot.bookReadingLogs.size,
             stepCountCount = snapshot.stepCounts.size,
             walkCount = snapshot.walks.size,
-            goalTimeLogCount = snapshot.goalTimeLogs.size
+            goalTimeLogCount = snapshot.goalTimeLogs.size,
+            recordLinkCount = snapshot.recordLinks.size
         )
     }
 }

@@ -97,6 +97,15 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.SearchKind
+import com.codex.appgoodwords.data.AppSearch
+import com.codex.appgoodwords.data.Happy
+import com.codex.appgoodwords.data.LinkedRecord
+import com.codex.appgoodwords.data.RecordIndex
+import com.codex.appgoodwords.data.RecordKind
+import com.codex.appgoodwords.data.RecordRef
+import com.codex.appgoodwords.ui.screen.HappyDetailScreen
+import com.codex.appgoodwords.ui.screen.HappyMomentList
+import com.codex.appgoodwords.ui.screen.LikeList
 import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.AppLock
 import com.codex.appgoodwords.ui.screen.AppLockScreen
@@ -171,6 +180,11 @@ private enum class AppTab(
     ROUTINE_STATS("루틴 기록"),
     /** 이상향·목표·롤모델 하나. 목표 탭의 카드나 홈의 한 줄에서 엽니다. 하단 바에는 없습니다. */
     GOAL_DETAIL("목표"),
+    /**
+     * 행복한 순간·좋아하는 것 하나(사용자가 정함, 2026-11-12). 보관함 행복 칸의 카드·검색·이어진 기록에서 엽니다.
+     * 하단 바에는 없습니다.
+     */
+    HAPPY_DETAIL("행복"),
     /** AI 돌아보기는 홈 카드에서 엽니다. 하단 바에 자리가 없습니다. */
     GROWTH("AI 돌아보기"),
     /**
@@ -219,6 +233,8 @@ private data class AppDestination(
     val statsRoutineId: Long? = null,
     /** 펼친 이상향·목표·롤모델. */
     val goalId: Long? = null,
+    /** 펼친 행복한 순간·좋아하는 것. */
+    val happyId: Long? = null,
     /** 지도에 펼친 걷기. */
     val walkSyncId: String? = null
 )
@@ -247,6 +263,8 @@ fun AppGoodWordsApp(
         RoutineStatsCalculator.buildAll(routines, routineChecks, LocalDate.now())
     }
     val contentMemos by viewModel.contentMemos.collectAsStateWithLifecycle()
+    val recordLinks by viewModel.recordLinks.collectAsStateWithLifecycle()
+    val happyDayDigest by viewModel.happyDayDigest.collectAsStateWithLifecycle()
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
     val walks by viewModel.walks.collectAsStateWithLifecycle()
@@ -367,6 +385,35 @@ fun AppGoodWordsApp(
     val selectedItem = allItems.firstOrNull { it.id == destination.selectedItemId }
     val editingItem = allItems.firstOrNull { it.id == destination.editingItemId }
     val canNavigateBack = navStack.size > 1
+
+    // 보관함 "행복" 칸과 이어진 기록(사용자가 정함, 2026-11-12). 저장하지 않고 기록이 바뀌면 다시 셉니다.
+    val recordIndex = remember(allItems, diaries, books, routines, todos, walks, diaryLocked) {
+        RecordIndex(
+            items = allItems,
+            diaries = diaries,
+            books = books,
+            routines = routines,
+            todos = todos,
+            walks = walks,
+            diaryLocked = diaryLocked
+        )
+    }
+    val likeItems = remember(allItems) { allItems.filter { it.type == ContentType.LIKE } }
+    val momentLikes = remember(allItems, recordLinks) { Happy.likesByMoment(allItems, recordLinks) }
+    val likeMomentCounts = remember(allItems, recordIndex, recordLinks) { Happy.momentCounts(allItems, recordIndex, recordLinks) }
+    // 잇기 창의 찾기. 검색 화면과 같은 규칙이고, 잠긴 일기는 찾지 않습니다.
+    val linkSearch: (String) -> List<LinkedRecord> = { query ->
+        AppSearch.search(
+            query = query,
+            items = allItems,
+            contentMemos = contentMemos,
+            diaries = if (diaryLocked) emptyList() else diaries,
+            todos = todos,
+            books = books,
+            routines = routines,
+            routineMemos = routineMemos
+        ).hits.mapNotNull { hit -> recordIndex.refOf(hit)?.let(recordIndex::resolve) }
+    }
 
     // AI 요청은 오래 걸리고 값이 듭니다. 도는 중인지와 왜 실패했는지를 화면이 들고 있어야
     // 사용자가 같은 것을 두 번 부르지 않습니다.
@@ -552,6 +599,23 @@ fun AppGoodWordsApp(
     ) {
         viewModel.recordContentViewed(itemId, trigger)
         pushRoute(detailRoute(tab, itemId))
+    }
+
+    /** 이어진 기록을 그 기록이 사는 화면으로 엽니다. 보관함 기록은 종류에 따라 행복·목표·상세 화면입니다. */
+    fun openLinked(record: LinkedRecord) {
+        when (RecordKind.fromNameOrNull(record.ref.kind)) {
+            RecordKind.CONTENT_ITEM -> when {
+                record.contentType?.isHappy == true -> pushRoute(happyRoute(record.id))
+                record.contentType?.isGoal == true -> pushRoute(goalRoute(record.id))
+                else -> openItemDetail(AppTab.LIBRARY, record.id)
+            }
+            RecordKind.DIARY -> pushRoute(focusRoute(SearchKind.DIARY, record.id))
+            RecordKind.BOOK -> pushRoute(focusRoute(SearchKind.BOOK, record.id))
+            RecordKind.ROUTINE -> pushRoute(focusRoute(SearchKind.ROUTINE, record.id))
+            RecordKind.TODO -> pushRoute(focusRoute(SearchKind.TODO, record.id))
+            RecordKind.WALK -> pushRoute(walkRoute(record.ref.syncId))
+            null -> Unit
+        }
     }
 
     /**
@@ -843,6 +907,11 @@ fun AppGoodWordsApp(
                                     .firstOrNull { it.goal.id == destination.goalId }
                                     ?.let { GoalTab.of(it.goal.type).label }
                                     ?: AppTab.GOAL_DETAIL.title
+                                // 행복한 순간인지 좋아하는 것인지가 제목입니다.
+                                currentTab == AppTab.HAPPY_DETAIL -> allItems
+                                    .firstOrNull { it.id == destination.happyId }
+                                    ?.type?.label
+                                    ?: AppTab.HAPPY_DETAIL.title
                                 // 설정의 갈래 안에서는 그 갈래 이름이 제목입니다.
                                 else -> settingsSection?.takeIf { currentTab == AppTab.SETTINGS }?.title
                                     ?: currentTab.title
@@ -932,6 +1001,7 @@ fun AppGoodWordsApp(
                                                 AppTab.LIBRARY -> Icons.AutoMirrored.Outlined.LibraryBooks
                                                 AppTab.ROUTINE -> Icons.Outlined.CheckCircle
                                                 AppTab.GOALS, AppTab.GOAL_DETAIL -> Icons.Outlined.Explore
+                                                AppTab.HAPPY_DETAIL -> Icons.AutoMirrored.Outlined.LibraryBooks
                                                 AppTab.TODO -> Icons.AutoMirrored.Outlined.ListAlt
                                                 AppTab.DIARY -> Icons.Outlined.EditNote
                                                 AppTab.ADD -> Icons.Outlined.Add
@@ -1164,6 +1234,7 @@ fun AppGoodWordsApp(
                             onOpenMemory = { memory ->
                                 when (memory.kind) {
                                     SearchKind.QUOTE -> openItemDetail(AppTab.HOME, memory.id)
+                                    SearchKind.HAPPY_MOMENT -> pushRoute(happyRoute(memory.id))
                                     else -> pushRoute(focusRoute(memory.kind, memory.id))
                                 }
                             }
@@ -1174,6 +1245,36 @@ fun AppGoodWordsApp(
                             inboxCount = allItems.count { it.type == ContentType.INBOX },
                             memoCount = allItems.count { it.type == ContentType.MEMO },
                             conceptCount = allItems.count { it.type == ContentType.CONCEPT },
+                            happyMomentCount = allItems.count { it.type == ContentType.HAPPY_MOMENT },
+                            likeCount = likeItems.size,
+                            happyMomentContent = {
+                                HappyMomentList(
+                                    moments = allItems.filter { it.type == ContentType.HAPPY_MOMENT },
+                                    likes = likeItems,
+                                    likesByMoment = momentLikes,
+                                    onOpen = { id -> pushRoute(happyRoute(id)) },
+                                    onSave = { text, date, images, likeIds ->
+                                        viewModel.saveHappyMoment(0L, text, date, images, likeIds)
+                                    },
+                                    onCreateLike = { name -> viewModel.saveLike(0L, name, "", "", emptyList()) },
+                                    onMessage = { message -> coroutineScope.launch { snackbarHostState.showSnackbar(message) } },
+                                    serverUrl = serverSyncSettings.serverUrl,
+                                    apiKey = serverSyncSettings.apiKey
+                                )
+                            },
+                            likeContent = {
+                                LikeList(
+                                    likes = likeItems,
+                                    momentCounts = likeMomentCounts,
+                                    onOpen = { id -> pushRoute(happyRoute(id)) },
+                                    onSave = { name, category, why, images ->
+                                        viewModel.saveLike(0L, name, category, why, images)
+                                    },
+                                    onMessage = { message -> coroutineScope.launch { snackbarHostState.showSnackbar(message) } },
+                                    serverUrl = serverSyncSettings.serverUrl,
+                                    apiKey = serverSyncSettings.apiKey
+                                )
+                            },
                             inboxContent = {
                                 TextCollectionScreen(
                                     items = allItems.filter { it.type == ContentType.INBOX },
@@ -1224,6 +1325,8 @@ fun AppGoodWordsApp(
                                 SearchKind.CONCEPT -> LibraryTab.CONCEPT
                                 SearchKind.INBOX -> LibraryTab.INBOX
                                 SearchKind.MEMO -> LibraryTab.MEMO
+                                SearchKind.HAPPY_MOMENT -> LibraryTab.HAPPY_MOMENT
+                                SearchKind.LIKE -> LibraryTab.LIKE
                                 else -> null
                             },
                             requestKey = destination.focusId,
@@ -1566,6 +1669,9 @@ fun AppGoodWordsApp(
                                 } else if (hit.kind == SearchKind.GOAL) {
                                     // 목표는 목록에서 짚어 주기보다 그 기록을 바로 엽니다. 되새긴 기록까지 거기 있습니다.
                                     pushRoute(goalRoute(hit.id))
+                                } else if (hit.kind == SearchKind.HAPPY_MOMENT || hit.kind == SearchKind.LIKE) {
+                                    // 행복 칸의 기록도 그 기록을 바로 엽니다. 이어진 기록이 거기 있습니다.
+                                    pushRoute(happyRoute(hit.id))
                                 } else {
                                     // 나머지는 각자 사는 탭으로 데려가 그 항목을 짚어 줍니다.
                                     pushRoute(focusRoute(hit.kind, hit.id))
@@ -1630,6 +1736,62 @@ fun AppGoodWordsApp(
                                     onOpenQuote = { quote -> openItemDetail(AppTab.GOALS, quote.id) },
                                     onOpenRoutines = { selectTab(AppTab.ROUTINE) },
                                     onMessage = { message -> coroutineScope.launch { snackbarHostState.showSnackbar(message) } }
+                                )
+                            }
+                        }
+
+                        AppTab.HAPPY_DETAIL -> {
+                            val item = allItems.firstOrNull { it.id == destination.happyId && it.type.isHappy }
+                            if (item == null) {
+                                // 막 적은 것은 목록이 따라오는 데 잠깐 걸립니다. 끝내 없으면(다른 기기에서 지움) 돌아갑니다.
+                                LaunchedEffect(destination.happyId) {
+                                    delay(GOAL_APPEAR_GRACE_MS)
+                                    popRoute()
+                                }
+                            } else {
+                                val ref = remember(item.syncId) { RecordRef.of(item) }
+                                val isMoment = item.type == ContentType.HAPPY_MOMENT
+                                val momentDate = remember(item.createdAt) { Happy.dateOf(item.createdAt) }
+                                // "같은 날"은 그날 요약과 같은 셈입니다(뷰모델이 셉니다). 화면을 떠나면 날을 비웁니다.
+                                DisposableEffect(isMoment, momentDate) {
+                                    viewModel.showHappyDay(if (isMoment) momentDate else null)
+                                    onDispose { viewModel.showHappyDay(null) }
+                                }
+                                val connections = remember(recordIndex, recordLinks, ref) {
+                                    recordIndex.connectionsOf(ref, recordLinks)
+                                }
+                                HappyDetailScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    item = item,
+                                    connections = connections,
+                                    likes = likeItems,
+                                    linkedLikeSyncIds = momentLikes[item.syncId].orEmpty().map { it.syncId },
+                                    sameDay = happyDayDigest,
+                                    sameDayMoments = if (isMoment) {
+                                        allItems.filter {
+                                            it.type == ContentType.HAPPY_MOMENT && it.id != item.id &&
+                                                Happy.dateOf(it.createdAt) == momentDate
+                                        }
+                                    } else {
+                                        emptyList()
+                                    },
+                                    onSaveMoment = { text, date, images, likeIds ->
+                                        viewModel.saveHappyMoment(item.id, text, date, images, likeIds)
+                                    },
+                                    onSaveLike = { name, category, why, images ->
+                                        viewModel.saveLike(item.id, name, category, why, images)
+                                    },
+                                    onCreateLike = { name -> viewModel.saveLike(0L, name, "", "", emptyList()) },
+                                    onDelete = { viewModel.deleteContent(item.id).onSuccess { popRoute() } },
+                                    onOpenLinked = { record -> openLinked(record) },
+                                    onOpenMoment = { id -> pushRoute(happyRoute(id)) },
+                                    onLink = { other -> viewModel.linkRecords(ref, other) },
+                                    onUnlink = { other -> viewModel.unlinkRecords(ref, other) },
+                                    searchRecords = linkSearch,
+                                    onOpenDay = { date -> viewModel.openDay(date) },
+                                    onMessage = { message -> coroutineScope.launch { snackbarHostState.showSnackbar(message) } },
+                                    serverUrl = serverSyncSettings.serverUrl,
+                                    apiKey = serverSyncSettings.apiKey
                                 )
                             }
                         }
@@ -1890,6 +2052,7 @@ fun AppGoodWordsApp(
                             onOpenSource = { shot ->
                                 when (shot.source) {
                                     SearchKind.QUOTE -> openItemDetail(AppTab.GALLERY, shot.sourceId)
+                                    SearchKind.HAPPY_MOMENT, SearchKind.LIKE -> pushRoute(happyRoute(shot.sourceId))
                                     else -> pushRoute(focusRoute(shot.source, shot.sourceId))
                                 }
                             }
@@ -2241,6 +2404,9 @@ private fun routineStatsRoute(routineId: Long): String = "routine-stats:$routine
 /** 이상향·목표·롤모델 하나. 목표 탭의 카드나 홈의 한 줄에서 엽니다. */
 private fun goalRoute(goalId: Long): String = "goal:$goalId"
 
+/** 행복한 순간·좋아하는 것 하나. 보관함 행복 칸의 카드·검색·이어진 기록에서 엽니다. */
+private fun happyRoute(itemId: Long): String = "happy:$itemId"
+
 /** 걷기 하나를 지도에 펼칩니다. 기기마다 같은 syncId로 가리킵니다(콜론이 들어가지 않습니다). */
 private fun walkRoute(syncId: String): String = "walk:$syncId"
 
@@ -2255,6 +2421,7 @@ private fun focusRoute(kind: SearchKind, id: Long): String = "focus:${kind.name}
 /** 그 종류를 어디서 보는지. 할 일과 루틴은 같은 탭 안에서 나뉩니다. */
 private fun tabOf(kind: SearchKind): AppTab = when (kind) {
     SearchKind.QUOTE, SearchKind.MEMO, SearchKind.INBOX, SearchKind.CONCEPT -> AppTab.LIBRARY
+    SearchKind.HAPPY_MOMENT, SearchKind.LIKE -> AppTab.LIBRARY
     SearchKind.BOOK -> AppTab.LIBRARY
     SearchKind.DIARY -> AppTab.DIARY
     SearchKind.TODO -> AppTab.TODO
@@ -2295,6 +2462,10 @@ private fun parseRoute(route: String): AppDestination {
         "goal" -> AppDestination(
             tab = AppTab.GOAL_DETAIL,
             goalId = parts.getOrNull(1)?.toLongOrNull()
+        )
+        "happy" -> AppDestination(
+            tab = AppTab.HAPPY_DETAIL,
+            happyId = parts.getOrNull(1)?.toLongOrNull()
         )
         "routine-stats" -> AppDestination(
             tab = AppTab.ROUTINE_STATS,

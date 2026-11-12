@@ -31,6 +31,8 @@ data class AppDataSnapshot(
     val walks: List<WalkEntity> = emptyList(),
     /** 목표에 들인 시간. 재는 중인 타이머는 담지 않습니다 — 남기기를 눌러야 기록입니다. */
     val goalTimeLogs: List<GoalTimeLogEntity> = emptyList(),
+    /** 기록끼리 이은 줄. 방향이 없고 양쪽 기록을 syncId로 가리킵니다. */
+    val recordLinks: List<RecordLinkEntity> = emptyList(),
     /**
      * 서버가 알려 준 리비전 번호. 다음에 "이 뒤에 바뀐 것만" 달라고 할 때 씁니다.
      * 파일로 주고받을 때는 0입니다.
@@ -54,14 +56,16 @@ data class AppDataSnapshot(
     val recordCount: Int
         get() = items.size + events.size + routines.size + routineChecks.size + routineMemos.size +
             contentMemos.size + diaries.size + todos.size + books.size + growthReports.size +
-            moodLogs.size + bookReadingLogs.size + stepCounts.size + walks.size + goalTimeLogs.size
+            moodLogs.size + bookReadingLogs.size + stepCounts.size + walks.size + goalTimeLogs.size +
+            recordLinks.size
 }
 
 object AppDataJson {
-    // 목표에 들인 시간(`goalTimeLogs`)이 생겼습니다(사용자가 정함, 2026-11-08). 옛 서버는 몰라 받아도 버리므로 형식을
-    // 올립니다. Room은 표 하나가 늘어 25입니다. 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과
-    // 가르려고 올렸습니다(2026-10-29).
-    const val schemaVersion: Int = 26
+    // 행복한 순간·좋아하는 것(보관함 종류 `HAPPY_MOMENT`·`LIKE`)과 기록끼리 이은 줄(`recordLinks`)이 생겼습니다(사용자가 정함,
+    // 2026-11-12). 옛 앱은 모르는 종류를 글귀로 바꿔 읽고(아래 `toEnumOrDefault`), 옛 서버는 줄을 몰라 받아도 버리므로 형식을
+    // 올립니다. Room은 표 하나가 늘어 26입니다. 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날
+    // 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 27
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -180,6 +184,13 @@ object AppDataJson {
                 snapshot.goalTimeLogs.forEach { log -> put(log.toJson()) }
             }
         )
+        .put("recordLinkCount", snapshot.recordLinks.size)
+        .put(
+            "recordLinks",
+            JSONArray().apply {
+                snapshot.recordLinks.forEach { link -> put(link.toJson()) }
+            }
+        )
 
     fun fromJsonText(jsonText: String): AppDataSnapshot {
         val payload = JSONObject(jsonText)
@@ -204,6 +215,7 @@ object AppDataJson {
             stepCounts = payload.optJSONArray("stepCounts").toStepCounts(),
             walks = payload.optJSONArray("walks").toWalks(),
             goalTimeLogs = payload.optJSONArray("goalTimeLogs").toGoalTimeLogs(),
+            recordLinks = payload.optJSONArray("recordLinks").toRecordLinks(),
             serverRev = payload.optLong("rev", 0L),
             serverEpoch = payload.optLong("epoch", 0L),
             partial = payload.optBoolean("partial", false)
@@ -417,6 +429,45 @@ object AppDataJson {
                         minutes = minutes,
                         note = log.optString("note"),
                         loggedAt = log.optLong("loggedAt", 0L).takeIf { it > 0L } ?: createdAt,
+                        createdAt = createdAt
+                    )
+                )
+            }
+        }
+    }
+
+    private fun RecordLinkEntity.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("syncId", syncId)
+        .put("updatedAt", updatedAt)
+        .put("fromKind", fromKind)
+        .put("fromSyncId", fromSyncId)
+        .put("toKind", toKind)
+        .put("toSyncId", toSyncId)
+        .put("createdAt", createdAt)
+
+    private fun JSONArray?.toRecordLinks(): List<RecordLinkEntity> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                val link = optJSONObject(index) ?: continue
+                val fromKind = RecordKind.fromNameOrNull(link.optString("fromKind")) ?: continue
+                val toKind = RecordKind.fromNameOrNull(link.optString("toKind")) ?: continue
+                val fromSyncId = link.optString("fromSyncId").trim()
+                val toSyncId = link.optString("toSyncId").trim()
+                // 어느 기록인지 모르는 끝이 있거나 제 자신을 이은 줄은 보여 줄 것이 없습니다(서버 `normalizeRecordLink`와 같게).
+                if (fromSyncId.isBlank() || toSyncId.isBlank()) continue
+                if (fromKind == toKind && fromSyncId == toSyncId) continue
+                val createdAt = link.optLong("createdAt", System.currentTimeMillis())
+                add(
+                    RecordLinkEntity(
+                        id = link.optLong("id", 0L),
+                        syncId = SyncIdentity.orNew(link.optString("syncId")),
+                        updatedAt = link.optLong("updatedAt", 0L).takeIf { it > 0L } ?: createdAt,
+                        fromKind = fromKind.name,
+                        fromSyncId = fromSyncId,
+                        toKind = toKind.name,
+                        toSyncId = toSyncId,
                         createdAt = createdAt
                     )
                 )

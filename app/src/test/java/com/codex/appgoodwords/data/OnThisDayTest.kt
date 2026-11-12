@@ -56,6 +56,24 @@ class OnThisDayTest {
     }
 
     @Test
+    fun aHappyMomentComesBackAsItselfAndALikeDoesNot() {
+        // 행복한 순간은 그날로 적은 것이라 그날의 기억입니다. 좋아하는 것은 늘 거기 있는 것이라 기억이 아닙니다.
+        val moment = item(id = 8, createdAt = "2025-08-26").copy(
+            type = ContentType.HAPPY_MOMENT,
+            title = "퇴근길 노을이 너무 예뻤다",
+            body = "퇴근길 노을이 너무 예뻤다\n하늘이 분홍색이었다"
+        )
+        val like = item(id = 9, createdAt = "2025-08-26").copy(type = ContentType.LIKE, title = "노을", body = "")
+
+        val memory = find(items = listOf(moment, like)).single()
+
+        assertEquals(SearchKind.HAPPY_MOMENT, memory.kind)
+        assertEquals(8L, memory.id)
+        // 이름이 첫 줄이라 본문에는 그 뒤만 둡니다.
+        assertEquals("하늘이 분홍색이었다", memory.body)
+    }
+
+    @Test
     fun theNearestYearComesFirstAndDiariesLeadWithinAYear() {
         val memories = find(
             diaries = listOf(diary(id = 1, date = "2025-08-26", body = "작년 일기")),

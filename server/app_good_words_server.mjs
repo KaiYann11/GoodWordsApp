@@ -9,9 +9,10 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 목표에 들인 시간(goalTimeLogs)이 생겼습니다(사용자가 정함, 2026-11-08). 옛 앱·서버는 몰라 받아도 버리므로 형식을
-// 올립니다. 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-const schemaVersion = 26;
+// 행복한 순간·좋아하는 것(보관함 종류 HAPPY_MOMENT·LIKE)과 기록끼리 이은 줄(recordLinks)이 생겼습니다(사용자가 정함,
+// 2026-11-12). 옛 앱은 모르는 종류를 글귀로 바꿔 읽고, 옛 서버는 줄을 몰라 받아도 버리므로 형식을 올립니다. 26은 목표에
+// 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 27;
 /** 한 번에 남길 수 있는 들인 시간(분). 앱 `GoalTime.MAX_MINUTES`와 같다 — 타이머를 잊어도 하루를 넘겨 쌓이지 않게. */
 const maxGoalTimeMinutes = 24 * 60;
 /** 시간 기록에 적은 글(과정)의 길이 한도. 하루치 일기보다 길 까닭이 없다. */
@@ -71,11 +72,20 @@ for (const [mime, ext] of attachmentExtensions) {
 
 /** 보관함에 담기는 종류. 앱 `ContentType`과 같은 이름이어야 한다. */
 // 이상향·목표·롤모델(VISION·GOAL·ROLE_MODEL)은 목표 탭의 기록입니다. 23부터 들어왔습니다.
+// 행복한 순간·좋아하는 것(HAPPY_MOMENT·LIKE)은 보관함 행복 칸의 기록입니다. 27부터 들어왔습니다.
 const contentTypes = new Set([
   "QUOTE", "LINK", "VIDEO", "IDEA", "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL",
+  "HAPPY_MOMENT", "LIKE",
 ]);
 /** 읽음으로 세지 않는 종류. 앱 `ContentType.personalTypes`와 같아야 한다. */
-const personalContentTypes = new Set(["INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL"]);
+const personalContentTypes = new Set([
+  "INBOX", "MEMO", "NOT_TO_DO", "CONCEPT", "PRINCIPLE", "VISION", "GOAL", "ROLE_MODEL", "HAPPY_MOMENT", "LIKE",
+]);
+/**
+ * 이을 수 있는 기록의 종류(앱 `RecordKind`와 같아야 한다). 이름은 삭제 표식의 종류 이름과 같다.
+ * 모르는 종류의 줄은 버린다.
+ */
+const recordKinds = new Set(["CONTENT_ITEM", "DIARY", "BOOK", "ROUTINE", "TODO", "WALK"]);
 /** 목표 탭의 기록. 제목만 있으면 되고, 이어 둔 루틴(linkedRoutineSyncIds)을 들고 다닙니다. */
 const goalContentTypes = new Set(["VISION", "GOAL", "ROLE_MODEL"]);
 const eventTypes = new Set(["SURFACED", "SHOWN", "CONFIRMED"]);
@@ -105,6 +115,7 @@ const deletionEntityTypes = new Set([
   "STEP_COUNT",
   "WALK",
   "GOAL_TIME_LOG",
+  "RECORD_LINK",
 ]);
 
 const bookStatuses = new Set(["READING", "FINISHED"]);
@@ -1319,6 +1330,7 @@ const revisionedCollections = [
   "stepCounts",
   "walks",
   "goalTimeLogs",
+  "recordLinks",
 ];
 
 async function withDb(mutator) {
@@ -1406,6 +1418,7 @@ function emptyDb() {
     stepCounts: [],
     walks: [],
     goalTimeLogs: [],
+    recordLinks: [],
   };
 }
 
@@ -1433,6 +1446,7 @@ function normalizeDb(db) {
     stepCounts: normalizeList(db?.stepCounts, normalizeStepCount),
     walks: normalizeList(db?.walks, normalizeWalk),
     goalTimeLogs: normalizeList(db?.goalTimeLogs, normalizeGoalTimeLog),
+    recordLinks: normalizeList(db?.recordLinks, normalizeRecordLink),
   };
 }
 
@@ -1496,6 +1510,7 @@ function snapshot(db, since = 0, epoch = null) {
     stepCountCount: normalized.stepCounts.length,
     walkCount: normalized.walks.length,
     goalTimeLogCount: normalized.goalTimeLogs.length,
+    recordLinkCount: normalized.recordLinks.length,
     settings: normalized.settings,
     settingsUpdatedAt: normalized.settingsUpdatedAt,
     items: only(sortDesc(normalized.items, "createdAt")),
@@ -1515,6 +1530,7 @@ function snapshot(db, since = 0, epoch = null) {
     stepCounts: only(sortDesc(normalized.stepCounts, "updatedAt")),
     walks: only(sortDesc(normalized.walks, "startedAt")),
     goalTimeLogs: only(sortDesc(normalized.goalTimeLogs, "loggedAt")),
+    recordLinks: only(sortDesc(normalized.recordLinks, "createdAt")),
   };
 }
 
@@ -1545,6 +1561,7 @@ function mergeSnapshot(db, payload) {
     stepCounts: payload?.stepCounts,
     walks: payload?.walks,
     goalTimeLogs: payload?.goalTimeLogs,
+    recordLinks: payload?.recordLinks,
   });
   const current = normalizeDb(db);
 
@@ -1573,6 +1590,7 @@ function mergeSnapshot(db, payload) {
   db.stepCounts = mergeMutable(current.stepCounts, incoming.stepCounts, deletedAt);
   db.walks = mergeMutable(current.walks, incoming.walks, deletedAt);
   db.goalTimeLogs = mergeMutable(current.goalTimeLogs, incoming.goalTimeLogs, deletedAt);
+  db.recordLinks = mergeMutable(current.recordLinks, incoming.recordLinks, deletedAt);
   db.deletions = pruneDeletions(deletions);
 
   if (incoming.settingsUpdatedAt > current.settingsUpdatedAt) {
@@ -1613,6 +1631,26 @@ function deduplicate(db) {
   const stepCounts = resolveDuplicates(db.stepCounts, stepCountFingerprint, moreSteps);
   const walks = resolveDuplicates(db.walks, walkFingerprint);
   const goalTimeLogs = resolveDuplicates(db.goalTimeLogs, goalTimeLogFingerprint);
+  // 이은 줄은 두 끝을 먼저 남은 기록으로 옮긴 뒤에 견준다. 두 기록이 하나로 합쳐졌으면 같은 두 기록을 잇는 줄이 둘이 될 수
+  // 있고, 제 자신을 잇게 된 줄은 보여 줄 것이 없어 버린다(표식을 남긴다). 앱 SyncDeduplicator와 같은 차례여야 한다.
+  const survivorsByKind = new Map([
+    ["CONTENT_ITEM", items.movedTo],
+    ["DIARY", diaries.movedTo],
+    ["BOOK", books.movedTo],
+    ["ROUTINE", routines.movedTo],
+    ["TODO", todos.movedTo],
+    ["WALK", walks.movedTo],
+  ]);
+  const repoint = (kind, id) => survivorsByKind.get(kind)?.get(id) || id;
+  const selfLinks = [];
+  const repointedLinks = db.recordLinks
+    .map((link) => ({ ...link, fromSyncId: repoint(link.fromKind, link.fromSyncId), toSyncId: repoint(link.toKind, link.toSyncId) }))
+    .filter((link) => {
+      const self = link.fromKind === link.toKind && link.fromSyncId === link.toSyncId;
+      if (self) selfLinks.push(link.syncId);
+      return !self;
+    });
+  const recordLinks = resolveDuplicates(repointedLinks, recordLinkFingerprint);
 
   // 사라진 책을 가리키던 글귀는 남은 책으로 옮겨 붙인다. 안 옮기면 출처를 잃는다.
   // 목표에 이어 둔 루틴도 남은 루틴으로 옮긴다. 둘이 하나로 합쳐졌으면 한 번만 남긴다(앱 SyncDeduplicator와 같게).
@@ -1646,6 +1684,7 @@ function deduplicate(db) {
     ...log,
     goalSyncId: items.movedTo.get(log.goalSyncId) || log.goalSyncId,
   }));
+  db.recordLinks = recordLinks.kept;
 
   // 합쳐서 사라진 쪽에 삭제 표식을 남긴다.
   // 전체를 주고받을 때는 결과만 보면 됐지만, 바뀐 것만 받는 기기는 사라졌다는 사실을 따로 들어야 한다.
@@ -1662,6 +1701,8 @@ function deduplicate(db) {
     [stepCounts.movedTo, "STEP_COUNT"],
     [walks.movedTo, "WALK"],
     [goalTimeLogs.movedTo, "GOAL_TIME_LOG"],
+    [recordLinks.movedTo, "RECORD_LINK"],
+    [new Map(selfLinks.map((syncId) => [syncId, syncId])), "RECORD_LINK"],
   ]) {
     for (const syncId of gone.keys()) {
       if (db.deletions.some((entry) => entry.syncId === syncId)) continue;
@@ -1740,6 +1781,8 @@ function itemFingerprint(item) {
     norm(item.sourceUrl),
     item.imageUris.join(","),
     item.videoUris.join(","),
+    // 행복한 순간은 그때까지 본다. 다른 날 같은 글로 적은 두 순간("가족과 저녁")은 다른 기록이다(앱과 같게).
+    ...(item.type === "HAPPY_MOMENT" ? [String(item.createdAt)] : []),
   ].join("|");
 }
 
@@ -1812,6 +1855,19 @@ function walkFingerprint(walk) {
 function goalTimeLogFingerprint(log) {
   const goal = text(log.goalSyncId);
   return goal && log.loggedAt > 0 ? `${goal}|${log.loggedAt}` : "";
+}
+
+/**
+ * 같은 두 기록을 잇는 줄이면 같은 줄이다. 줄에는 방향이 없어 두 끝을 글자 차례로 늘어놓는다.
+ * 앱 `RecordLinks.fingerprint`와 같아야 한다(어긋나면 두 기기가 끝없이 서로를 고친다).
+ */
+function recordLinkFingerprint(link) {
+  const from = text(link.fromSyncId);
+  const to = text(link.toSyncId);
+  if (!from || !to) return "";
+  const a = `${text(link.fromKind)}:${from}`;
+  const b = `${text(link.toKind)}:${to}`;
+  return a <= b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 /**
@@ -1920,6 +1976,8 @@ function reindex(db) {
   db.walks = withStableIds(db.walks);
   // 목표에 들인 시간은 그 목표 안에서만 보인다. 붙을 목표가 없으면 어디에도 그릴 수 없다(글귀 메모와 같다).
   db.goalTimeLogs = withStableIds(db.goalTimeLogs.filter((log) => itemIds.has(log.goalSyncId)));
+  // 이은 줄은 양쪽 기록을 syncId로만 가리켜 번호만 보면 된다. 지운 기록을 가리키는 줄도 버리지 않는다 — 화면이 뺀다(앱과 같게).
+  db.recordLinks = withStableIds(db.recordLinks);
 
   return db;
 }
@@ -2054,6 +2112,7 @@ function replaceSnapshot(db, payload) {
   db.goalTimeLogs = Array.isArray(payload.goalTimeLogs)
     ? payload.goalTimeLogs.map(normalizeGoalTimeLog).filter(Boolean)
     : [];
+  db.recordLinks = Array.isArray(payload.recordLinks) ? payload.recordLinks.map(normalizeRecordLink).filter(Boolean) : [];
   return db;
 }
 
@@ -2781,6 +2840,32 @@ function normalizeGoalTimeLog(log) {
     minutes,
     note: (typeof log.note === "string" ? log.note : "").slice(0, maxGoalTimeNoteLength),
     loggedAt: integer(log.loggedAt, 0) > 0 ? integer(log.loggedAt, 0) : createdAt,
+    createdAt,
+  };
+}
+
+/**
+ * 두 기록을 잇는 줄 하나(사용자가 정함, 2026-11-12). 모르는 종류이거나, 어느 기록인지 모르는 끝이 있거나, 제 자신을
+ * 이은 줄은 버린다(앱 `AppDataJson.toRecordLinks`와 같게).
+ */
+function normalizeRecordLink(link) {
+  if (!link) return null;
+  const fromKind = text(link.fromKind);
+  const toKind = text(link.toKind);
+  const fromSyncId = text(link.fromSyncId);
+  const toSyncId = text(link.toSyncId);
+  if (!recordKinds.has(fromKind) || !recordKinds.has(toKind)) return null;
+  if (!fromSyncId || !toSyncId) return null;
+  if (fromKind === toKind && fromSyncId === toSyncId) return null;
+  const createdAt = integer(link.createdAt, nowMs());
+  return {
+    id: positiveInt(link.id),
+    syncId: syncId(link.syncId),
+    updatedAt: integer(link.updatedAt, createdAt),
+    fromKind,
+    fromSyncId,
+    toKind,
+    toSyncId,
     createdAt,
   };
 }

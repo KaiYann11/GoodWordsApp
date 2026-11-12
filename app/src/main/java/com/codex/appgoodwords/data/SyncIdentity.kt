@@ -31,7 +31,8 @@ enum class SyncEntityType {
     BOOK_READING_LOG,
     STEP_COUNT,
     WALK,
-    GOAL_TIME_LOG;
+    GOAL_TIME_LOG,
+    RECORD_LINK;
 
     companion object {
         fun fromNameOrNull(value: String?): SyncEntityType? =

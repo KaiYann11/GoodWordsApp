@@ -21,7 +21,7 @@ data class OnThisDayMemory(
 }
 
 /**
- * 지난 해 오늘 남긴 일기와 담아 둔 글귀를 찾아 줍니다.
+ * 지난 해 오늘 남긴 일기와 담아 둔 글귀, 적어 둔 행복한 순간을 찾아 줍니다.
  *
  * 일기와 글귀는 쌓일수록 값이 커지는 기록인데, 지금까지 화면은 최근 이레와 이번 달만
  * 보여 주었습니다. 오래 쓴 사람에게만 생기는 되돌림이 없었습니다.
@@ -57,18 +57,21 @@ object OnThisDay {
         }
 
         val fromItems = items
-            // 기준(하지 않을 일·원칙)과 개념, 목표 탭의 기록(이상향·목표·롤모델)은 뺍니다. 늘 거기 있는 것이라,
+            // 기준(하지 않을 일·원칙)과 개념, 목표 탭의 기록(이상향·목표·롤모델), 좋아하는 것은 뺍니다. 늘 거기 있는 것이라,
             // 담은 날을 되짚어도 "지난해 오늘"의 기억이 되지 않습니다.
-            .filter { it.type !in listOf(ContentType.NOT_TO_DO, ContentType.CONCEPT, ContentType.PRINCIPLE) && !it.type.isGoal }
+            .filter { it.type !in listOf(ContentType.NOT_TO_DO, ContentType.CONCEPT, ContentType.PRINCIPLE, ContentType.LIKE) && !it.type.isGoal }
             .mapNotNull { item ->
             val date = toDate(item.createdAt, zoneId)
             val yearsAgo = yearsAgoOf(date, today) ?: return@mapNotNull null
+            // 행복한 순간은 그날로 적은 것이라 그대로 그날의 기억입니다(사용자가 정함, 2026-11-13). 글귀가 아니라 그 순간의 화면으로 엽니다.
+            // 이름이 글의 첫 줄이라, 본문에는 그 뒤만 둡니다(같은 말이 두 번 보이지 않게).
+            val isMoment = item.type == ContentType.HAPPY_MOMENT
             OnThisDayMemory(
-                kind = SearchKind.QUOTE,
+                kind = if (isMoment) SearchKind.HAPPY_MOMENT else SearchKind.QUOTE,
                 id = item.id,
                 date = date,
-                title = item.title.ifBlank { "그날 담은 글귀" },
-                body = item.body,
+                title = item.title.ifBlank { if (isMoment) "그날의 행복한 순간" else "그날 담은 글귀" },
+                body = if (isMoment) item.body.trim().removePrefix(item.title).trim() else item.body,
                 yearsAgo = yearsAgo
             )
             }

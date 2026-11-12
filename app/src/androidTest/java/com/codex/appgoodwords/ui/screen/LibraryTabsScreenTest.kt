@@ -13,10 +13,11 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * 보관함의 네 칸.
+ * 보관함의 다섯 칸.
  *
  * 여섯 칸일 때는 옆으로 밀어야 메모와 임시저장소가 보였습니다. 메모·개념·임시저장소를 노트 한 칸에 모았고,
  * 예전 번호(`LibraryTab.MEMO` 등)는 노트 안 알약을 가리킵니다 — 검색에서 넘어온 사람이 그 자리에 떨어져야 합니다.
+ * 행복 칸(사용자가 정함, 2026-11-12)은 행복한 순간·좋아하는 것 두 알약입니다.
  */
 class LibraryTabsScreenTest {
     @get:Rule
@@ -73,6 +74,35 @@ class LibraryTabsScreenTest {
     }
 
     @Test
+    fun theHappyTabHoldsMomentsAndLikesAndReopensOnThePillLastSeen() {
+        showLibrary(happyMomentCount = 2, likeCount = 1)
+
+        compose.onNodeWithTag(libraryHappyMomentPillTag).assertDoesNotExist()
+        compose.onNodeWithTag(libraryHappyTabTag).performClick()
+
+        // 처음은 행복한 순간입니다. 알약에 개수가 붙습니다.
+        compose.onNodeWithText("순간 목록").assertIsDisplayed()
+        compose.onNodeWithTag(libraryHappyMomentPillTag).assertIsSelected()
+        compose.onNodeWithText("행복한 순간 2").assertIsDisplayed()
+        compose.onNodeWithText("좋아하는 것 1").assertIsDisplayed()
+
+        compose.onNodeWithTag(libraryLikePillTag).performClick()
+        compose.onNodeWithText("좋아하는 것 목록").assertIsDisplayed()
+        compose.onNodeWithTag(libraryNoteTabTag).performClick()
+        compose.onNodeWithTag(libraryHappyTabTag).performClick()
+        compose.onNodeWithText("좋아하는 것 목록").assertIsDisplayed()
+    }
+
+    @Test
+    fun aSearchForALikeLandsOnTheLikePill() {
+        showLibrary(requestedTab = LibraryTab.LIKE)
+
+        compose.onNodeWithText("좋아하는 것 목록").assertIsDisplayed()
+        compose.onNodeWithTag(libraryLikePillTag).assertIsSelected()
+        compose.onNodeWithTag(libraryHappyTabTag).assertIsSelected()
+    }
+
+    @Test
     fun aPiledUpInboxShowsOnTheNotesTabFromElsewhere() {
         // 공유로 담은 글은 임시저장소에 쌓입니다. 노트 안에 들어갔다고 그것이 안 보이면 잊힙니다.
         showLibrary(inboxCount = 3)
@@ -84,7 +114,9 @@ class LibraryTabsScreenTest {
         requestedTab: Int? = null,
         memoCount: Int = 1,
         conceptCount: Int = 0,
-        inboxCount: Int = 0
+        inboxCount: Int = 0,
+        happyMomentCount: Int = 0,
+        likeCount: Int = 0
     ) {
         compose.setContent {
             AppGoodWordsTheme {
@@ -98,7 +130,11 @@ class LibraryTabsScreenTest {
                     conceptCount = conceptCount,
                     inboxContent = { Text("임시저장소 목록") },
                     memoContent = { Text("메모 목록") },
-                    conceptContent = { Text("개념 목록") }
+                    conceptContent = { Text("개념 목록") },
+                    happyMomentCount = happyMomentCount,
+                    likeCount = likeCount,
+                    happyMomentContent = { Text("순간 목록") },
+                    likeContent = { Text("좋아하는 것 목록") }
                 )
             }
         }

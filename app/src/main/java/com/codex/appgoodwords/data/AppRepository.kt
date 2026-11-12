@@ -28,7 +28,8 @@ class AppRepository(
     private val growthReportDao: GrowthReportDao? = null,
     private val moodLogDao: MoodLogDao? = null,
     private val bookReadingLogDao: BookReadingLogDao? = null,
-    private val goalTimeLogDao: GoalTimeLogDao? = null
+    private val goalTimeLogDao: GoalTimeLogDao? = null,
+    private val recordLinkDao: RecordLinkDao? = null
 ) {
     /** 삭제 표식을 남긴다. 표식이 없으면 다른 기기에서 지운 항목이 되살아난다. */
     private suspend fun recordDeletion(syncId: String, entityType: SyncEntityType) {
@@ -155,6 +156,150 @@ class AppRepository(
         val removed = dao.deleteById(id)
         existing?.let { recordDeletion(it.syncId, SyncEntityType.GOAL_TIME_LOG) }
         return removed
+    }
+
+    fun observeRecordLinks(): Flow<List<RecordLinkEntity>> =
+        recordLinkDao?.observeAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    /**
+     * 행복한 순간을 적거나 고칩니다(사용자가 정함, 2026-11-12 — 글·날짜·사진 + 좋아하는 것 칩).
+     *
+     * [likeSyncIds]는 이 순간과 이어 둘 좋아하는 것 **전부**입니다. 칩에서 뺀 것은 줄을 지우고(표식), 새로 고른 것은 잇습니다.
+     * 좋아하는 것이 아닌 기록과 이은 줄(상세의 "잇기")은 건드리지 않습니다. 날짜는 [Happy.momentTime]으로 그날의 시각이 됩니다.
+     *
+     * @return 저장한 순간의 id.
+     */
+    suspend fun saveHappyMoment(
+        id: Long,
+        text: String,
+        date: LocalDate,
+        imageUris: List<String>,
+        likeSyncIds: List<String>,
+        now: Long = System.currentTimeMillis(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): Long = database.withTransaction {
+        val body = text.trim()
+        require(body.isNotBlank()) { "무엇이 행복했는지 적어 주세요." }
+        val existing = if (id != 0L) contentItemDao.getById(id) else null
+        if (existing != null) check(existing.type == ContentType.HAPPY_MOMENT) { "행복한 순간이 아닙니다." }
+        val moment = (existing ?: ContentItemEntity(type = ContentType.HAPPY_MOMENT, title = "", body = "")).copy(
+            title = Happy.titleOf(body),
+            body = body,
+            imageUris = imageUris.map(String::trim).filter(String::isNotBlank).distinct(),
+            createdAt = Happy.momentTime(date, existing?.createdAt, now, zoneId),
+            updatedAt = maxOf(now, (existing?.updatedAt ?: 0L) + 1)
+        )
+        val insertedId = contentItemDao.insert(moment)
+        setLikeLinks(RecordRef.of(moment), likeSyncIds, now)
+        existing?.id ?: insertedId
+    }
+
+    /**
+     * 좋아하는 것을 적거나 고칩니다. 새로 적는데 이름이 같은 것이 이미 있으면(띄어쓰기·대소문자는 상관없이) 그것을 돌려줍니다 —
+     * 같은 이름이 둘이면 순간에 이을 칩도, 다른 글에 나온 이름도 둘로 갈립니다.
+     *
+     * @return 저장한(또는 이미 있던) 좋아하는 것의 id.
+     */
+    suspend fun saveLike(
+        id: Long,
+        name: String,
+        category: String,
+        why: String,
+        imageUris: List<String>,
+        now: Long = System.currentTimeMillis()
+    ): Long {
+        val title = name.trim()
+        require(title.isNotBlank()) { "좋아하는 것의 이름을 적어 주세요." }
+        val images = imageUris.map(String::trim).filter(String::isNotBlank).distinct()
+        val existing = if (id != 0L) contentItemDao.getById(id) else null
+        if (existing != null) {
+            check(existing.type == ContentType.LIKE) { "좋아하는 것이 아닙니다." }
+            contentItemDao.insert(
+                existing.copy(
+                    title = title,
+                    category = category.trim(),
+                    body = why.trim(),
+                    imageUris = images,
+                    updatedAt = maxOf(now, existing.updatedAt + 1)
+                )
+            )
+            return existing.id
+        }
+        contentItemDao.getAll().firstOrNull { it.type == ContentType.LIKE && Happy.sameName(it.title, title) }?.let { return it.id }
+        return contentItemDao.insert(
+            ContentItemEntity(
+                type = ContentType.LIKE,
+                title = title,
+                body = why.trim(),
+                category = category.trim(),
+                imageUris = images,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+    }
+
+    /** 순간과 좋아하는 것 사이의 줄을 [likeSyncIds]에 맞춥니다. 좋아하는 것이 아닌 기록과 이은 줄은 그대로 둡니다. */
+    private suspend fun setLikeLinks(moment: RecordRef, likeSyncIds: List<String>, now: Long) {
+        val dao = recordLinkDao ?: return
+        val likes = contentItemDao.getAll().filter { it.type == ContentType.LIKE }.mapTo(HashSet()) { it.syncId }
+        val wanted = likeSyncIds.map(String::trim).filter { it in likes }.toSet()
+        val likeLinks = dao.getTouching(moment.syncId).filter { link ->
+            val other = link.otherEnd(moment)
+            other != null && other.kind == RecordKind.CONTENT_ITEM.name && other.syncId in likes
+        }
+        likeLinks.filter { link -> link.otherEnd(moment)?.syncId !in wanted }.forEach { link ->
+            dao.deleteById(link.id)
+            recordDeletion(link.syncId, SyncEntityType.RECORD_LINK)
+        }
+        val have = likeLinks.mapNotNullTo(HashSet()) { it.otherEnd(moment)?.syncId }
+        (wanted - have).forEach { likeSyncId ->
+            dao.insert(
+                RecordLinkEntity(
+                    fromKind = moment.kind,
+                    fromSyncId = moment.syncId,
+                    toKind = RecordKind.CONTENT_ITEM.name,
+                    toSyncId = likeSyncId,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+        }
+    }
+
+    /**
+     * 두 기록을 잇습니다(사용자가 정함, 2026-11-12). 이미 이어져 있으면(어느 쪽에서 이었든) 아무것도 하지 않습니다.
+     *
+     * @return 새로 이었으면 true.
+     */
+    suspend fun linkRecords(a: RecordRef, b: RecordRef, now: Long = System.currentTimeMillis()): Boolean {
+        val dao = recordLinkDao ?: error("기록을 이을 수 없습니다.")
+        require(RecordKind.fromNameOrNull(a.kind) != null && RecordKind.fromNameOrNull(b.kind) != null) { "이을 수 없는 기록입니다." }
+        require(a.syncId.isNotBlank() && b.syncId.isNotBlank()) { "이을 수 없는 기록입니다." }
+        require(a != b) { "같은 기록끼리는 이을 수 없습니다." }
+        if (RecordLinks.between(dao.getTouching(a.syncId), a, b) != null) return false
+        dao.insert(
+            RecordLinkEntity(
+                fromKind = a.kind,
+                fromSyncId = a.syncId,
+                toKind = b.kind,
+                toSyncId = b.syncId,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+        return true
+    }
+
+    /** 두 기록 사이의 줄을 지우고 표식을 남깁니다(표식이 없으면 다른 기기의 사본이 줄을 되살립니다). */
+    suspend fun unlinkRecords(a: RecordRef, b: RecordRef): Int {
+        val dao = recordLinkDao ?: return 0
+        val links = dao.getTouching(a.syncId).filter { it.otherEnd(a) == b }
+        links.forEach { link ->
+            dao.deleteById(link.id)
+            recordDeletion(link.syncId, SyncEntityType.RECORD_LINK)
+        }
+        return links.size
     }
 
     /** 이 이상향·목표·롤모델을 위해 하는 루틴을 바꿉니다. 루틴의 syncId로 가리킵니다. */
@@ -607,6 +752,28 @@ class AppRepository(
                     contentItemDao.insert(item.copy(linkedRoutineSyncIds = linked, updatedAt = maxOf(now, item.updatedAt + 1)))
                 }
 
+            // 사라지는 루틴과 이은 줄은 남는 루틴과 잇게 옮깁니다. 이미 남는 루틴과 이어진 기록이거나 남는 루틴 자신이면
+            // 줄을 지웁니다(표식) — 같은 두 기록을 잇는 줄이 둘이거나 제 자신을 잇는 줄은 보여 줄 것이 없습니다.
+            recordLinkDao?.let { dao ->
+                val goneRef = RecordRef.of(gone)
+                val keptRef = RecordRef.of(kept)
+                val linkedToKept = dao.getTouching(kept.syncId).mapNotNullTo(HashSet()) { it.otherEnd(keptRef) }
+                dao.getTouching(gone.syncId).forEach { link ->
+                    val other = link.otherEnd(goneRef) ?: return@forEach
+                    if (other == keptRef || other in linkedToKept) {
+                        dao.deleteById(link.id)
+                        recordDeletion(link.syncId, SyncEntityType.RECORD_LINK)
+                    } else {
+                        val changedAt = maxOf(now, link.updatedAt + 1)
+                        dao.insert(
+                            if (link.from == goneRef) link.copy(fromSyncId = kept.syncId, updatedAt = changedAt)
+                            else link.copy(toSyncId = kept.syncId, updatedAt = changedAt)
+                        )
+                        linkedToKept.add(other)
+                    }
+                }
+            }
+
             routineDao.deleteById(gone.id)
             recordDeletion(gone.syncId, SyncEntityType.ROUTINE)
             RoutineMergeResult(routine = kept, movedChecks = oldChecks.size, movedMemos = memos.size)
@@ -1003,7 +1170,8 @@ class AppRepository(
     }
 
     suspend fun removeCategory(category: String): Int {
-        return contentItemDao.clearCategory(category.trim(), System.currentTimeMillis())
+        // 좋아하는 것의 갈래(음식·음악…)는 글귀의 카테고리와 이름이 같아도 다른 것이라 건드리지 않습니다.
+        return contentItemDao.clearCategory(category.trim(), System.currentTimeMillis(), ContentType.happyTypes)
     }
 
     suspend fun seedDefaultsIfNeeded() {

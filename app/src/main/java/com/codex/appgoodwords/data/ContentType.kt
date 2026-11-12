@@ -43,7 +43,21 @@ enum class ContentType {
     GOAL,
 
     /** 닮고 싶은 사람. 제목이 이름이고, 보관함에서 저자가 같은 글귀를 모아 보여 줍니다. */
-    ROLE_MODEL;
+    ROLE_MODEL,
+
+    /**
+     * 행복했던 순간 — 보관함 "행복" 칸의 첫 알약(사용자가 정함, 2026-11-12).
+     *
+     * 글(무엇이 행복했나)은 [ContentItemEntity.body]에, 날짜는 [ContentItemEntity.createdAt]에 둡니다 — 지난날의 순간은
+     * 그날로 적습니다. 그 순간에 있던 [LIKE]는 잇기 표([RecordLinkEntity])로 이어 둡니다.
+     */
+    HAPPY_MOMENT,
+
+    /**
+     * 내가 좋아하는 것 — 이름([ContentItemEntity.title])·갈래([ContentItemEntity.category])·왜 좋은지·사진.
+     * 어느 순간에 있었는지는 이어 둔 것과 다른 글에 나온 이름으로 봅니다([RecordConnections]).
+     */
+    LIKE;
 
     /** 글귀 목록과 알림에서 다시 보여 줄 종류. 미분류 글과 개인 메모는 따로 둡니다. */
     val isReadingContent: Boolean
@@ -57,6 +71,29 @@ enum class ContentType {
     val isGoal: Boolean
         get() = this in goalTypes
 
+    /** 보관함 "행복" 칸에 모이는 종류(행복한 순간·좋아하는 것). */
+    val isHappy: Boolean
+        get() = this in happyTypes
+
+    /** 화면에 보이는 이름. 상세·카드·이어진 기록이 같은 이름을 씁니다. */
+    val label: String
+        get() = when (this) {
+            QUOTE -> "글귀"
+            LINK -> "링크"
+            VIDEO -> "영상"
+            IDEA -> "아이디어"
+            INBOX -> "임시저장소"
+            MEMO -> "메모"
+            NOT_TO_DO -> "하지 않을 일"
+            CONCEPT -> "개념"
+            PRINCIPLE -> "원칙"
+            VISION -> "이상향"
+            GOAL -> "목표"
+            ROLE_MODEL -> "롤모델"
+            HAPPY_MOMENT -> "행복한 순간"
+            LIKE -> "좋아하는 것"
+        }
+
     companion object {
         val readingTypes = listOf(QUOTE, LINK, VIDEO)
 
@@ -66,9 +103,12 @@ enum class ContentType {
          * 한곳에 모아 둡니다. 예전에는 이 목록이 여러 군데에 따로 적혀 있어서, 종류를 늘릴 때
          * 한 곳만 빠뜨리면 그 종류가 "오늘의 글귀"라며 알림에 뜨거나 읽음 횟수로 세어졌습니다.
          */
-        val personalTypes = listOf(INBOX, MEMO, NOT_TO_DO, CONCEPT, PRINCIPLE, VISION, GOAL, ROLE_MODEL)
+        val personalTypes = listOf(INBOX, MEMO, NOT_TO_DO, CONCEPT, PRINCIPLE, VISION, GOAL, ROLE_MODEL, HAPPY_MOMENT, LIKE)
 
         /** 목표 탭의 칸. 적어 둔 차례가 칸의 차례입니다. */
         val goalTypes = listOf(VISION, GOAL, ROLE_MODEL)
+
+        /** 보관함 "행복" 칸의 알약. 적어 둔 차례가 알약의 차례입니다. */
+        val happyTypes = listOf(HAPPY_MOMENT, LIKE)
     }
 }

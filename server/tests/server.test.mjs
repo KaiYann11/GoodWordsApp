@@ -208,6 +208,7 @@ function emptySnapshot(overrides = {}) {
     stepCounts: [],
     walks: [],
     goalTimeLogs: [],
+    recordLinks: [],
     ...overrides,
   };
 }
@@ -2683,7 +2684,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 26);
+    assert.equal(stored.schemaVersion, 27);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2898,11 +2899,11 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("목표 시간을 모르는 옛 앱과 구별할 형식 26을 알린다", async () => {
-    // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과
-    // 가르려고 올렸습니다.
+  it("행복 칸과 이은 줄을 모르는 옛 앱과 구별할 형식 27을 알린다", async () => {
+    // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과,
+    // 27은 행복한 순간·좋아하는 것을 글귀로 바꿔 읽고 이은 줄을 버리는 옛 앱과 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 26);
+    assert.equal(health.schemaVersion, 27);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {
@@ -3841,5 +3842,162 @@ describe("걷기", () => {
     assert.equal(delta.partial, true);
     assert.deepEqual(delta.walks.map((entry) => entry.syncId), ["walk-2"]);
     assert.equal(delta.stepCounts.length, 0);
+  });
+});
+
+describe("행복한 순간·좋아하는 것과 이은 줄", () => {
+  async function resetServer() {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ deletions: [] }) });
+  }
+
+  function content(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "moment-1",
+      updatedAt: 1_000,
+      type: "HAPPY_MOMENT",
+      title: "퇴근길 노을이 너무 예뻤다",
+      body: "퇴근길 노을이 너무 예뻤다",
+      category: "",
+      createdAt: 1_000,
+      ...overrides,
+    };
+  }
+
+  function like(overrides = {}) {
+    return content({ id: 2, syncId: "like-1", type: "LIKE", title: "노을", body: "", category: "장소", ...overrides });
+  }
+
+  function link(overrides = {}) {
+    return {
+      id: 1,
+      syncId: "link-1",
+      updatedAt: 2_000,
+      fromKind: "CONTENT_ITEM",
+      fromSyncId: "moment-1",
+      toKind: "CONTENT_ITEM",
+      toSyncId: "like-1",
+      createdAt: 2_000,
+      ...overrides,
+    };
+  }
+
+  it("행복한 순간과 좋아하는 것은 글귀로 바뀌지 않는다", async () => {
+    await resetServer();
+    const merged = await (await api("/api/sync", { method: "POST", body: emptySnapshot({ items: [content(), like()] }) })).json();
+
+    // 모르는 종류는 글귀로 바뀝니다(contentTypes). 그러면 내가 쓴 순간이 "오늘의 글귀"로 알림에 뜹니다.
+    assert.deepEqual(merged.items.map((item) => item.type).sort(), ["HAPPY_MOMENT", "LIKE"]);
+    assert.equal(merged.items.find((item) => item.type === "LIKE").category, "장소");
+  });
+
+  it("이은 줄이 스냅샷에 남고, 모르는 종류·빈 끝·제 자신을 이은 줄은 버린다", async () => {
+    await api("/api/snapshot", {
+      method: "PUT",
+      body: emptySnapshot({
+        items: [content(), like()],
+        recordLinks: [
+          link(),
+          link({ syncId: "unknown-kind", toKind: "MOOD_LOG" }),
+          link({ syncId: "no-end", toSyncId: "" }),
+          link({ syncId: "self", toSyncId: "moment-1" }),
+        ],
+      }),
+    });
+
+    const stored = await (await api("/api/snapshot")).json();
+    assert.deepEqual(stored.recordLinks.map((entry) => entry.syncId), ["link-1"]);
+    assert.equal(stored.recordLinkCount, 1);
+  });
+
+  it("같은 두 기록을 거꾸로 이은 줄은 하나만 남기고 사라진 쪽에 표식을 남긴다", async () => {
+    await resetServer();
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        items: [content(), like()],
+        recordLinks: [
+          link({ syncId: "link-a", updatedAt: 2_000 }),
+          // 줄에는 방향이 없습니다. 거꾸로 이어도 같은 두 기록입니다(앱 RecordLinks.fingerprint와 같게).
+          link({ syncId: "link-b", updatedAt: 3_000, fromSyncId: "like-1", toSyncId: "moment-1" }),
+        ],
+      }),
+    })).json();
+
+    assert.deepEqual(merged.recordLinks.map((entry) => entry.syncId), ["link-b"]);
+    assert.ok(merged.deletions.some((entry) => entry.syncId === "link-a" && entry.entityType === "RECORD_LINK"));
+  });
+
+  it("두 기록이 하나로 합쳐지면 줄이 남은 쪽을 가리키고, 제 자신을 잇게 된 줄은 표식과 함께 버린다", async () => {
+    await resetServer();
+    const older = like({ syncId: "like-old", updatedAt: 1_000 });
+    const newer = like({ id: 3, syncId: "like-new", updatedAt: 2_000 });
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        items: [content(), older, newer],
+        recordLinks: [
+          link({ syncId: "to-old", toSyncId: "like-old" }),
+          // 같은 내용이라 하나로 합쳐질 두 좋아하는 것끼리 이은 줄 — 합친 뒤에는 제 자신을 잇는 줄입니다.
+          link({ syncId: "old-new", fromSyncId: "like-old", toSyncId: "like-new" }),
+        ],
+      }),
+    })).json();
+
+    assert.deepEqual(merged.items.filter((item) => item.type === "LIKE").map((item) => item.syncId), ["like-new"]);
+    assert.deepEqual(merged.recordLinks.map((entry) => [entry.syncId, entry.toSyncId]), [["to-old", "like-new"]]);
+    assert.ok(merged.deletions.some((entry) => entry.syncId === "old-new" && entry.entityType === "RECORD_LINK"));
+  });
+
+  it("다른 날 같은 글로 적은 행복한 순간은 하나로 합치지 않는다", async () => {
+    // 행복한 순간은 그때가 곧 그 순간입니다. 때까지 같은 사본만 하나로 합칩니다(앱 SyncDeduplicator와 같게).
+    await resetServer();
+    const day = 24 * 60 * 60 * 1000;
+    const dinner = { title: "가족과 저녁", body: "가족과 저녁" };
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        items: [
+          content({ syncId: "monday", ...dinner, createdAt: 1_000 }),
+          content({ id: 2, syncId: "friday", ...dinner, createdAt: 1_000 + 4 * day }),
+          content({ id: 3, syncId: "friday-copy", ...dinner, createdAt: 1_000 + 4 * day, updatedAt: 2_000 }),
+        ],
+      }),
+    })).json();
+
+    assert.deepEqual(merged.items.map((item) => item.syncId).sort(), ["friday-copy", "monday"]);
+  });
+
+  it("지운 기록을 가리키는 줄은 버리지 않는다", async () => {
+    // 화면이 뺍니다(목표에 이어 둔 루틴과 같은 규칙). 다른 기기에는 그 기록이 아직 있을 수 있습니다.
+    await resetServer();
+    const merged = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ items: [content()], recordLinks: [link({ toKind: "DIARY", toSyncId: "diary-elsewhere" })] }),
+    })).json();
+
+    assert.deepEqual(merged.recordLinks.map((entry) => entry.syncId), ["link-1"]);
+  });
+
+  it("줄을 푼 표식이 오면 줄이 사라지고, 바뀐 것만 달라고 하면 새 줄만 온다", async () => {
+    await resetServer();
+    const first = await (await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({ items: [content(), like()], recordLinks: [link()] }),
+    })).json();
+
+    const delta = await (await api(`/api/sync?since=${first.rev}`, {
+      method: "POST",
+      body: emptySnapshot({ recordLinks: [link({ syncId: "link-2", toKind: "BOOK", toSyncId: "book-1" })] }),
+    })).json();
+    assert.equal(delta.partial, true);
+    assert.deepEqual(delta.recordLinks.map((entry) => entry.syncId), ["link-2"]);
+
+    const afterUnlink = await (await api("/api/sync", {
+      method: "POST",
+      // 90일 넘은 표식은 서버가 정리합니다. 지금 푼 것으로 보냅니다.
+      body: emptySnapshot({ deletions: [{ syncId: "link-1", entityType: "RECORD_LINK", deletedAt: Date.now() }] }),
+    })).json();
+    assert.deepEqual(afterUnlink.recordLinks.map((entry) => entry.syncId), ["link-2"]);
   });
 });

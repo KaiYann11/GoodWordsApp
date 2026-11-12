@@ -35,6 +35,25 @@ object SyncDeduplicator {
         )
         val walks = resolve(snapshot.walks, { it.syncId }, { it.updatedAt }, ::walkFingerprint)
         val goalTimeLogs = resolve(snapshot.goalTimeLogs, { it.syncId }, { it.updatedAt }, ::goalTimeLogFingerprint)
+        // 이은 줄은 두 끝을 먼저 남은 기록으로 옮긴 뒤에 견줍니다. 두 기록이 하나로 합쳐졌으면 같은 두 기록을 잇는 줄이
+        // 둘이 될 수 있고, 제 자신을 잇게 된 줄은 보여 줄 것이 없어 버립니다. 서버 `deduplicate()`와 같은 차례여야 합니다.
+        val survivors: Map<String, Resolution<*>> = mapOf(
+            RecordKind.CONTENT_ITEM.name to items,
+            RecordKind.DIARY.name to diaries,
+            RecordKind.BOOK.name to books,
+            RecordKind.ROUTINE.name to routines,
+            RecordKind.TODO.name to todos,
+            RecordKind.WALK.name to walks
+        )
+        val repointedLinks = snapshot.recordLinks
+            .map { link ->
+                link.copy(
+                    fromSyncId = survivors[link.fromKind]?.survivorOf(link.fromSyncId) ?: link.fromSyncId,
+                    toSyncId = survivors[link.toKind]?.survivorOf(link.toSyncId) ?: link.toSyncId
+                )
+            }
+            .filterNot { it.fromKind == it.toKind && it.fromSyncId == it.toSyncId }
+        val recordLinks = resolve(repointedLinks, { it.syncId }, { it.updatedAt }, RecordLinks::fingerprint)
 
         return snapshot.copy(
             items = items.kept.map { item ->
@@ -59,6 +78,7 @@ object SyncDeduplicator {
             walks = walks.kept,
             // 사라진 목표를 가리키던 시간은 남은 목표로 옮겨 붙입니다. 안 옮기면 쌓은 시간이 목표를 잃습니다.
             goalTimeLogs = goalTimeLogs.kept.map { log -> log.copy(goalSyncId = items.survivorOf(log.goalSyncId)) },
+            recordLinks = recordLinks.kept,
             // 사라진 책을 가리키던 독서 기록은 남은 책으로 옮겨 붙입니다.
             bookReadingLogs = readingLogs.kept.map { log ->
                 if (log.bookSyncId.isBlank()) log
@@ -121,14 +141,16 @@ object SyncDeduplicator {
 
     // 글만 같고 첨부가 다르면 다른 기록이다. 첨부까지 넣지 않으면
     // 글 없이 사진만 올린 두 기록이 하나로 합쳐지면서 한쪽 사진이 사라진다.
-    private fun itemFingerprint(item: ContentItemEntity): String = listOf(
+    // 행복한 순간은 그때까지 본다. 다른 날 같은 글로 적은 두 순간("가족과 저녁")은 다른 기록이다(서버와 같게).
+    private fun itemFingerprint(item: ContentItemEntity): String = listOfNotNull(
         item.type.name,
         normalize(item.title),
         normalize(item.body),
         normalize(item.author),
         normalize(item.sourceUrl),
         item.imageUris.joinToString(","),
-        item.videoUris.joinToString(",")
+        item.videoUris.joinToString(","),
+        item.createdAt.toString().takeIf { item.type == ContentType.HAPPY_MOMENT }
     ).joinToString("|")
 
     private fun routineFingerprint(routine: RoutineEntity): String = normalize(routine.title)
