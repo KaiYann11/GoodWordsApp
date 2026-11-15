@@ -16,6 +16,22 @@ class InboxDataTest {
     }
 
     @Test
+    fun aMemoWithOnlyPhotosIsNamedPhotoMemo() {
+        val draft = ContentNormalizer.normalize(
+            ContentDraft(type = ContentType.MEMO, imageUris = listOf(" content://media/external/images/media/1000012345 "))
+        )
+        ContentNormalizer.validate(draft)
+        // 파일 이름(문서 번호)으로 지으면 목록·검색에서 무엇인지 알 수 없습니다.
+        assertEquals("사진 메모", draft.title)
+        assertEquals(listOf("content://media/external/images/media/1000012345"), draft.imageUris)
+        // 글이 있으면 사진이 있어도 글이 이름입니다.
+        assertEquals(
+            "화이트보드 정리",
+            ContentNormalizer.normalize(draft.copy(title = "", body = "화이트보드 정리")).title
+        )
+    }
+
+    @Test
     fun aBackupPreservesTextLinksAndCollectionTypes() {
         val items = listOf(ContentType.INBOX, ContentType.MEMO, ContentType.CONCEPT).mapIndexed { index, type ->
             ContentItemEntity(

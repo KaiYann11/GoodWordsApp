@@ -7,8 +7,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -214,5 +217,57 @@ class TextCollectionScreenTest {
         compose.onNodeWithText("저장").performClick()
         assertEquals(ContentType.MEMO, saved?.type)
         assertEquals("메모의 원문", saved?.body)
+    }
+
+    @Test
+    fun aNoteCardSaysHowManyPhotosWithoutDrawingThem() {
+        val photos = listOf("content://photo/1", "content://photo/2", "content://photo/3")
+        compose.setContent {
+            AppGoodWordsTheme {
+                TextCollectionScreen(
+                    items = listOf(
+                        item.copy(type = ContentType.MEMO, imageUris = photos, videoUris = listOf("content://movie/1")),
+                        item.copy(id = 2, type = ContentType.MEMO, title = "글만", body = "사진 없는 메모")
+                    ),
+                    collectionType = ContentType.MEMO,
+                    onOpenItem = {}
+                )
+            }
+        }
+
+        // 목록은 가볍게 — 몇 장인지만 적고 사진은 상세에서 봅니다(사용자가 정함, 2026-11-15). 누르는 카드 안의 글이라
+        // 합쳐진 나무에서는 카드에 묻힙니다.
+        compose.onNodeWithTag(collectionAttachmentsTag(item.id), useUnmergedTree = true).assertTextEquals("사진 3 · 동영상 1")
+        photos.forEach { compose.onNodeWithTag(attachmentThumbnailTag(it), useUnmergedTree = true).assertDoesNotExist() }
+        compose.onNodeWithTag(collectionAttachmentsTag(2), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun aMemoTakesPhotosAndOneCanBeTakenOutBeforeSaving() {
+        var saved: ContentDraft? = null
+        compose.setContent {
+            AppGoodWordsTheme {
+                AddContentScreen(
+                    initialDraft = ContentDraft(
+                        id = 1, type = ContentType.MEMO, body = "화이트보드 정리",
+                        imageUris = listOf("content://photo/1", "content://photo/2")
+                    ),
+                    categories = emptyList(), existingTags = emptyList(), sharedText = null,
+                    formVersion = 0, submitLabel = "저장", secondaryActionLabel = null,
+                    onSecondaryAction = null, onSharedTextConsumed = {}, onFetchMetadata = { _, _ -> },
+                    onSave = { saved = it }
+                )
+            }
+        }
+        val list = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+
+        list.performScrollToNode(hasTestTag(memoAddPhotoTag))
+        compose.onNodeWithTag(memoAddPhotoTag).assertTextEquals("+ 사진 더")
+        compose.onAllNodesWithContentDescription("사진 빼기")[0].performClick()
+        list.performScrollToNode(hasText("저장"))
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals(ContentType.MEMO, saved?.type)
+        assertEquals(listOf("content://photo/2"), saved?.imageUris)
     }
 }

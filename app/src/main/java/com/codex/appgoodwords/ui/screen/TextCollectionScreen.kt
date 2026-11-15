@@ -39,6 +39,7 @@ internal const val inboxPasteTag = "inbox_paste"
 internal const val collectionAddTag = "collection_add"
 internal fun inboxClassifyTag(id: Long) = "inbox_classify_$id"
 internal fun askConceptTag(id: Long) = "ask_concept_$id"
+internal fun collectionAttachmentsTag(id: Long) = "collection_attachments_$id"
 
 /**
  * 수집한 글과 정리한 메모는 읽음 횟수를 세지 않고 최신순으로 찾습니다.
@@ -168,6 +169,15 @@ fun TextCollectionScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    // 사진은 그리지 않고 몇 장인지만 적습니다(사용자가 정함, 2026-11-15 — 목록이 가볍게). 사진은 상세에서 봅니다.
+                    attachmentCountLine(item)?.let { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag(collectionAttachmentsTag(item.id))
+                        )
+                    }
                     val explanation = if (isConcept) {
                         memoBodiesByItem[item.id]
                             .orEmpty()
@@ -224,6 +234,12 @@ fun TextCollectionScreen(
         }
     }
 }
+
+/** 붙여 둔 것의 수("사진 3 · 동영상 1"). 없으면 null입니다. 일기 목록과 같은 말을 씁니다. */
+private fun attachmentCountLine(item: ContentItemEntity): String? = buildList {
+    if (item.imageUris.isNotEmpty()) add("사진 ${item.imageUris.size}")
+    if (item.videoUris.isNotEmpty()) add("동영상 ${item.videoUris.size}")
+}.joinToString(" · ").ifBlank { null }
 
 @Composable
 fun ClassifyInboxDialog(

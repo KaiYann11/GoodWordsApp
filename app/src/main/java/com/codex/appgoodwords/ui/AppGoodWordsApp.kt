@@ -1046,6 +1046,8 @@ fun AppGoodWordsApp(
                         onClassify = { classifyingItemId = selectedItem.id },
                         askingConcept = askingConceptId == selectedItem.id,
                         onAskConcept = { explainConcept(selectedItem) },
+                        serverUrl = serverSyncSettings.serverUrl,
+                        apiKey = serverSyncSettings.apiKey,
                         confirmedToday = selectedItem.id in confirmedTodayIds,
                         onEdit = { item ->
                             pushRoute(editRoute(currentTab, item.id))
@@ -2119,7 +2121,9 @@ fun AppGoodWordsApp(
                                         snackbarHostState.showSnackbar(message)
                                     }
                                 }
-                            }
+                            },
+                            serverUrl = serverSyncSettings.serverUrl,
+                            apiKey = serverSyncSettings.apiKey
                         )
 
                         // 설정처럼 일기 잠금이 걸려 있으면 열지 않습니다. 복원은 일기까지 통째로 바꿉니다.

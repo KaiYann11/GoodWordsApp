@@ -175,6 +175,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   `DiaryAnswerConverters`).
 - 공유로 들어온 글(`ShareTargetActivity`)은 `documentLaunchMode="always"`와 `onNewIntent` 저장을 지키고, 토스트는 메인 스레드에서만.
 - 분류·설명은 같은 기록의 종류만 바꿉니다(새로 만들면 첨부·덧메모·syncId가 끊깁니다).
+- **붙여 둔 사진은 `attachmentImageRequest`로 그립니다**(`AttachmentThumbnails`·`PhotoThumbnail`·`AttachmentViewerDialog`).
+  동기화가 주소를 서버 것(`appgoodwords://attachment/…`)으로 바꾸므로, 주소를 Coil에 그대로 넘기면 올리기 전에만 보이고
+  올린 뒤에는 오류 없이 빈칸이 됩니다(1.22.0까지 보관함 상세가 그랬습니다). 상세의 영상은 아직 주소를 그대로 씁니다(`BACKLOG.md`).
 - **탭 번호는 이름표일 뿐입니다** — 보관함 `LibraryTab`(메모·개념·임시저장소 번호는 노트 칸 알약, 행복한 순간·좋아하는 것은 행복
   칸 알약), 홈 `HomeTab`. 검색이 번호로 짚어 오므로 차례에 맞춰 번호를 바꾸지 않습니다.
 - **지운 기록을 가리키는 이은 줄은 지우지 않습니다**(`RecordIndex.resolve`가 없는 기록을 화면에서만 뺍니다 — 목표에 이어 둔 루틴과

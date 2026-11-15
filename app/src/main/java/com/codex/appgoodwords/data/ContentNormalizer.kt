@@ -17,6 +17,8 @@ object ContentNormalizer {
             draft.title.isNotBlank() -> draft.title.trim()
             draft.body.isNotBlank() -> draft.body.trim().take(TITLE_LIMIT)
             draft.sourceUrl.isNotBlank() -> draft.sourceUrl.trim()
+            // 사진만 붙인 메모. 파일 이름은 대개 문서 번호("1000012345")라 무엇인지 알려 주지 못합니다.
+            draft.imageUris.isNotEmpty() && draft.type == ContentType.MEMO -> PHOTO_MEMO_TITLE
             draft.imageUris.isNotEmpty() -> displayNameFromUri(draft.imageUris.first())
             draft.videoUris.isNotEmpty() -> displayNameFromUri(draft.videoUris.first())
             else -> ""
@@ -80,4 +82,7 @@ object ContentNormalizer {
 
     /** 목록에서 잘리지 않을 만큼만. 본문에서 제목을 끌어올 때 씁니다. */
     private const val TITLE_LIMIT = 24
+
+    /** 글 없이 사진만 붙인 메모의 이름. */
+    internal const val PHOTO_MEMO_TITLE = "사진 메모"
 }

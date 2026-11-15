@@ -39,6 +39,9 @@ import com.codex.appgoodwords.data.LinkMetadata
 /** 번뜩인 것으로 담는 스위치. 이 화면에 스위치가 둘이라 이름으로 짚습니다. */
 internal const val ideaSwitchTag = "add_idea_switch"
 
+/** 메모의 사진 고르기 단추. */
+internal const val memoAddPhotoTag = "memo_add_photo"
+
 @Composable
 fun AddContentScreen(
     categories: List<String>,
@@ -52,7 +55,10 @@ fun AddContentScreen(
     onSharedTextConsumed: () -> Unit,
     onSave: (ContentDraft) -> Unit,
     onFetchMetadata: (String, (LinkMetadata) -> Unit) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 메모를 고칠 때 서버에 올라간 사진을 작게 보여 주는 데 씁니다. */
+    serverUrl: String = "",
+    apiKey: String = ""
 ) {
     val context = LocalContext.current
     val isEditing = (initialDraft?.id ?: 0L) != 0L
@@ -80,11 +86,11 @@ fun AddContentScreen(
     val collectionType = initialDraft?.type?.takeIf { it.isPersonalRecord }
 
     /**
-     * 메모는 제목과 본문만 받습니다.
+     * 메모는 제목과 본문, 사진만 받습니다(사진은 사용자가 정함, 2026-11-15 — 행복한 순간과 같은 사진 칸).
      *
      * 글귀를 담는 칸(저자·링크·첨부·카테고리·태그·즐겨찾기)을 메모에도 다 늘어놓으면 적을 것보다 지나칠
      * 칸이 많아, 떠오른 것을 바로 적는 자리가 되지 못합니다. **숨긴 칸의 값은 그대로 저장합니다** — 임시저장소에서
-     * 링크와 태그를 달고 메모로 옮겨 온 글을 고칠 때 그것이 지워지면 안 됩니다.
+     * 링크와 태그를 달고 메모로 옮겨 온 글을 고칠 때 그것이 지워지면 안 됩니다(붙여 온 영상도 그대로 둡니다).
      */
     val isMemo = collectionType == ContentType.MEMO
 
@@ -140,7 +146,7 @@ fun AddContentScreen(
                     collectionType == ContentType.CONCEPT ->
                         "개념으로 담깁니다. 모르는 용어나 문장을 적어 두고, 담은 뒤 AI에게 의미를 물어볼 수 있습니다."
                     collectionType == ContentType.MEMO ->
-                        "메모로 담깁니다. 참고할 정보와 문장을 적어 두세요."
+                        "메모로 담깁니다. 참고할 정보와 문장을 적고 사진을 붙여 두세요."
                     else ->
                         "텍스트, 링크, 사진, 영상을 한 화면에서 같이 추가할 수 있습니다. 링크를 넣으면 자동으로 링크/영상 항목으로 분류됩니다."
                 },
@@ -156,7 +162,7 @@ fun AddContentScreen(
                 label = { Text("제목") },
                 supportingText = {
                     Text(
-                        if (isMemo) "비워 두면 본문 첫머리가 제목이 됩니다."
+                        if (isMemo) "비워 두면 본문 첫머리가 제목이 됩니다. 사진만 있으면 '사진 메모'입니다."
                         else "비워두면 본문이나 첨부 파일 이름으로 자동 생성됩니다."
                     )
                 }
@@ -171,6 +177,21 @@ fun AddContentScreen(
                 label = { Text(if (isMemo) "본문" else "본문 / 메모") },
                 minLines = if (isMemo) 8 else 4
             )
+        }
+
+        // 고른 사진이 작게 보이고 ×로 뺍니다. 글귀의 첨부 칸(파일 이름 칩·영상)은 메모에 늘어놓지 않습니다.
+        if (isMemo) item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "사진", style = MaterialTheme.typography.titleSmall)
+                PhotoPicker(
+                    images = imageUris,
+                    onChange = { imageUris = it },
+                    enabled = true,
+                    serverUrl = serverUrl,
+                    apiKey = apiKey,
+                    addTag = memoAddPhotoTag
+                )
+            }
         }
 
         if (!isMemo) item {

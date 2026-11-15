@@ -399,3 +399,38 @@ test("행복 탭은 이은 좋아하는 것을 순간 옆에, 이어 두었거�
   assert.equal(context.mentions("책을 읽었다", "책"), false);
   assert.equal(context.mentions("아이유 노래", "아이유노래"), true);
 });
+
+/** 보관함 카드를 그대로 그려, 붙여 둔 사진이 앱과 같은 첨부 규칙으로 보이는지 봅니다. */
+async function renderContentCard(item) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const context = vm.createContext({
+    state: { snapshot: { contentMemos: [] } },
+    personalTypes: ["MEMO"],
+    todaySummary: () => ({ confirmedIds: new Set() }),
+    labelForType: (type) => type,
+    contentMemoCard: () => "",
+  });
+  vm.runInContext(source.slice(source.indexOf("const attachmentScheme ="), source.indexOf("/**\n * 받아 둔 첨부의 blob 주소.")), context);
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("/**\n * 톡 찍어 둔 기분.")), context);
+  vm.runInContext(source.slice(source.indexOf("function attachmentMedia("), source.indexOf("function diaryCard(")), context);
+  const start = source.indexOf("function contentCard(");
+  const end = source.indexOf("function contentMemoCard(");
+  assert.ok(start >= 0 && end > start, "보관함 카드 토막을 찾지 못했습니다.");
+  vm.runInContext(source.slice(start, end), context);
+  return context.contentCard(item);
+}
+
+test("메모 카드는 붙여 둔 사진을 서버에서 받아 보이고, 기기 안 파일은 그렇다고 적는다", async () => {
+  const photo = `appgoodwords://attachment/${"a".repeat(64)}.jpg`;
+  const html = await renderContentCard({
+    id: 1, type: "MEMO", title: "사진 메모", body: "", tags: [],
+    imageUris: [photo, "content://media/external/images/media/7"],
+  });
+  // 주소는 비워 두고 표식만 답니다 — 접속 키를 실어 받는 것은 hydrateAttachments입니다.
+  assert.match(html, new RegExp(`<img data-attachment="${"a".repeat(64)}\\.jpg"`));
+  assert.doesNotMatch(html, /<img[^>]* src=/);
+  assert.match(html, /기기 안 파일/);
+  // 사진이 없으면 사진 칸도 없습니다.
+  const plain = await renderContentCard({ id: 2, type: "QUOTE", title: "글귀", body: "본문", tags: [] });
+  assert.doesNotMatch(plain, /attachmentGrid/);
+});

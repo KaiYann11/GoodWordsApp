@@ -1,13 +1,8 @@
 package com.codex.appgoodwords.ui.screen
 
 import android.app.DatePickerDialog
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -23,21 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,15 +40,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import com.codex.appgoodwords.data.Connections
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
@@ -236,7 +221,7 @@ private fun MomentCard(
             }
             moment.imageUris.firstOrNull()?.let { uri ->
                 Spacer(modifier = Modifier.width(12.dp))
-                HappyThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 64.dp)
+                PhotoThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 64.dp)
             }
         }
     }
@@ -357,7 +342,7 @@ private fun LikeCard(like: ContentItemEntity, momentCount: Int, onOpen: () -> Un
             }
             like.imageUris.firstOrNull()?.let { uri ->
                 Spacer(modifier = Modifier.width(12.dp))
-                HappyThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 56.dp)
+                PhotoThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 56.dp)
             }
         }
     }
@@ -908,7 +893,7 @@ private fun HappyMomentEditorDialog(
                     )
                 }
                 Text("사진", style = MaterialTheme.typography.labelLarge)
-                PhotoPicker(images = images, onChange = { images = it }, enabled = !saving, serverUrl = serverUrl, apiKey = apiKey)
+                PhotoPicker(images = images, onChange = { images = it }, enabled = !saving, serverUrl = serverUrl, apiKey = apiKey, addTag = happyAddPhotoTag)
                 Text("좋아하는 것과 잇기", style = MaterialTheme.typography.labelLarge)
                 if (likes.isEmpty()) {
                     Text(
@@ -1090,7 +1075,7 @@ private fun LikeEditorDialog(
                     modifier = Modifier.fillMaxWidth().testTag(likeWhyFieldTag)
                 )
                 Text("사진", style = MaterialTheme.typography.labelLarge)
-                PhotoPicker(images = images, onChange = { images = it }, enabled = !saving, serverUrl = serverUrl, apiKey = apiKey)
+                PhotoPicker(images = images, onChange = { images = it }, enabled = !saving, serverUrl = serverUrl, apiKey = apiKey, addTag = happyAddPhotoTag)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -1112,90 +1097,6 @@ private fun LikeEditorDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("취소") } }
     )
-}
-
-/**
- * 사진 고르기와 고른 사진. 앱을 다시 켜도 그 사진을 읽을 수 있게 권한을 붙들어 둡니다(보관함 담기와 같게). 올리는 것은
- * 동기화가 맡습니다 — 보관함 기록의 사진과 같은 길입니다.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun PhotoPicker(
-    images: List<String>,
-    onChange: (List<String>) -> Unit,
-    enabled: Boolean,
-    serverUrl: String,
-    apiKey: String
-) {
-    val context = LocalContext.current
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val granted = uris.mapNotNull { uri ->
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            uri.toString().takeIf(String::isNotBlank)
-        }
-        onChange((images + granted).distinct())
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (images.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                images.forEach { uri ->
-                    Box {
-                        HappyThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 64.dp)
-                        IconButton(
-                            onClick = { onChange(images - uri) },
-                            enabled = enabled,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(24.dp)
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape)
-                        ) {
-                            Icon(Icons.Outlined.Close, contentDescription = "사진 빼기", modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-        OutlinedButton(
-            onClick = { picker.launch(arrayOf("image/*")) },
-            enabled = enabled,
-            modifier = Modifier.testTag(happyAddPhotoTag)
-        ) { Text(if (images.isEmpty()) "+ 사진" else "+ 사진 더") }
-    }
-}
-
-/** 작은 사진 한 장. 서버에 올라간 사진은 접속 키를 실어 받습니다([attachmentImageRequest]). */
-@Composable
-private fun HappyThumbnail(uri: String, serverUrl: String, apiKey: String, size: Dp) {
-    val context = LocalContext.current
-    val model = remember(uri, serverUrl, apiKey) { attachmentImageRequest(context, uri, serverUrl, apiKey) }
-    if (model == null) {
-        // 서버 주소를 안 넣은 기기에서 다른 기기가 붙인 사진을 받으면 여기로 옵니다.
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("사진", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    } else {
-        AsyncImage(
-            model = model,
-            imageLoader = attachmentImageLoader(),
-            contentDescription = "붙여 둔 사진",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    }
 }
 
 internal fun formatHappyDate(date: LocalDate): String =
