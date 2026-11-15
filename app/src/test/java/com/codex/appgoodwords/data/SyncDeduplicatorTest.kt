@@ -368,6 +368,26 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun theSameTodoWithDifferentPhotosIsLeftAlone() {
+        // 같은 날 "반품하기" 둘에 영수증이 하나씩 붙어 있으면 서로 다른 할 일입니다. 합치면 한쪽 사진이 사라집니다.
+        val merged = snapshotOf(
+            todos = listOf(
+                TodoEntity(syncId = "t1", title = "반품하기", dueDate = "2026-11-16", updatedAt = 1_000L, imageUris = listOf("content://photo/a")),
+                TodoEntity(syncId = "t2", title = "반품하기", dueDate = "2026-11-16", updatedAt = 2_000L, imageUris = listOf("content://photo/b")),
+                TodoEntity(syncId = "t3", title = "반품하기", dueDate = "2026-11-16", updatedAt = 3_000L, imageUris = listOf("content://photo/b"))
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        // 사진까지 같은 것은 하나로 합칩니다(서버 todoFingerprint와 같게).
+        assertEquals(
+            listOf(listOf("content://photo/a"), listOf("content://photo/b")),
+            result.todos.map { it.imageUris }.sortedBy { it.single() }
+        )
+    }
+
+    @Test
     fun theResultDoesNotDependOnWhichSideRunsIt() {
         // 같은 시각이면 순서만 뒤집혀도 승자가 달라질 수 있다. 그러면 두 기기가 영원히 서로를 고친다.
         val a = item("aaa", "제목", "본문", updatedAt = 1_000L)

@@ -95,7 +95,9 @@ data class TodoDraft(
     /** 마감일. null이면 "언젠가" 할 일입니다. */
     val dueDate: LocalDate? = LocalDate.now(),
     /** 알람 시각(epoch millis). null이면 알리지 않습니다. */
-    val remindAt: Long? = null
+    val remindAt: Long? = null,
+    /** 붙여 둔 사진. 고치기에서 빼거나 더합니다. */
+    val imageUris: List<String> = emptyList()
 ) {
     companion object {
         fun from(todo: TodoEntity): TodoDraft = TodoDraft(
@@ -103,7 +105,8 @@ data class TodoDraft(
             title = todo.title,
             note = todo.note,
             dueDate = runCatching { LocalDate.parse(todo.dueDate) }.getOrNull(),
-            remindAt = todo.remindAt
+            remindAt = todo.remindAt,
+            imageUris = todo.imageUris
         )
     }
 }

@@ -168,7 +168,8 @@ class ServerSyncClientIntegrationTest {
                         title = todoTitle,
                         dueDate = "2026-08-12",
                         remindAt = 3_000L,
-                        createdAt = 2_000L
+                        createdAt = 2_000L,
+                        imageUris = listOf("content://photo/todo-receipt")
                     )
                 )
             )
@@ -185,6 +186,8 @@ class ServerSyncClientIntegrationTest {
         assertEquals(todoTitle, todo?.title)
         assertEquals(3_000L, todo?.remindAt)
         assertEquals("누르지 않은 완료 표시가 생겼습니다.", null, todo?.doneAt)
+        // 서버가 할 일의 사진 칸을 모르면 여기서 빠지고, 다음 동기화가 기기의 사진까지 지웁니다(형식 28).
+        assertEquals(listOf("content://photo/todo-receipt"), todo?.imageUris)
     }
 
     @Test

@@ -1595,6 +1595,55 @@ describe("첨부 파일", () => {
     // 주소가 바뀌면 다른 기기에서 첨부를 못 찾는다.
     assert.deepEqual(merged.diaries[0].imageUris, [created.uri]);
   });
+
+  it("할 일에 붙인 사진도 쓰이는 첨부로 센다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    // 다른 시험과 겹치지 않는 파일이어야 셈이 이 할 일만의 것이 된다(1x1 PNG 뒤에 바이트를 붙여도 받는다).
+    const photo = Buffer.concat([onePixelPng, Buffer.from(`todo-${Date.now()}`)]);
+    const created = await (await upload(photo, "image/png")).json();
+    const before = await (await api("/api/attachments")).json();
+
+    await api("/api/sync", {
+      method: "POST",
+      body: emptySnapshot({
+        todos: [{ syncId: "todo-photo-used", updatedAt: 1000, title: "영수증 챙기기", dueDate: "2026-11-16", createdAt: 1000, imageUris: [created.uri] }],
+      }),
+    });
+
+    // 할 일의 사진을 안 쓰는 것으로 세면, 숫자를 보고 지우는 사람이 살아 있는 사진을 지운다.
+    const after = await (await api("/api/attachments")).json();
+    assert.equal(after.unusedCount, before.unusedCount - 1);
+  });
+
+  it("할 일의 사진은 병합을 지나고, 웹에서 고치거나 완료해도 남는다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const created = await (await upload(onePixelPng, "image/png")).json();
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [{ syncId: "todo-photo", updatedAt: 1000, title: "반품하기", dueDate: "2026-11-16", createdAt: 1000, imageUris: [created.uri] }],
+        }),
+      })
+    ).json();
+    const todo = merged.todos.find((candidate) => candidate.syncId === "todo-photo");
+    // 서버가 칸을 모르면 여기서 사진이 빠지고, 다음 동기화가 기기의 사진까지 지운다.
+    assert.deepEqual(todo.imageUris, [created.uri]);
+
+    // 웹은 사진 칸 없이 고칩니다. 있던 사진이 그대로 남아야 합니다({...existing, ...payload}).
+    const edited = await (
+      await api(`/api/todos/${todo.id}`, { method: "PUT", body: { title: "택배 반품하기", dueDate: "2026-11-17", note: "" } })
+    ).json();
+    assert.equal(edited.title, "택배 반품하기");
+    assert.deepEqual(edited.imageUris, [created.uri]);
+    const done = await (await api(`/api/todos/${todo.id}/toggle-done`, { method: "POST" })).json();
+    assert.deepEqual(done.imageUris, [created.uri]);
+
+    // 웹에서 새로 만든 할 일은 사진이 빈 목록이다(없는 칸이 아니라).
+    const fresh = await (await api("/api/todos", { method: "POST", body: { title: "물 사기", dueDate: "2026-11-16" } })).json();
+    assert.deepEqual(fresh.imageUris, []);
+  });
 });
 
 describe("라우팅", () => {
@@ -2255,6 +2304,30 @@ describe("같은 내용 합치기", () => {
     assert.equal(merged.todos.length, 1);
   });
 
+  it("같은 날 같은 이름의 할 일이라도 붙인 사진이 다르면 합치지 않는다", async () => {
+    await resetServer();
+    const receipt = (letter) => `appgoodwords://attachment/${letter.repeat(64)}.jpg`;
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [
+            { syncId: "t1", updatedAt: 1000, title: "반품하기", dueDate: "2026-11-16", createdAt: 1000, imageUris: [receipt("a")] },
+            { syncId: "t2", updatedAt: 2000, title: "반품하기", dueDate: "2026-11-16", createdAt: 2000, imageUris: [receipt("b")] },
+            { syncId: "t3", updatedAt: 3000, title: "반품하기", dueDate: "2026-11-16", createdAt: 3000, imageUris: [receipt("b")] },
+          ],
+        }),
+      })
+    ).json();
+
+    // 영수증이 다른 두 반품은 다른 할 일이다. 합치면 한쪽 사진이 사라진다. 사진까지 같은 것은 하나로 합친다(앱과 같게).
+    assert.deepEqual(
+      merged.todos.map((todo) => todo.imageUris[0]).sort(),
+      [receipt("a"), receipt("b")],
+    );
+  });
+
   it("합친 뒤 다시 보내도 결과가 흔들리지 않는다", async () => {
     await resetServer();
     const body = emptySnapshot({
@@ -2684,7 +2757,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 27);
+    assert.equal(stored.schemaVersion, 28);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2899,11 +2972,12 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("행복 칸과 이은 줄을 모르는 옛 앱과 구별할 형식 27을 알린다", async () => {
+  it("할 일의 사진을 모르는 옛 앱과 구별할 형식 28을 알린다", async () => {
     // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과,
-    // 27은 행복한 순간·좋아하는 것을 글귀로 바꿔 읽고 이은 줄을 버리는 옛 앱과 가르려고 올렸습니다.
+    // 27은 행복한 순간·좋아하는 것을 글귀로 바꿔 읽고 이은 줄을 버리는 옛 앱과, 28은 할 일의 사진을 버린 채 고쳐 올리는
+    // 옛 앱과 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 27);
+    assert.equal(health.schemaVersion, 28);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {

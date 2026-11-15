@@ -185,10 +185,13 @@ object SyncDeduplicator {
         normalize(book.author)
     ).joinToString("|")
 
+    // 사진도 봅니다(보관함·일기와 같게). 같은 날 "반품하기" 둘에 영수증이 하나씩 붙어 있으면 서로 다른 할 일입니다 —
+    // 빼면 하나로 합쳐지면서 한쪽 사진이 사라집니다. 서버 todoFingerprint와 같아야 합니다.
     private fun todoFingerprint(todo: TodoEntity): String = listOf(
         todo.dueDate.trim(),
         normalize(todo.title),
-        normalize(todo.note)
+        normalize(todo.note),
+        todo.imageUris.joinToString(",")
     ).joinToString("|")
 
     /**

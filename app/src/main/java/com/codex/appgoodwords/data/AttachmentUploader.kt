@@ -79,6 +79,14 @@ class AttachmentUploader(
             )
         }
 
+        // 할 일의 사진(사용자가 정함, 2026-11-15). 빠뜨리면 다른 기기와 웹에서는 "기기 안 파일"로만 보입니다.
+        val todoDao = database.todoDao()
+        for (todo in todoDao.getAll()) {
+            val images = convert(todo.imageUris)
+            if (images == todo.imageUris) continue
+            todoDao.insert(todo.copy(imageUris = images, updatedAt = System.currentTimeMillis()))
+        }
+
         return Result(uploaded = uploaded, failed = failed, firstError = firstError)
     }
 

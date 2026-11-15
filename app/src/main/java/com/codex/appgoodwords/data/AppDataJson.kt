@@ -61,11 +61,11 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    // 행복한 순간·좋아하는 것(보관함 종류 `HAPPY_MOMENT`·`LIKE`)과 기록끼리 이은 줄(`recordLinks`)이 생겼습니다(사용자가 정함,
-    // 2026-11-12). 옛 앱은 모르는 종류를 글귀로 바꿔 읽고(아래 `toEnumOrDefault`), 옛 서버는 줄을 몰라 받아도 버리므로 형식을
-    // 올립니다. Room은 표 하나가 늘어 26입니다. 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날
-    // 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-    const val schemaVersion: Int = 27
+    // 할 일에 사진 칸(`imageUris`)이 생겼습니다(사용자가 정함, 2026-11-15). 옛 서버는 할 일의 모르는 칸을 버리고, 옛 앱은 받은
+    // 사진을 버린 채 할 일을 고쳐 올려 서버의 사진까지 지우므로 형식을 올립니다. 같은 할 일 판정에도 사진이 들어갑니다. Room은 27입니다.
+    // 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07),
+    // 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 28
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -599,6 +599,7 @@ object AppDataJson {
         .put("remindAt", remindAt)
         .put("doneAt", doneAt)
         .put("createdAt", createdAt)
+        .put("imageUris", JSONArray(imageUris))
 
     private fun JSONArray?.toTodos(): List<TodoEntity> {
         if (this == null) return emptyList()
@@ -623,7 +624,9 @@ object AppDataJson {
                         dueDate = dueDate,
                         remindAt = todo.optNullableLong("remindAt"),
                         doneAt = todo.optNullableLong("doneAt"),
-                        createdAt = todo.optLong("createdAt", System.currentTimeMillis())
+                        createdAt = todo.optLong("createdAt", System.currentTimeMillis()),
+                        // 옛 파일·옛 서버의 할 일에는 사진 칸이 없습니다. 빈 목록으로 읽습니다.
+                        imageUris = todo.optJSONArray("imageUris").toStringList()
                     )
                 )
             }

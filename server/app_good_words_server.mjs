@@ -9,10 +9,11 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 행복한 순간·좋아하는 것(보관함 종류 HAPPY_MOMENT·LIKE)과 기록끼리 이은 줄(recordLinks)이 생겼습니다(사용자가 정함,
-// 2026-11-12). 옛 앱은 모르는 종류를 글귀로 바꿔 읽고, 옛 서버는 줄을 몰라 받아도 버리므로 형식을 올립니다. 26은 목표에
-// 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-const schemaVersion = 27;
+// 할 일에 사진 칸(imageUris)이 생겼습니다(사용자가 정함, 2026-11-15). 옛 서버는 할 일의 모르는 칸을 버리고, 옛 앱은 받은
+// 사진을 버린 채 할 일을 고쳐 올려 여기 사진까지 지우므로 형식을 올립니다. 같은 할 일 판정에도 사진이 들어갑니다. 27은 행복한
+// 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07),
+// 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 28;
 /** 한 번에 남길 수 있는 들인 시간(분). 앱 `GoalTime.MAX_MINUTES`와 같다 — 타이머를 잊어도 하루를 넘겨 쌓이지 않게. */
 const maxGoalTimeMinutes = 24 * 60;
 /** 시간 기록에 적은 글(과정)의 길이 한도. 하루치 일기보다 길 까닭이 없다. */
@@ -1259,6 +1260,8 @@ function referencedAttachmentIds(db) {
     collect(diary.videoUris);
     collect(diary.audioUris);
   }
+  // 할 일의 사진도 쓰이는 첨부다. 빠뜨리면 안 쓰는 파일로 세어, 보고 지우는 사람이 살아 있는 사진을 지운다.
+  for (const todo of db.todos) collect(todo.imageUris);
   return ids;
 }
 
@@ -1809,8 +1812,10 @@ function diaryFingerprint(diary) {
   ].join("|");
 }
 
+// 사진도 본다(보관함·일기와 같게). 같은 날 "반품하기" 둘에 영수증이 하나씩 붙어 있으면 서로 다른 할 일이다.
+// 앱 SyncDeduplicator.todoFingerprint와 같아야 한다.
 function todoFingerprint(todo) {
-  return [text(todo.dueDate), norm(todo.title), norm(todo.note)].join("|");
+  return [text(todo.dueDate), norm(todo.title), norm(todo.note), todo.imageUris.join(",")].join("|");
 }
 
 /**
@@ -2714,6 +2719,8 @@ function normalizeTodo(todo) {
     remindAt: nullableInteger(todo.remindAt),
     doneAt: nullableInteger(todo.doneAt),
     createdAt: integer(todo.createdAt, nowMs()),
+    // 붙여 둔 사진(사용자가 정함, 2026-11-15). 빠뜨리면 병합 때마다 사라진다.
+    imageUris: stringList(todo.imageUris),
   };
 }
 

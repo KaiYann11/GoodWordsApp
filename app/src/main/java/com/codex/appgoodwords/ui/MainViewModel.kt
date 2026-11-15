@@ -568,8 +568,8 @@ class MainViewModel(
     }
 
     /** 여기저기 붙여 둔 첨부를 한자리에. 파일을 옮기지 않고 주소만 모읍니다. */
-    val attachmentShots = combine(diaries, allItems) { diaryList, items ->
-        AttachmentGallery.collect(diaries = diaryList, items = items)
+    val attachmentShots = combine(diaries, allItems, todos) { diaryList, items, todoList ->
+        AttachmentGallery.collect(diaries = diaryList, items = items, todos = todoList)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val categories = allItems

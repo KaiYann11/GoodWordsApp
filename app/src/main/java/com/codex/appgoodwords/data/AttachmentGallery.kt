@@ -25,7 +25,7 @@ data class AttachmentShot(
 /**
  * 여기저기 붙여 둔 첨부를 한자리에 모읍니다.
  *
- * 일기에 사진·동영상·소리를 붙일 수 있고 글귀에도 사진을 붙이는데, 모아 보는 곳이 없었습니다.
+ * 일기에 사진·동영상·소리를 붙일 수 있고 글귀·할 일에도 사진을 붙이는데, 모아 보는 곳이 없었습니다.
  * 지난 사진 한 장을 찾으려면 그날 일기를 기억해 내서 찾아 들어가야 했습니다.
  *
  * **파일을 옮기거나 베끼지 않습니다.** 주소만 모아 늘어놓습니다. 첨부 자체는 기기나 서버에
@@ -37,6 +37,7 @@ object AttachmentGallery {
     fun collect(
         diaries: List<DiaryEntity>,
         items: List<ContentItemEntity>,
+        todos: List<TodoEntity> = emptyList(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<AttachmentShot> {
         val fromDiaries = diaries.flatMap { diary ->
@@ -70,8 +71,21 @@ object AttachmentGallery {
             )
         }
 
+        // 할 일의 사진은 그 할 일의 날에 둡니다. 날짜 없는 할 일("언젠가")은 만든 날입니다.
+        val fromTodos = todos.flatMap { todo ->
+            shotsOf(
+                source = SearchKind.TODO,
+                sourceId = todo.id,
+                date = parseDate(todo.dueDate) ?: toDate(todo.createdAt, zoneId),
+                label = todo.title.ifBlank { "할 일" },
+                images = todo.imageUris,
+                videos = emptyList(),
+                audios = emptyList()
+            )
+        }
+
         // 새것이 위입니다. 같은 날이면 붙인 차례를 그대로 둡니다.
-        return (fromDiaries + fromItems)
+        return (fromDiaries + fromItems + fromTodos)
             .distinctBy { it.uri }
             .sortedByDescending { it.date }
     }

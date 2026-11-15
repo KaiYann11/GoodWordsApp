@@ -43,7 +43,8 @@ class DiaryTodoSyncTest {
                     dueDate = "2026-08-12",
                     remindAt = 9_000L,
                     doneAt = 9_500L,
-                    createdAt = 4_000L
+                    createdAt = 4_000L,
+                    imageUris = listOf("content://photo/receipt", "appgoodwords://attachment/${"a".repeat(64)}.jpg")
                 )
             )
         )
@@ -52,6 +53,18 @@ class DiaryTodoSyncTest {
 
         assertEquals(snapshot.diaries, restored.diaries)
         assertEquals(snapshot.todos, restored.todos)
+    }
+
+    @Test
+    fun aTodoFromAnOlderServerOrFileHasNoPhotos() {
+        // 형식 27까지의 서버와 내보낸 파일에는 할 일의 사진 칸이 없습니다. 없는 칸은 빈 목록으로 읽습니다.
+        val json = AppDataJson.toJson(snapshotOf()).toString()
+            .replace("\"todos\":[]", """"todos":[{"syncId":"old","title":"우체국 가기","dueDate":"2026-08-12"}]""")
+
+        val restored = AppDataJson.fromJsonText(json)
+
+        assertEquals("우체국 가기", restored.todos.single().title)
+        assertEquals(emptyList<String>(), restored.todos.single().imageUris)
     }
 
     @Test

@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GoalTimeLogEntity::class,
         RecordLinkEntity::class
     ],
-    version = 26,
+    version = 27,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -50,6 +50,18 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recordLinkDao(): RecordLinkDao
 
     companion object {
+        /**
+         * 할 일에 사진 칸을 더합니다(사용자가 정함, 2026-11-15). 다른 표는 건드리지 않습니다.
+         *
+         * 빈 목록(`[]`)을 기본값으로 둡니다 — 일기·보관함의 `imageUris`와 같습니다. NULL을 허용하면 읽는 쪽마다
+         * "없음"과 "빈 목록"을 따로 다뤄야 합니다. 칸 이름은 [TodoEntity.imageUris]와 정확히 같아야 합니다.
+         */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE todos ADD COLUMN imageUris TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         /**
          * 기록끼리 잇는 줄을 담을 자리를 만듭니다(사용자가 정함, 2026-11-12). 기존 표는 건드리지 않습니다.
          *

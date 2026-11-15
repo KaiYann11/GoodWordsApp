@@ -434,3 +434,32 @@ test("메모 카드는 붙여 둔 사진을 서버에서 받아 보이고, 기�
   const plain = await renderContentCard({ id: 2, type: "QUOTE", title: "글귀", body: "본문", tags: [] });
   assert.doesNotMatch(plain, /attachmentGrid/);
 });
+
+async function renderTodoCard(todo, today) {
+  const source = await readFile(join(here, "../web/app.js"), "utf8");
+  const context = vm.createContext({ formatDate: (value) => String(value) });
+  vm.runInContext(source.slice(source.indexOf("const attachmentScheme ="), source.indexOf("/**\n * 받아 둔 첨부의 blob 주소.")), context);
+  vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("/**\n * 톡 찍어 둔 기분.")), context);
+  vm.runInContext(source.slice(source.indexOf("function attachmentMedia("), source.indexOf("function diaryCard(")), context);
+  // 할 일 카드 함수 하나만 떼어 옵니다(맨 앞 칸의 닫는 괄호까지).
+  const start = source.indexOf("function todoCard(");
+  const end = source.indexOf("\n}\n", start) + 3;
+  assert.ok(start >= 0 && end > start, "할 일 카드 토막을 찾지 못했습니다.");
+  vm.runInContext(source.slice(start, end), context);
+  return context.todoCard(todo, today);
+}
+
+test("할 일 카드는 붙여 둔 사진을 서버에서 받아 보이고, 사진이 없으면 사진 칸도 없다", async () => {
+  const photo = `appgoodwords://attachment/${"b".repeat(64)}.jpg`;
+  const html = await renderTodoCard(
+    { id: 3, title: "반품하기", note: "", dueDate: "2026-11-16", imageUris: [photo, "content://media/external/images/media/9"] },
+    "2026-11-15",
+  );
+  // 주소는 비워 두고 표식만 답니다 — 접속 키를 실어 받는 것은 hydrateAttachments입니다.
+  assert.match(html, new RegExp(`<img data-attachment="${"b".repeat(64)}\\.jpg"`));
+  assert.doesNotMatch(html, /<img[^>]* src=/);
+  assert.match(html, /기기 안 파일/);
+  // 웹은 보기만 합니다. 옛 서버가 준 할 일(사진 칸 없음)도 그대로 그립니다.
+  const plain = await renderTodoCard({ id: 4, title: "물 사기", note: "", dueDate: "2026-11-15" }, "2026-11-15");
+  assert.doesNotMatch(plain, /attachmentGrid/);
+});

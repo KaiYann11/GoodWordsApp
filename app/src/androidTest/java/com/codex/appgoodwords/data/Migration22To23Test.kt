@@ -33,22 +33,25 @@ class Migration22To23Test {
             // Room이 만든 표에는 이미 새 칸이 있습니다. 22의 모양으로 되돌려 놓아야
             // ALTER가 실제로 걸리는 길을 시험하게 됩니다(그러지 않으면 "칸이 이미 있다"로 끝납니다).
             before.openHelper.writableDatabase.execSQL("ALTER TABLE content_items DROP COLUMN linkedRoutineSyncIds")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN imageUris")
             before.openHelper.writableDatabase.version = 22
         } finally {
             before.close()
         }
 
-        // 지금 판까지 잇습니다(Migration20To21Test와 같은 방식). 23→24·24→25·25→26은 표만 더하므로 여기서 본 것을 건드리지 않습니다.
+        // 지금 판까지 잇습니다(Migration20To21Test와 같은 방식). 23→24·24→25·25→26은 표만, 26→27은 할 일에 칸 하나만 더하므로
+        // 여기서 본 것을 건드리지 않습니다. 할 일의 새 칸도 위에서 지워 두어야 26→27의 ALTER가 "칸이 이미 있다"로 깨지지 않습니다.
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
             .addMigrations(
                 AppDatabase.MIGRATION_22_23,
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
-                AppDatabase.MIGRATION_25_26
+                AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27
             )
             .build()
         try {
-            assertEquals(26, after.openHelper.writableDatabase.version)
+            assertEquals(27, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(quote, after.contentItemDao().getById(quote.id))
             assertEquals(1, after.contentMemoDao().getAll().size)

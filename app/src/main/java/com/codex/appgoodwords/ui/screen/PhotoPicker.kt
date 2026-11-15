@@ -32,12 +32,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
 /**
- * 사진 고르기와 고른 사진 — 행복한 순간·좋아하는 것과 메모가 같이 씁니다. 앱을 다시 켜도 그 사진을 읽을 수 있게 권한을
- * 붙들어 둡니다(보관함 담기와 같게). 올리는 것은 동기화가 맡습니다 — 보관함 기록의 사진과 같은 길입니다.
+ * 사진 고르기와 고른 사진 — 행복한 순간·좋아하는 것·메모와 할 일 고치기가 같이 씁니다. 앱을 다시 켜도 그 사진을 읽을 수
+ * 있게 권한을 붙들어 둡니다(보관함 담기와 같게). 올리는 것은 동기화가 맡습니다 — 보관함 기록의 사진과 같은 길입니다.
  *
  * @param addTag 고르기 단추의 시험 표식. 쓰는 화면마다 다릅니다.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PhotoPicker(
     images: List<String>,
@@ -47,6 +46,23 @@ internal fun PhotoPicker(
     apiKey: String,
     addTag: String
 ) {
+    val pickPhotos = rememberPhotoPicker(images = images, onChange = onChange)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        PickedPhotos(images = images, onChange = onChange, enabled = enabled, serverUrl = serverUrl, apiKey = apiKey)
+        OutlinedButton(
+            onClick = pickPhotos,
+            enabled = enabled,
+            modifier = Modifier.testTag(addTag)
+        ) { Text(if (images.isEmpty()) "+ 사진" else "+ 사진 더") }
+    }
+}
+
+/**
+ * 사진 고르기 창을 여는 손잡이. 고른 사진은 권한을 붙들어 둔 뒤 [images] 뒤에 더해 [onChange]로 넘깁니다.
+ * 고르기 단추를 따로 두는 화면(할 일 적는 줄)이 씁니다.
+ */
+@Composable
+internal fun rememberPhotoPicker(images: List<String>, onChange: (List<String>) -> Unit): () -> Unit {
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val granted = uris.mapNotNull { uri ->
@@ -57,34 +73,39 @@ internal fun PhotoPicker(
         }
         onChange((images + granted).distinct())
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (images.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                images.forEach { uri ->
-                    Box {
-                        PhotoThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 64.dp)
-                        IconButton(
-                            onClick = { onChange(images - uri) },
-                            enabled = enabled,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(24.dp)
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape)
-                        ) {
-                            Icon(Icons.Outlined.Close, contentDescription = "사진 빼기", modifier = Modifier.size(16.dp))
-                        }
-                    }
+    return { picker.launch(arrayOf("image/*")) }
+}
+
+/** 고른 사진들. 한 장마다 ×로 뺍니다. 고른 것이 없으면 아무것도 그리지 않습니다. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PickedPhotos(
+    images: List<String>,
+    onChange: (List<String>) -> Unit,
+    enabled: Boolean,
+    serverUrl: String,
+    apiKey: String
+) {
+    if (images.isEmpty()) return
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        images.forEach { uri ->
+            Box {
+                PhotoThumbnail(uri = uri, serverUrl = serverUrl, apiKey = apiKey, size = 64.dp)
+                IconButton(
+                    onClick = { onChange(images - uri) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), CircleShape)
+                ) {
+                    Icon(Icons.Outlined.Close, contentDescription = "사진 빼기", modifier = Modifier.size(16.dp))
                 }
             }
         }
-        OutlinedButton(
-            onClick = { picker.launch(arrayOf("image/*")) },
-            enabled = enabled,
-            modifier = Modifier.testTag(addTag)
-        ) { Text(if (images.isEmpty()) "+ 사진" else "+ 사진 더") }
     }
 }
 

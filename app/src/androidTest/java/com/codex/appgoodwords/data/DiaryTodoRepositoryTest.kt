@@ -107,6 +107,29 @@ class DiaryTodoRepositoryTest {
     }
 
     @Test
+    fun aTodoKeepsItsPhotosThroughTheDoneMarkAndEdits() = runBlocking {
+        // 빈 주소와 같은 사진 두 번은 떼고 붙인 차례대로 둡니다(메모·행복한 순간과 같게).
+        val saved = repository.saveTodo(
+            TodoDraft(
+                title = "반품하기",
+                dueDate = today,
+                imageUris = listOf("content://photo/receipt", " ", "content://photo/box", "content://photo/receipt")
+            )
+        )
+        assertEquals(listOf("content://photo/receipt", "content://photo/box"), saved.imageUris)
+
+        // 완료를 눌러도 사진은 그대로입니다.
+        repository.toggleTodoDone(saved.id)
+        val done = container.database.todoDao().getById(saved.id)!!
+        assertEquals(saved.imageUris, done.imageUris)
+
+        // 고치기는 화면이 들고 있던 사진 목록 그대로 저장합니다 — 뺀 사진은 빠지고 완료 표시는 남습니다.
+        val edited = repository.saveTodo(TodoDraft.from(done).copy(title = "택배 반품하기", imageUris = listOf("content://photo/box")))
+        assertEquals(listOf("content://photo/box"), container.database.todoDao().getById(saved.id)?.imageUris)
+        assertNotNull("고치면서 완료 표시를 잃었습니다.", edited.doneAt)
+    }
+
+    @Test
     fun onlyUnfinishedTodosWithAlarmsNeedRescheduling() = runBlocking {
         repository.saveTodo(TodoDraft(title = "알람 없음", dueDate = today))
         val withAlarm = repository.saveTodo(

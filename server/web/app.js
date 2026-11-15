@@ -1047,6 +1047,7 @@ function renderTodos() {
       </section>
     </section>
   `;
+  hydrateAttachments();
 }
 
 function todoGroup(title, todos, today) {
@@ -1080,6 +1081,8 @@ function groupTodos(todos, today) {
 function todoCard(todo, today) {
   const done = Boolean(todo.doneAt);
   const overdue = !done && Boolean(todo.dueDate) && todo.dueDate < today;
+  // 붙여 둔 사진. 웹은 보기만 합니다 — 할 일에 사진을 붙이는 것은 앱에서(사용자가 정함, 2026-11-15).
+  const photos = todo.imageUris || [];
   return `
     <article class="item">
       <div class="itemHeader">
@@ -1095,6 +1098,7 @@ function todoCard(todo, today) {
         <button type="button" data-action="toggle-todo" data-id="${todo.id}">${done ? "되돌리기" : "완료"}</button>
       </div>
       ${todo.note ? `<p>${escapeHtml(todo.note)}</p>` : ""}
+      ${photos.length ? `<div class="attachmentGrid">${photos.map(attachmentMedia).join("")}</div>` : ""}
       <div class="actions">
         <button type="button" data-action="edit-todo" data-id="${todo.id}">수정</button>
         <button class="danger" type="button" data-action="delete-todo" data-id="${todo.id}">삭제</button>
