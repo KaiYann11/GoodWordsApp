@@ -175,6 +175,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   `DiaryAnswerConverters`).
 - 공유로 들어온 글(`ShareTargetActivity`)은 `documentLaunchMode="always"`와 `onNewIntent` 저장을 지키고, 토스트는 메인 스레드에서만.
 - 분류·설명은 같은 기록의 종류만 바꿉니다(새로 만들면 첨부·덧메모·syncId가 끊깁니다).
+- **붙여 둔 사진은 `attachmentImageRequest`로 그립니다**(`AttachmentThumbnails`·`PhotoThumbnail`·`AttachmentViewerDialog`).
+  동기화가 주소를 서버 것(`appgoodwords://attachment/…`)으로 바꾸므로, 주소를 Coil에 그대로 넘기면 올리기 전에만 보이고
+  올린 뒤에는 오류 없이 빈칸이 됩니다(1.22.0까지 보관함 상세가 그랬습니다). 상세의 영상은 아직 주소를 그대로 씁니다(`BACKLOG.md`).
 - **탭 번호는 이름표일 뿐입니다** — 보관함 `LibraryTab`(메모·개념·임시저장소 번호는 노트 칸 알약, 행복한 순간·좋아하는 것은 행복
   칸 알약), 홈 `HomeTab`. 검색이 번호로 짚어 오므로 차례에 맞춰 번호를 바꾸지 않습니다.
 - **지운 기록을 가리키는 이은 줄은 지우지 않습니다**(`RecordIndex.resolve`가 없는 기록을 화면에서만 뺍니다 — 목표에 이어 둔 루틴과
@@ -194,6 +197,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   묻는 몇 분 사이에 보낸 내 말·담기 표시를 묻기 전 상태로 덮습니다. 코치의 말은 물은 때의 차례에 끼웁니다(`withCoachLine`).
 - **목록 화면에서 다른 경로로 넘어갈 때 대화상자를 먼저 닫습니다** — 열린 채로 넘어가면 그 경로의 상태와 함께 저장되어,
   돌아왔을 때 창이 다시 뜨고 앞서 친 글이 다음 창에 남습니다(`GoalTabsScreen`).
+- **새로 여는 담는 칸·고치는 칸은 그 경로의 저장 상태를 먼저 버립니다**(`saveableStateHolder.removeState` — `openFreshAddForm`·
+  편집). 경로를 빼도 저장 상태는 남고, `rememberSaveable`은 되살릴 값이 있으면 열쇠(`addFormVersion`)가 바뀌어도 그 값을 씁니다 —
+  1.22.0까지 메모를 저장하고 "직접 쓰기"를 다시 누르면 방금 쓴 글이 그대로 떴습니다(`FreshFormFlowTest`).
 - 앱 업데이트는 서버가 준 파일 이름을 그대로 믿지 않고, 해시가 다르면 지우고, 접속 키를 보내지 않습니다(`AppUpdateJson`).
   **받기는 DownloadManager에 맡깁니다**(`AppUpdateDownloads` — 화면 쪽 코루틴으로 받으면 다른 앱으로 간 사이 Android 15가
   통신을 끊습니다). 다 받으면 앱 안쪽 캐시로 옮겨 담으며 맞춰 본 것만 설치합니다(`AppUpdateFiles.verifyInto`). 시스템의

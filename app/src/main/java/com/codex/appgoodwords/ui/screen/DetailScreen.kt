@@ -83,10 +83,15 @@ fun DetailScreen(
     onMakeTodo: (String) -> Unit = {},
     onClassify: () -> Unit = {},
     askingConcept: Boolean = false,
-    onAskConcept: () -> Unit = {}
+    onAskConcept: () -> Unit = {},
+    /** 서버에 올라간 사진을 받는 데 씁니다. 비어 있으면 그 사진은 "서버 연결 필요"로 보입니다. */
+    serverUrl: String = "",
+    apiKey: String = ""
 ) {
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // 크게 보는 사진의 차례. null이면 닫혀 있습니다.
+    var viewerIndex by remember(item.id) { mutableStateOf<Int?>(null) }
     var practiceKind by remember { mutableStateOf<PracticeKind?>(null) }
     var memoText by rememberSaveable(item.id) { mutableStateOf("") }
     val sortedMemos = remember(memos) { memos.sortedByDescending { it.createdAt } }
@@ -111,6 +116,16 @@ fun DetailScreen(
                     Text("취소")
                 }
             }
+        )
+    }
+
+    viewerIndex?.let { index ->
+        AttachmentViewerDialog(
+            uris = item.imageUris,
+            startIndex = index,
+            onDismiss = { viewerIndex = null },
+            serverUrl = serverUrl,
+            apiKey = apiKey
         )
     }
 
@@ -231,15 +246,17 @@ fun DetailScreen(
         if (item.imageUris.isNotEmpty() || item.videoUris.isNotEmpty()) {
             item {
                 SectionCard(title = "첨부 미디어") {
+                    // 작은 사진 줄이고 누르면 전체 화면입니다(사용자가 정함, 2026-11-15 — 일기·행복한 순간과 같게). 서버에 올라간
+                    // 사진은 접속 키를 실어 받습니다. 예전에는 주소를 Coil에 그대로 넘겨, 동기화로 주소가 서버 것
+                    // (`appgoodwords://`)으로 바뀐 사진이 "이미지를 불러오지 못했습니다"로 나왔습니다.
                     if (item.imageUris.isNotEmpty()) {
-                        Text(
-                            text = "사진",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
+                        AttachmentThumbnails(
+                            imageUris = item.imageUris,
+                            videoUris = emptyList(),
+                            serverUrl = serverUrl,
+                            apiKey = apiKey,
+                            onOpenImage = { index -> viewerIndex = index }
                         )
-                        item.imageUris.forEach { imageUri ->
-                            MediaImage(uriString = imageUri)
-                        }
                     }
 
                     if (item.videoUris.isNotEmpty()) {
@@ -684,30 +701,15 @@ private fun VideoLinkPreview(
     }
 }
 
-@Composable
-private fun MediaImage(uriString: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        RemoteOrLocalImage(
-            source = uriString,
-            contentDescription = displayNameFromUri(uriString),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-        )
-        Text(
-            text = displayNameFromUri(uriString),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
 /**
  * 이미지 로딩은 Coil에 맡깁니다.
  *
  * 직접 스레드를 띄워 받던 이전 방식은 캐시와 다운샘플링이 없어 스크롤할 때마다 다시 받고,
  * 큰 이미지에서 메모리를 통째로 잡아먹었습니다. content:// 로컬 파일과 http(s) 원격 주소를
  * 모두 같은 경로로 처리합니다.
+ *
+ * **붙여 둔 첨부는 여기로 넘기지 않습니다.** 서버가 보관하는 첨부(`appgoodwords://`)는 Coil이 열 줄 모르고 접속 키도
+ * 실어야 해서 [attachmentImageRequest]로 받습니다([AttachmentThumbnails]). 지금은 영상 링크의 썸네일만 씁니다.
  */
 @Composable
 private fun RemoteOrLocalImage(
@@ -862,13 +864,4 @@ private fun deriveVideoThumbnailUrl(sourceUrl: String): String? {
     }?.substringBefore("?")
 
     return videoId?.takeIf { it.isNotBlank() }?.let { "https://img.youtube.com/vi/$it/hqdefault.jpg" }
-}
-
-private fun displayNameFromUri(uriString: String): String {
-    val uri = Uri.parse(uriString)
-    return uri.lastPathSegment
-        ?.substringAfterLast('/')
-        ?.substringAfterLast(':')
-        ?.takeIf(String::isNotBlank)
-        ?: "첨부 파일"
 }

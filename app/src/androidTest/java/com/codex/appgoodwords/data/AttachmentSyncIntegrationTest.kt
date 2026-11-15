@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.core.app.ApplicationProvider
+import coil.request.SuccessResult
 import com.codex.appgoodwords.AppGoodWordsApplication
+import com.codex.appgoodwords.ui.screen.attachmentImageRequest
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -90,6 +92,27 @@ class AttachmentSyncIntegrationTest {
         val url = AttachmentUris.toHttpUrl(settings.serverUrl, stored)!!
 
         assertArrayEquals("받아온 파일이 올린 것과 다릅니다.", png, download(url))
+    }
+
+    @Test
+    fun aMemoPhotoIsUploadedAndOpensTheWayTheDetailAsks() = runBlocking {
+        val itemDao = container.database.contentItemDao()
+        val memoId = itemDao.insert(
+            ContentItemEntity(type = ContentType.MEMO, title = "사진 메모", body = "", imageUris = listOf(photoUri(photo)))
+        )
+        try {
+            container.attachmentUploader.uploadPending(settings)
+            val stored = itemDao.getById(memoId)!!.imageUris.single()
+            assertTrue("주소가 서버 것으로 바뀌지 않았습니다: $stored", AttachmentUris.isServerAttachment(stored))
+
+            // 상세가 그리는 길 그대로 받습니다(접속 키를 실은 http 주소). 1.22.0까지 상세는 서버 주소를 Coil에 그대로 넘겨
+            // 동기화된 사진을 열지 못했습니다.
+            val request = attachmentImageRequest(context, stored, settings.serverUrl, settings.apiKey)!!
+            val result = container.attachmentImageLoader.execute(request)
+            assertTrue("사진을 받지 못했습니다: $result", result is SuccessResult)
+        } finally {
+            itemDao.deleteById(memoId)
+        }
     }
 
     @Test

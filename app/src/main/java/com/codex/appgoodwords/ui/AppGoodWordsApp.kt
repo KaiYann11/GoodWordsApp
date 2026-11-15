@@ -671,6 +671,10 @@ fun AppGoodWordsApp(
         if (navStack.lastOrNull() == route) {
             return
         }
+        // 지난번 이 경로에서 적던 것(저장한 글·고른 사진)이 경로별 저장 상태에 남아 있습니다. 버리지 않으면 새 칸 대신
+        // 그것이 되살아납니다 — rememberSaveable은 되살릴 값이 있으면 열쇠(addFormVersion)가 바뀌어도 그 값을 씁니다.
+        // 1.22.0까지 메모를 저장하고 "직접 쓰기"를 다시 누르면 방금 쓴 글이 그대로 있었습니다.
+        saveableStateHolder.removeState(route)
         pushRoute(route)
     }
 
@@ -1046,9 +1050,14 @@ fun AppGoodWordsApp(
                         onClassify = { classifyingItemId = selectedItem.id },
                         askingConcept = askingConceptId == selectedItem.id,
                         onAskConcept = { explainConcept(selectedItem) },
+                        serverUrl = serverSyncSettings.serverUrl,
+                        apiKey = serverSyncSettings.apiKey,
                         confirmedToday = selectedItem.id in confirmedTodayIds,
                         onEdit = { item ->
-                            pushRoute(editRoute(currentTab, item.id))
+                            // 지난번 고치다 만 값 대신 지금 기록으로 엽니다(새 칸과 같은 까닭 — openFreshAddForm).
+                            val route = editRoute(currentTab, item.id)
+                            saveableStateHolder.removeState(route)
+                            pushRoute(route)
                             addFormVersion += 1
                         },
                         // 이 글귀에 달린 것만 골라 넘깁니다. 화면은 자기 글귀 것만 그립니다.
@@ -2119,7 +2128,9 @@ fun AppGoodWordsApp(
                                         snackbarHostState.showSnackbar(message)
                                     }
                                 }
-                            }
+                            },
+                            serverUrl = serverSyncSettings.serverUrl,
+                            apiKey = serverSyncSettings.apiKey
                         )
 
                         // 설정처럼 일기 잠금이 걸려 있으면 열지 않습니다. 복원은 일기까지 통째로 바꿉니다.

@@ -40,7 +40,11 @@ class NotToDoFlowTest {
     }
 
     @Test fun createReopenSearchEditAndDeletePreserveTheRecordIdentity() {
-        compose.onNode(hasText("루틴") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).performClick()
+        val routineTab = hasText("루틴") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
+        // 앱은 잠금 여부를 읽는 동안 빈 화면입니다(AppLockState.CHECKING). 그 읽기는 시험이 기다려 주지 않아, 가끔 하단 바를
+        // 찾기 전에 눌러 실패했습니다(2026-11-15).
+        compose.waitUntil(10_000) { compose.onAllNodes(routineTab).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(routineTab).performClick()
         compose.onNodeWithTag(notToDoTabTag).performClick()
         compose.onNodeWithTag(notToDoAddTag).performClick()
         compose.onNodeWithTag(notToDoTitleTag).performTextInput(title)
@@ -52,6 +56,7 @@ class NotToDoFlowTest {
         assertEquals("", original.body)
 
         compose.activityRule.scenario.recreate()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText(title)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(title).assertIsDisplayed()
         compose.onNodeWithContentDescription("검색").performClick()
         compose.onNodeWithTag(searchInputTag).performTextInput(title)

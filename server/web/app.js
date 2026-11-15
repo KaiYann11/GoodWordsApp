@@ -560,6 +560,7 @@ function renderHome() {
       </div>
     </section>
   `;
+  hydrateAttachments();
 }
 
 function renderLibrary() {
@@ -651,6 +652,7 @@ function renderLibraryListOnly() {
   if (!list) return;
   const filtered = filteredItems();
   list.innerHTML = filtered.length ? filtered.map(contentCard).join("") : empty("조건에 맞는 항목이 없습니다.");
+  hydrateAttachments(list);
 }
 
 function renderRoutines() {
@@ -1818,6 +1820,8 @@ function contentCard(item) {
   const memos = state.snapshot.contentMemos
     .filter((memo) => memo.contentItemId === item.id)
     .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  // 붙여 둔 사진·영상. 웹은 보기만 합니다 — 메모에 사진을 붙이는 것은 앱에서(사용자가 정함, 2026-11-15).
+  const media = [...(item.imageUris || []), ...(item.videoUris || [])];
   return `
     <article class="item">
       <div class="itemHeader">
@@ -1833,6 +1837,7 @@ function contentCard(item) {
         <button type="button" data-action="favorite" data-id="${item.id}" title="즐겨찾기">${item.isFavorite ? "★" : "☆"}</button>
       </div>
       ${item.body ? `<p>${escapeHtml(item.body)}</p>` : ""}
+      ${media.length ? `<div class="attachmentGrid">${media.map(attachmentMedia).join("")}</div>` : ""}
       ${item.sourceUrl ? `<p><a href="${attr(item.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.sourceUrl)}</a></p>` : ""}
       ${item.tags?.length ? `<div class="chips">${item.tags.map((tag) => `<span class="chip">#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
       <div class="actions">
