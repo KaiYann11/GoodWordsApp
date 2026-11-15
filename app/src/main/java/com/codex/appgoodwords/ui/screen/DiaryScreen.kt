@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.codex.appgoodwords.data.DiaryAnswers
@@ -354,7 +355,9 @@ internal fun AttachmentThumbnails(
      * **사진만 엽니다.** 어느 것이 영상인지는 주소를 보고 짐작하지 않고 일기가 나눠 둔
      * 두 목록으로 가릅니다. 확장자로 짐작하면 서버 주소(`appgoodwords://...`)에서 틀립니다.
      */
-    onOpenImage: (Int) -> Unit = {}
+    onOpenImage: (Int) -> Unit = {},
+    /** 한 장의 크기. 목록 줄(할 일)은 작게 둡니다. */
+    size: Dp = 96.dp
 ) {
     val uris = imageUris + videoUris
     if (uris.isEmpty()) return
@@ -370,7 +373,7 @@ internal fun AttachmentThumbnails(
                 // 서버 주소를 안 넣은 채 다른 기기에서 붙인 첨부를 받으면 여기로 옵니다.
                 Box(
                     modifier = Modifier
-                        .size(96.dp)
+                        .size(size)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
@@ -390,7 +393,7 @@ internal fun AttachmentThumbnails(
                     contentDescription = if (isImage) "붙여 둔 사진, 눌러서 크게 보기" else "붙여 둔 영상",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(96.dp)
+                        .size(size)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .then(

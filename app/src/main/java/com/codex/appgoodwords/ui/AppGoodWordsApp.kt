@@ -1595,6 +1595,9 @@ fun AppGoodWordsApp(
                                     focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.TODO },
                                     today = LocalDate.now(),
                                     canScheduleExactAlarms = canScheduleExactAlarms,
+                                    // 동기화로 서버에 올라간 사진은 주소와 키가 있어야 받아 옵니다.
+                                    serverUrl = serverSyncSettings.serverUrl,
+                                    apiKey = serverSyncSettings.apiKey,
                                     onSaveTodo = { draft ->
                                         coroutineScope.launch {
                                             val result = viewModel.saveTodo(draft)

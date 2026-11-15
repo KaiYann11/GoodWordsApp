@@ -30,7 +30,12 @@ data class TodoEntity(
     val remindAt: Long? = null,
     /** 완료 시각. null이면 아직 안 한 것입니다. */
     val doneAt: Long? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * 붙여 둔 사진(사용자가 정함, 2026-11-15) — 반품할 영수증, 살 물건처럼 할 일을 할 때 볼 것.
+     * 일기·보관함 사진과 같은 주소이고, 동기화 직전에 서버 주소로 바뀝니다([AttachmentUploader]).
+     */
+    val imageUris: List<String> = emptyList()
 ) {
     val isDone: Boolean
         get() = doneAt != null

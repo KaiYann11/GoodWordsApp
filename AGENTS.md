@@ -114,6 +114,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 
 바꾸면 **`Migration`과 `Migration{N}To{M}Test`를 함께** 더합니다(없거나 틀리면 DB가 오류 없이 지워집니다). 동기화 JSON을
 바꾸면 앱 `AppDataJson`과 서버를 함께 바꾸고 `schemaVersion`을 올립니다.
+**지금 판까지 잇는 마이그레이션 시험**(`Migration22To23Test`부터)도 판을 올릴 때마다 고칩니다 — 새 `Migration`을 사슬에 더하고 판
+숫자를 맞춥니다. 이 시험들은 지금 모양으로 만든 DB를 옛 모양으로 되돌려 쓰므로 **새로 생긴 칸도 지워 둡니다** — `ADD COLUMN`은
+같은 칸이 있으면 실패합니다(`CREATE TABLE IF NOT EXISTS`는 괜찮습니다).
 
 ## 한 곳에서만 정하는 것
 
@@ -149,6 +152,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 보관함 기록의 칸(`ContentItemEntity`) | `AppDataJson` · 편집 저장이 칸을 지키는지(`saveContent`·서버 `saveContent`) · 서버 `normalizeContent`(빠뜨리면 병합 때마다 사라집니다) |
 | 목표에 이어 둔 루틴(`linkedRoutineSyncIds`) | 같은 내용 합치기로 루틴이 줄 때 앱 `SyncDeduplicator`·서버 `deduplicate`가 같이 옮깁니다 |
 | 첨부 주소 형식 | 앱 `AttachmentUris.SCHEME` · 서버·웹 `attachmentScheme` |
+| 첨부를 붙이는 기록(일기·보관함·할 일) | 앱 `AttachmentUploader`(빠지면 다른 기기·웹에서 "기기 안 파일")·`AttachmentGallery` · 같은 내용 합치기의 지문(앱·서버 모두 첨부까지) · 서버 `normalize…`(빠뜨리면 병합 때마다 사라짐)·`referencedAttachmentIds`(빠지면 쓰는 사진을 안 쓰는 것으로 셈) · 웹 카드와 `hydrateAttachments` |
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
 | 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |

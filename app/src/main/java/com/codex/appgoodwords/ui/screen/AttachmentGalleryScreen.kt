@@ -66,7 +66,7 @@ fun AttachmentGalleryScreen(
         ) {
             EmptyCard(
                 title = "아직 붙여 둔 첨부가 없습니다.",
-                body = "일기에 사진·동영상·소리를 붙이거나 글귀에 사진을 넣으면 여기에 모입니다."
+                body = "일기에 사진·동영상·소리를 붙이거나 글귀·메모·할 일에 사진을 넣으면 여기에 모입니다."
             )
         }
         return

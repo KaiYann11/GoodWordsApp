@@ -1,8 +1,12 @@
 package com.codex.appgoodwords.ui.screen
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -28,6 +32,9 @@ class TodoScreenTest {
     val compose = createComposeRule()
 
     private val today = LocalDate.of(2026, 8, 12)
+    // 아무것도 듣지 않는 자리라 시험이 바깥으로 요청을 내보내지 않습니다.
+    private val serverUrl = "https://127.0.0.1:1"
+    private val photos = listOf("a", "b").map { "appgoodwords://attachment/${it.repeat(64)}.jpg" }
 
     @Test
     fun anUnfinishedTaskFromAnEarlierDayShowsUnderOverdue() {
@@ -81,6 +88,58 @@ class TodoScreenTest {
 
         assertEquals("우체국 가기", saved?.title)
         assertEquals(today, saved?.dueDate)
+        assertEquals("고르지 않은 사진이 붙었습니다.", emptyList<String>(), saved?.imageUris)
+    }
+
+    @Test
+    fun theAddRowHasAPhotoButton() {
+        // 만들면서 영수증·물건 사진을 바로 붙입니다(사용자가 정함, 2026-11-15). 고르는 창은 시스템 것이라 눌러 보기에서 봅니다.
+        compose.setContent { todoScreen(todos = emptyList()) }
+
+        compose.onNodeWithTag(todoAddPhotoTag).assertIsDisplayed()
+        compose.onNodeWithContentDescription("사진 붙이기").assertIsDisplayed()
+    }
+
+    @Test
+    fun aTaskWithPhotosShowsThemSmallAndOpensTheTappedOneFullScreen() {
+        // 할 일에는 따로 여는 화면이 없어 목록 줄에서 바로 크게 봅니다(사용자가 정함, 2026-11-15).
+        compose.setContent {
+            todoScreen(
+                todos = listOf(
+                    todo(id = 1, title = "반품하기", dueDate = "2026-08-12", imageUris = photos),
+                    todo(id = 2, title = "물 사기", dueDate = "2026-08-12")
+                ),
+                serverUrl = serverUrl
+            )
+        }
+
+        compose.onNodeWithTag(attachmentThumbnailTag(photos[0])).assertIsDisplayed()
+        // 사진이 없는 할 일에는 사진 줄이 없습니다.
+        compose.onAllNodesWithContentDescription("붙여 둔 사진, 눌러서 크게 보기").assertCountEquals(2)
+        compose.onNodeWithTag(attachmentThumbnailTag(photos[1])).performClick()
+
+        compose.onNodeWithTag(attachmentViewerTag).assertExists()
+        compose.onNodeWithTag(attachmentViewerCountTag, useUnmergedTree = true).assertTextEquals("2 / 2")
+    }
+
+    @Test
+    fun editingCanTakeOutAPhotoAndKeepsTheRest() {
+        var saved: TodoDraft? = null
+        compose.setContent {
+            todoScreen(
+                todos = listOf(todo(id = 1, title = "반품하기", dueDate = "2026-08-12", imageUris = photos)),
+                serverUrl = serverUrl,
+                onSaveTodo = { saved = it }
+            )
+        }
+
+        compose.onNodeWithText("고치기").performClick()
+        compose.onNodeWithTag(todoEditPhotoTag).performScrollTo().assertTextEquals("+ 사진 더")
+        compose.onAllNodesWithContentDescription("사진 빼기")[0].performClick()
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals("반품하기", saved?.title)
+        assertEquals(listOf(photos[1]), saved?.imageUris)
     }
 
     @Test
@@ -162,20 +221,23 @@ class TodoScreenTest {
         id: Long,
         title: String,
         dueDate: String,
-        doneAt: Long? = null
+        doneAt: Long? = null,
+        imageUris: List<String> = emptyList()
     ) = TodoEntity(
         id = id,
         syncId = "todo-$id",
         title = title,
         dueDate = dueDate,
-        doneAt = doneAt
+        doneAt = doneAt,
+        imageUris = imageUris
     )
 
     @androidx.compose.runtime.Composable
     private fun todoScreen(
         todos: List<TodoEntity>,
         canScheduleExactAlarms: Boolean = true,
-        onSaveTodo: (TodoDraft) -> Unit = {}
+        onSaveTodo: (TodoDraft) -> Unit = {},
+        serverUrl: String = ""
     ) {
         TodoScreen(
             todos = todos,
@@ -184,7 +246,9 @@ class TodoScreenTest {
             onSaveTodo = onSaveTodo,
             onToggleDone = {},
             onDeleteTodo = {},
-            onOpenExactAlarmSettings = {}
+            onOpenExactAlarmSettings = {},
+            serverUrl = serverUrl,
+            apiKey = "synthetic-review-key"
         )
     }
 }

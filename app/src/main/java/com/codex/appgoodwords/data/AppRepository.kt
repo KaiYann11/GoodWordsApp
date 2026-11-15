@@ -1118,7 +1118,8 @@ class AppRepository(
             remindAt = draft.remindAt,
             // 고칠 때 완료 상태를 잃으면 끝낸 일이 되살아난다.
             doneAt = existing?.doneAt,
-            createdAt = existing?.createdAt ?: System.currentTimeMillis()
+            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            imageUris = draft.imageUris.map(String::trim).filter(String::isNotBlank).distinct()
         )
         val id = dao.insert(todo)
         return todo.copy(id = if (todo.id == 0L) id else todo.id)

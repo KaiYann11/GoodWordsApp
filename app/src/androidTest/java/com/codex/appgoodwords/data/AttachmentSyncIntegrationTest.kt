@@ -116,6 +116,27 @@ class AttachmentSyncIntegrationTest {
     }
 
     @Test
+    fun aTodoPhotoIsUploadedAndOpensTheWayTheListAsks() = runBlocking {
+        val todoDao = container.database.todoDao()
+        val todoId = todoDao.insert(
+            TodoEntity(title = "반품하기", dueDate = "2026-11-16", imageUris = listOf(photoUri(photo)))
+        )
+        try {
+            container.attachmentUploader.uploadPending(settings)
+            // 할 일의 사진도 올라가 주소가 서버 것이 되어야 다른 기기와 웹에서 보입니다(사용자가 정함, 2026-11-15).
+            val stored = todoDao.getById(todoId)!!.imageUris.single()
+            assertTrue("주소가 서버 것으로 바뀌지 않았습니다: $stored", AttachmentUris.isServerAttachment(stored))
+
+            // 할 일 목록의 작은 사진 줄이 그리는 길 그대로 받습니다(접속 키를 실은 http 주소).
+            val request = attachmentImageRequest(context, stored, settings.serverUrl, settings.apiKey)!!
+            val result = container.attachmentImageLoader.execute(request)
+            assertTrue("사진을 받지 못했습니다: $result", result is SuccessResult)
+        } finally {
+            todoDao.deleteById(todoId)
+        }
+    }
+
+    @Test
     fun alreadyUploadedAttachmentsAreNotSentAgain() = runBlocking {
         container.database.diaryDao().insert(
             DiaryEntity(

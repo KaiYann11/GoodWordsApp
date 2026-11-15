@@ -3,6 +3,7 @@ package com.codex.appgoodwords.ui.screen
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,7 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,6 +56,10 @@ import java.util.Calendar
 
 internal const val todoInputTag = "todo_input"
 internal const val todoAddButtonTag = "todo_add_button"
+/** 적는 줄의 사진 단추. */
+internal const val todoAddPhotoTag = "todo_add_photo"
+/** 고치기 창의 사진 고르기 단추. */
+internal const val todoEditPhotoTag = "todo_edit_photo"
 
 /** 새 할 일을 언제로 둘지 고르는 칩. */
 internal fun todoWhenTag(name: String): String = "todo_when_$name"
@@ -80,6 +88,9 @@ private enum class NewTodoWhen(val label: String) {
  * 예전에는 오늘 탭 안에서 루틴과 자리를 나눠 썼고, 화면에는 지난 일과 오늘만 보였습니다.
  * 앞일을 적어 두어도 그날이 오기 전에는 보이지 않아 적어 둘 곳이 못 되었습니다.
  * 지금은 마감일이 없어도 되고([TodoBucket.SOMEDAY]), 앞으로의 일도 칸을 나눠 함께 보입니다.
+ *
+ * 사진을 붙일 수 있습니다(사용자가 정함, 2026-11-15) — 적는 줄의 사진 단추로 만들 때, 고치기 창에서 나중에.
+ * 할 일에는 따로 여는 상세 화면이 없어서, 사진은 목록 줄에 작게 두고 누르면 크게 봅니다.
  */
 @Composable
 fun TodoScreen(
@@ -92,11 +103,19 @@ fun TodoScreen(
     onOpenExactAlarmSettings: () -> Unit,
     modifier: Modifier = Modifier,
     /** 검색에서 고른 할 일. 그 자리로 굴려 주고 잠깐 강조합니다. */
-    focusId: Long? = null
+    focusId: Long? = null,
+    /** 서버에 올라간 사진은 접속 키를 실어 받습니다([attachmentImageRequest]). */
+    serverUrl: String = "",
+    apiKey: String = ""
 ) {
     var editing by remember { mutableStateOf<TodoDraft?>(null) }
     var pendingDelete by remember { mutableStateOf<TodoEntity?>(null) }
     var newTitle by remember { mutableStateOf("") }
+    // 적는 줄에서 고른 사진. 추가하면 새 할 일에 붙고 비워집니다.
+    var newImages by remember { mutableStateOf(emptyList<String>()) }
+    val pickNewPhotos = rememberPhotoPicker(images = newImages, onChange = { newImages = it })
+    // 크게 보는 사진들과 처음 펼칠 자리.
+    var viewing by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
     var newWhen by rememberSaveable { mutableStateOf(NewTodoWhen.TODAY.name) }
 
     val selectedWhen = NewTodoWhen.valueOf(newWhen)
@@ -152,22 +171,38 @@ fun TodoScreen(
                                 .weight(1f)
                                 .testTag(todoInputTag)
                         )
+                        IconButton(
+                            onClick = pickNewPhotos,
+                            modifier = Modifier.testTag(todoAddPhotoTag)
+                        ) {
+                            Icon(imageVector = Icons.Outlined.AddPhotoAlternate, contentDescription = "사진 붙이기")
+                        }
                         Button(
                             enabled = newTitle.isNotBlank(),
                             onClick = {
                                 onSaveTodo(
                                     TodoDraft(
                                         title = newTitle,
-                                        dueDate = selectedWhen.dateFrom(today)
+                                        dueDate = selectedWhen.dateFrom(today),
+                                        imageUris = newImages
                                     )
                                 )
                                 newTitle = ""
+                                newImages = emptyList()
                             },
                             modifier = Modifier.testTag(todoAddButtonTag)
                         ) {
                             Text("추가")
                         }
                     }
+
+                    PickedPhotos(
+                        images = newImages,
+                        onChange = { newImages = it },
+                        enabled = true,
+                        serverUrl = serverUrl,
+                        apiKey = apiKey
+                    )
 
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(NewTodoWhen.entries) { choice ->
@@ -227,7 +262,10 @@ fun TodoScreen(
                     isOverdue = bucket == TodoBucket.OVERDUE && !todo.isDone,
                     onToggleDone = { onToggleDone(todo.id) },
                     onEdit = { editing = TodoDraft.from(todo) },
-                    onDelete = { pendingDelete = todo }
+                    onDelete = { pendingDelete = todo },
+                    onOpenImage = { index -> viewing = todo.imageUris to index },
+                    serverUrl = serverUrl,
+                    apiKey = apiKey
                 )
             }
         }
@@ -237,11 +275,23 @@ fun TodoScreen(
         TodoEditDialog(
             draft = draft,
             today = today,
+            serverUrl = serverUrl,
+            apiKey = apiKey,
             onDismiss = { editing = null },
             onSave = {
                 onSaveTodo(it)
                 editing = null
             }
+        )
+    }
+
+    viewing?.let { (uris, startIndex) ->
+        AttachmentViewerDialog(
+            uris = uris,
+            startIndex = startIndex,
+            onDismiss = { viewing = null },
+            serverUrl = serverUrl,
+            apiKey = apiKey
         )
     }
 
@@ -275,6 +325,9 @@ private fun TodoRow(
     onToggleDone: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onOpenImage: (Int) -> Unit,
+    serverUrl: String,
+    apiKey: String,
     focused: Boolean = false,
     focusKey: Any? = null
 ) {
@@ -283,50 +336,63 @@ private fun TodoRow(
             .fillMaxWidth()
             .focusHighlight(focused = focused, key = focusKey)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val haptics = rememberHaptics()
-            Checkbox(
-                checked = todo.isDone,
-                onCheckedChange = {
-                    // 끝냈을 때만 울립니다. 되돌리는 것은 기쁜 일이 아니라 고치는 일입니다.
-                    if (!todo.isDone) haptics.commit() else haptics.tap()
-                    onToggleDone()
-                }
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp)
-            ) {
-                Text(
-                    text = todo.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textDecoration = if (todo.isDone) TextDecoration.LineThrough else null,
-                    color = if (isOverdue) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val haptics = rememberHaptics()
+                Checkbox(
+                    checked = todo.isDone,
+                    onCheckedChange = {
+                        // 끝냈을 때만 울립니다. 되돌리는 것은 기쁜 일이 아니라 고치는 일입니다.
+                        if (!todo.isDone) haptics.commit() else haptics.tap()
+                        onToggleDone()
                     }
                 )
-                val subtitle = listOfNotNull(
-                    todo.dueDate.takeIf { it.isNotBlank() },
-                    todo.remindAt?.let { "알람 ${formatTime(it)}" },
-                    todo.note.takeIf { it.isNotBlank() }
-                ).joinToString(" · ")
-                if (subtitle.isNotBlank()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 4.dp)
+                ) {
                     Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = todo.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textDecoration = if (todo.isDone) TextDecoration.LineThrough else null,
+                        color = if (isOverdue) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
                     )
+                    val subtitle = listOfNotNull(
+                        todo.dueDate.takeIf { it.isNotBlank() },
+                        todo.remindAt?.let { "알람 ${formatTime(it)}" },
+                        todo.note.takeIf { it.isNotBlank() }
+                    ).joinToString(" · ")
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                TextButton(onClick = onEdit) { Text("고치기") }
+                IconButton(onClick = onDelete) {
+                    Icon(imageVector = Icons.Outlined.Delete, contentDescription = "할 일 지우기")
                 }
             }
-            TextButton(onClick = onEdit) { Text("고치기") }
-            IconButton(onClick = onDelete) {
-                Icon(imageVector = Icons.Outlined.Delete, contentDescription = "할 일 지우기")
+            // 사진이 있는 할 일만 작은 줄이 붙습니다. 따로 여는 화면이 없어 여기서 눌러 크게 봅니다.
+            // 체크 상자(48)와 글 앞 여백(4)만큼 들여 제목 아래에 맞춥니다 — 줄 안에 넣으면 체크 상자가 가운데로 내려갑니다.
+            if (todo.imageUris.isNotEmpty()) {
+                Box(modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)) {
+                    AttachmentThumbnails(
+                        imageUris = todo.imageUris,
+                        videoUris = emptyList(),
+                        serverUrl = serverUrl,
+                        apiKey = apiKey,
+                        onOpenImage = onOpenImage,
+                        size = 56.dp
+                    )
+                }
             }
         }
     }
@@ -336,6 +402,8 @@ private fun TodoRow(
 private fun TodoEditDialog(
     draft: TodoDraft,
     today: LocalDate,
+    serverUrl: String,
+    apiKey: String,
     onDismiss: () -> Unit,
     onSave: (TodoDraft) -> Unit
 ) {
@@ -346,7 +414,11 @@ private fun TodoEditDialog(
         onDismissRequest = onDismiss,
         title = { Text("할 일 고치기") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 사진까지 붙으면 작은 화면에서 넘칩니다. 창 안에서 밀어 봅니다.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
                     value = current.title,
                     onValueChange = { current = current.copy(title = it) },
@@ -416,6 +488,15 @@ private fun TodoEditDialog(
                         Text("알람 지우기")
                     }
                 }
+                Text(text = "사진", style = MaterialTheme.typography.titleSmall)
+                PhotoPicker(
+                    images = current.imageUris,
+                    onChange = { current = current.copy(imageUris = it) },
+                    enabled = true,
+                    serverUrl = serverUrl,
+                    apiKey = apiKey,
+                    addTag = todoEditPhotoTag
+                )
             }
         },
         confirmButton = {
