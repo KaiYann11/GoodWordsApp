@@ -197,6 +197,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   묻는 몇 분 사이에 보낸 내 말·담기 표시를 묻기 전 상태로 덮습니다. 코치의 말은 물은 때의 차례에 끼웁니다(`withCoachLine`).
 - **목록 화면에서 다른 경로로 넘어갈 때 대화상자를 먼저 닫습니다** — 열린 채로 넘어가면 그 경로의 상태와 함께 저장되어,
   돌아왔을 때 창이 다시 뜨고 앞서 친 글이 다음 창에 남습니다(`GoalTabsScreen`).
+- **새로 여는 담는 칸·고치는 칸은 그 경로의 저장 상태를 먼저 버립니다**(`saveableStateHolder.removeState` — `openFreshAddForm`·
+  편집). 경로를 빼도 저장 상태는 남고, `rememberSaveable`은 되살릴 값이 있으면 열쇠(`addFormVersion`)가 바뀌어도 그 값을 씁니다 —
+  1.22.0까지 메모를 저장하고 "직접 쓰기"를 다시 누르면 방금 쓴 글이 그대로 떴습니다(`FreshFormFlowTest`).
 - 앱 업데이트는 서버가 준 파일 이름을 그대로 믿지 않고, 해시가 다르면 지우고, 접속 키를 보내지 않습니다(`AppUpdateJson`).
   **받기는 DownloadManager에 맡깁니다**(`AppUpdateDownloads` — 화면 쪽 코루틴으로 받으면 다른 앱으로 간 사이 Android 15가
   통신을 끊습니다). 다 받으면 앱 안쪽 캐시로 옮겨 담으며 맞춰 본 것만 설치합니다(`AppUpdateFiles.verifyInto`). 시스템의
