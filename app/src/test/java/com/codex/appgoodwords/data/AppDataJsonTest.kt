@@ -52,6 +52,43 @@ class AppDataJsonTest {
     }
 
     @Test
+    fun aRoutineGoesOutWithIsoDaysAndAClock() {
+        // 서버·웹이 읽는 꼴입니다(요일은 월=1 … 일=7, 시각은 HH:mm, 상시는 빈 글자).
+        val payload = AppDataJson.toJson(fullSnapshot())
+        val routine = payload.getJSONArray("routines").getJSONObject(0)
+
+        assertEquals("[1,3,5]", routine.getJSONArray("weekdays").toString())
+        assertEquals("19:30", routine.getString("time"))
+
+        val anytime = AppDataJson.toJson(
+            fullSnapshot().let { it.copy(routines = it.routines.map { routine -> routine.copy(timeOfDay = null, weekdays = RoutineSchedule.EVERY_DAY) }) }
+        ).getJSONArray("routines").getJSONObject(0)
+        assertEquals("", anytime.getString("time"))
+        assertEquals("[1,2,3,4,5,6,7]", anytime.getJSONArray("weekdays").toString())
+    }
+
+    @Test
+    fun aRoutineFromAnOlderFileOrServerIsEveryDayAndAnytime() {
+        // 요일·시각이 생기기 전의 루틴, 하나도 고르지 않은 요일, 틀린 시각은 모두 매일·상시입니다.
+        val restored = AppDataJson.fromJsonText(
+            """{"schemaVersion":28,"routines":[
+                {"id":1,"syncId":"old","title":"옛 루틴"},
+                {"id":2,"syncId":"empty","title":"빈 요일","weekdays":[],"time":"25:00"},
+                {"id":3,"syncId":"null","title":"빈 시각","weekdays":[0,9],"time":null},
+                {"id":4,"syncId":"sun","title":"일요일 아침","weekdays":[7],"time":"7:05"}
+            ]}"""
+        )
+        val bySync = restored.routines.associateBy { it.syncId }
+
+        for (syncId in listOf("old", "empty", "null")) {
+            assertEquals(syncId, RoutineSchedule.EVERY_DAY, bySync.getValue(syncId).weekdays)
+            assertNull(syncId, bySync.getValue(syncId).timeOfDay)
+        }
+        assertEquals(RoutineSchedule.maskOf(listOf(7)), bySync.getValue("sun").weekdays)
+        assertEquals(7 * 60 + 5, bySync.getValue("sun").timeOfDay)
+    }
+
+    @Test
     fun roundTrip_keepsNullLastShownAtNull() {
         val snapshot = fullSnapshot().let { base ->
             base.copy(items = listOf(base.items.first().copy(lastShownAt = null)))
@@ -311,7 +348,10 @@ class AppDataJsonTest {
                 orderIndex = 2,
                 sourceContentSyncId = "item-sync-1",
                 reminderEnabled = false,
-                createdAt = 1_700_000_700_000L
+                createdAt = 1_700_000_700_000L,
+                // 요일·시각도 기본값(매일·상시)이 아닌 것으로 채운다(사용자가 정함, 2026-11-17).
+                weekdays = RoutineSchedule.maskOf(listOf(1, 3, 5)),
+                timeOfDay = 19 * 60 + 30
             )
         ),
         routineChecks = listOf(

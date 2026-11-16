@@ -33,5 +33,15 @@ data class RoutineEntity(
      */
     val sourceContentSyncId: String = "",
     val reminderEnabled: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * 하는 요일(사용자가 정함, 2026-11-17). 일곱 칸 비트이고 기본은 매일입니다 — 요일이 생기기 전의 루틴도 매일입니다.
+     * 읽고 쓰는 규칙은 [RoutineSchedule]에 있습니다. 홈의 다음 차례·위젯·진행·주기 알림은 오늘 요일의 루틴만 셉니다.
+     */
+    val weekdays: Int = RoutineSchedule.EVERY_DAY,
+    /**
+     * 정해 둔 시각(자정부터의 분). null이면 상시 — 하루 중 아무 때나 하는 루틴입니다(사용자가 정함, 2026-11-17).
+     * 시각이 있으면 30분 전에 알리고, 지나도 체크가 없으면 1시간마다 세 번까지 다시 알립니다([RoutineAlarms]).
+     */
+    val timeOfDay: Int? = null
 )

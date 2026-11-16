@@ -388,6 +388,24 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun theSameRoutineNameOnOtherDaysOrTimesIsLeftAlone() {
+        // 평일 06:30과 주말 08:00에 따로 둔 두 "기상"은 서로 다른 루틴입니다(사용자가 정함, 2026-11-17).
+        // 이름만 보고 합치면 한쪽이 지워집니다. 요일·시각까지 같은 것은 하나로 합칩니다(서버 routineFingerprint와 같게).
+        val merged = snapshotOf(
+            routines = listOf(
+                RoutineEntity(syncId = "weekday", title = "기상", updatedAt = 1_000L, weekdays = RoutineSchedule.WEEKDAYS, timeOfDay = 390),
+                RoutineEntity(syncId = "weekend", title = "기상", updatedAt = 2_000L, weekdays = RoutineSchedule.WEEKEND, timeOfDay = 480),
+                RoutineEntity(syncId = "copy", title = "기상", updatedAt = 3_000L, weekdays = RoutineSchedule.WEEKDAYS, timeOfDay = 390)
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(2, result.routines.size)
+        assertEquals(setOf(390, 480), result.routines.mapNotNull { it.timeOfDay }.toSet())
+    }
+
+    @Test
     fun theResultDoesNotDependOnWhichSideRunsIt() {
         // 같은 시각이면 순서만 뒤집혀도 승자가 달라질 수 있다. 그러면 두 기기가 영원히 서로를 고친다.
         val a = item("aaa", "제목", "본문", updatedAt = 1_000L)

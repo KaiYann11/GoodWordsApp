@@ -36,4 +36,33 @@ class DayStreakTest {
         assertEquals(1, DayStreak.current(dates, today))
         assertEquals(4, DayStreak.best(dates))
     }
+
+    /** 주말에만 하는 것. 10월 16일은 금요일입니다. */
+    private val weekendOnly: (LocalDate) -> Boolean = { it.dayOfWeek.value >= 6 }
+
+    @Test fun onlyTheDaysItIsOnAreCounted() {
+        // 주말 셋(3·4일, 10일)과 11일. 그 사이의 평일은 끊지도 더하지도 않습니다.
+        val dates = days("2026-10-03", "2026-10-04", "2026-10-10", "2026-10-11", "2026-10-14")
+
+        assertEquals(4, DayStreak.current(dates, today, weekendOnly))
+        assertEquals(4, DayStreak.best(dates, weekendOnly))
+        // 평일(14일)에 한 것은 날수에 들지 않습니다.
+        assertEquals(0, DayStreak.best(days("2026-10-14"), weekendOnly))
+        assertEquals(0, DayStreak.current(days("2026-10-14"), today, weekendOnly))
+    }
+
+    @Test fun aMissedDayOnIsStillAGap() {
+        // 4일(일)이 비었습니다 — 하는 날이 비면 끊깁니다.
+        val dates = days("2026-10-03", "2026-10-10", "2026-10-11")
+
+        assertEquals(2, DayStreak.current(dates, today, weekendOnly))
+        assertEquals(2, DayStreak.best(dates, weekendOnly))
+    }
+
+    @Test fun everyDayIsTheOldRule() {
+        val dates = days("2026-10-13", "2026-10-14", "2026-10-15")
+
+        assertEquals(DayStreak.current(dates, today), DayStreak.current(dates, today) { true })
+        assertEquals(DayStreak.best(dates), DayStreak.best(dates) { true })
+    }
 }

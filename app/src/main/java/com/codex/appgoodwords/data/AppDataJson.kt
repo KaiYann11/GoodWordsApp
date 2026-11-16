@@ -61,11 +61,12 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    // 할 일에 사진 칸(`imageUris`)이 생겼습니다(사용자가 정함, 2026-11-15). 옛 서버는 할 일의 모르는 칸을 버리고, 옛 앱은 받은
-    // 사진을 버린 채 할 일을 고쳐 올려 서버의 사진까지 지우므로 형식을 올립니다. 같은 할 일 판정에도 사진이 들어갑니다. Room은 27입니다.
-    // 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07),
-    // 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-    const val schemaVersion: Int = 28
+    // 루틴에 요일(`weekdays`)과 시각(`time`)이 생겼습니다(사용자가 정함, 2026-11-17). 옛 서버는 루틴의 모르는 칸을 버리고, 옛 앱은
+    // 받은 요일·시각을 버린 채 루틴을 고쳐 올려 서버의 것까지 매일·상시로 되돌리므로 형식을 올립니다. 같은 루틴 판정에도 요일·시각이
+    // 들어갑니다(평일 06:30과 주말 08:00의 "기상"은 다른 루틴). Room은 28입니다.
+    // 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08),
+    // 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 29
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -723,6 +724,9 @@ object AppDataJson {
         .put("reminderEnabled", reminderEnabled)
         .put("createdAt", createdAt)
         .put("createdAtText", formatTimestamp(createdAt))
+        // 요일은 ISO 번호(월=1 … 일=7), 시각은 `HH:mm`(상시는 빈 글자). 서버·웹이 같은 꼴을 읽습니다.
+        .put("weekdays", JSONArray(RoutineSchedule.isoDaysOf(weekdays)))
+        .put("time", RoutineSchedule.clockText(timeOfDay))
 
     private fun RoutineCheckEntity.toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -855,7 +859,10 @@ object AppDataJson {
                         // 글귀에서 뽑기 전의 백업에는 없다. 없으면 직접 만든 루틴으로 본다.
                         sourceContentSyncId = routine.optString("sourceContentSyncId").trim(),
                         reminderEnabled = routine.optBoolean("reminderEnabled", true),
-                        createdAt = routine.optLong("createdAt", System.currentTimeMillis())
+                        createdAt = routine.optLong("createdAt", System.currentTimeMillis()),
+                        // 옛 파일·옛 서버의 루틴에는 요일·시각이 없습니다. 매일·상시로 읽습니다.
+                        weekdays = RoutineSchedule.normalized(routine.optJSONArray("weekdays").toIsoDayMask()),
+                        timeOfDay = if (routine.isNull("time")) null else RoutineSchedule.parseClock(routine.optString("time"))
                     )
                 )
             }
@@ -965,6 +972,12 @@ object AppDataJson {
             }
         }
         return DiaryAnswers.normalize(values)
+    }
+
+    /** 요일 번호 목록을 비트로. 없거나 고른 것이 없으면 0입니다 — 읽는 쪽이 매일로 봅니다([RoutineSchedule.normalized]). */
+    private fun JSONArray?.toIsoDayMask(): Int {
+        if (this == null) return 0
+        return RoutineSchedule.maskOf((0 until length()).map { optInt(it, 0) })
     }
 
     private fun JSONObject.optNullableLong(key: String): Long? {

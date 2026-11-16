@@ -273,6 +273,7 @@ fun AppGoodWordsApp(
     val walkRecording by viewModel.walkRecording.collectAsStateWithLifecycle()
     val healthConnection by viewModel.healthConnection.collectAsStateWithLifecycle()
     val openWalkRequest by viewModel.openWalkRequest.collectAsStateWithLifecycle()
+    val openRoutineRequest by viewModel.openRoutineRequest.collectAsStateWithLifecycle()
     val openedDayDigest by viewModel.openedDayDigest.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val feedbackNotes by viewModel.feedbackNotes.collectAsStateWithLifecycle()
@@ -730,6 +731,13 @@ fun AppGoodWordsApp(
             if (currentTab != AppTab.WALK) navStack = listOf(tabRoute(AppTab.HOME), tabRoute(AppTab.WALK))
             viewModel.consumeOpenWalkRequest()
         }
+    }
+
+    // 루틴 알람을 눌러 왔으면 루틴 탭의 그 루틴으로. 검색에서 고른 것처럼 그 자리로 굴려 주고 잠깐 강조합니다. 뒤로 가면 홈입니다.
+    LaunchedEffect(openRoutineRequest) {
+        val routineId = openRoutineRequest ?: return@LaunchedEffect
+        navStack = listOf(tabRoute(AppTab.HOME), focusRoute(SearchKind.ROUTINE, routineId))
+        viewModel.consumeOpenRoutineRequest()
     }
 
     // 코치의 답 알림을 눌러 왔으면 그 대화로 데려갑니다. 답을 읽고 바로 이어 말할 수 있게.

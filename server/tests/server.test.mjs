@@ -888,6 +888,84 @@ describe("루틴 API", () => {
     assert.equal(stored.routineMemos.length, 0);
     assert.equal(stored.routineChecks.length, 0);
   });
+
+  it("루틴의 요일·시각은 병합을 지나고, 웹에서 고쳐도 남는다", async () => {
+    await resetServer();
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          routines: [{ syncId: "gym", updatedAt: 1000, title: "헬스장", createdAt: 1000, weekdays: [5, 1, 3, 3], time: "19:00" }],
+        }),
+      })
+    ).json();
+    const routine = merged.routines.find((candidate) => candidate.syncId === "gym");
+    // 서버가 칸을 모르면 여기서 빠지고, 다음 동기화가 기기의 루틴까지 매일·상시로 되돌린다.
+    assert.deepEqual(routine.weekdays, [1, 3, 5]);
+    assert.equal(routine.time, "19:00");
+
+    // 웹은 요일·시각 칸 없이 고칩니다. 있던 값이 그대로 남아야 합니다({...existing, ...payload}).
+    const edited = await (
+      await api(`/api/routines/${routine.id}`, { method: "PUT", body: { title: "헬스장 가기", note: "", category: "운동", reminderEnabled: true } })
+    ).json();
+    assert.equal(edited.title, "헬스장 가기");
+    assert.deepEqual(edited.weekdays, [1, 3, 5]);
+    assert.equal(edited.time, "19:00");
+
+    // 웹에서 새로 만든 루틴은 매일·상시다(사용자가 정한 기본값).
+    const fresh = await createRoutine("물 한 컵");
+    assert.deepEqual(fresh.weekdays, [1, 2, 3, 4, 5, 6, 7]);
+    assert.equal(fresh.time, "");
+  });
+
+  it("요일·시각이 없거나 틀린 루틴은 매일·상시로 읽는다", async () => {
+    await resetServer();
+    const routines = [
+      { syncId: "old", title: "옛 루틴" },
+      { syncId: "none", title: "요일 없음", weekdays: [] },
+      { syncId: "bad", title: "틀린 요일", weekdays: [0, 9, "x"], time: "25:00" },
+      { syncId: "short", title: "짧은 시각", weekdays: [7], time: "7:05" },
+      { syncId: "null", title: "빈 시각", time: null },
+    ].map((routine, index) => ({ updatedAt: 1000 + index, createdAt: 1000 + index, ...routine }));
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ routines }) });
+    const stored = await (await api("/api/snapshot")).json();
+    const bySync = (syncId) => stored.routines.find((routine) => routine.syncId === syncId);
+
+    // 요일이 생기기 전의 루틴도, 하나도 고르지 않은 값도 매일이다 — 어느 날에도 안 보이는 루틴은 고칠 수도 없게 숨는다.
+    for (const syncId of ["old", "none", "bad", "null"]) {
+      assert.deepEqual(bySync(syncId).weekdays, [1, 2, 3, 4, 5, 6, 7], syncId);
+    }
+    assert.deepEqual(bySync("short").weekdays, [7]);
+    assert.equal(bySync("old").time, "");
+    assert.equal(bySync("bad").time, "");
+    assert.equal(bySync("null").time, "");
+    assert.equal(bySync("short").time, "07:05");
+  });
+
+  it("같은 이름의 루틴이라도 요일이나 시각이 다르면 합치지 않는다", async () => {
+    await resetServer();
+    const routine = (syncId, updatedAt, weekdays, time) => ({ syncId, updatedAt, createdAt: updatedAt, title: "기상", weekdays, time });
+
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          routines: [
+            routine("weekday", 1000, [1, 2, 3, 4, 5], "06:30"),
+            routine("weekend", 2000, [6, 7], "08:00"),
+            routine("weekday-copy", 3000, [1, 2, 3, 4, 5], "06:30"),
+          ],
+        }),
+      })
+    ).json();
+
+    // 평일 06:30과 주말 08:00의 "기상"은 다른 루틴이다. 합치면 한쪽이 지워진다. 요일·시각까지 같은 것은 하나로 합친다(앱과 같게).
+    assert.equal(merged.routines.length, 2);
+    assert.deepEqual(
+      merged.routines.map((candidate) => `${candidate.weekdays.join(",")}|${candidate.time}`).sort(),
+      ["1,2,3,4,5|06:30", "6,7|08:00"],
+    );
+  });
 });
 
 describe("일기와 할 일 API", () => {
@@ -2757,7 +2835,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 28);
+    assert.equal(stored.schemaVersion, 29);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -2972,12 +3050,12 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("할 일의 사진을 모르는 옛 앱과 구별할 형식 28을 알린다", async () => {
+  it("루틴의 요일·시각을 모르는 옛 앱과 구별할 형식 29를 알린다", async () => {
     // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과,
     // 27은 행복한 순간·좋아하는 것을 글귀로 바꿔 읽고 이은 줄을 버리는 옛 앱과, 28은 할 일의 사진을 버린 채 고쳐 올리는
-    // 옛 앱과 가르려고 올렸습니다.
+    // 옛 앱과, 29는 루틴의 요일·시각을 버린 채 고쳐 올리는 옛 앱과 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 28);
+    assert.equal(health.schemaVersion, 29);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {

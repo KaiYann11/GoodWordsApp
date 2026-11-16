@@ -786,6 +786,18 @@ class MainViewModel(
         _openWalkRequest.value = false
     }
 
+    /** 루틴 알람을 눌러 들어왔으면 그 루틴. 루틴 탭의 그 자리로 데려갑니다. */
+    private val _openRoutineRequest = MutableStateFlow<Long?>(null)
+    val openRoutineRequest: StateFlow<Long?> = _openRoutineRequest.asStateFlow()
+
+    fun handleOpenRoutineRequest(routineId: Long) {
+        _openRoutineRequest.value = routineId
+    }
+
+    fun consumeOpenRoutineRequest() {
+        _openRoutineRequest.value = null
+    }
+
     /**
      * Health Connect가 이어져 있는지 보고, 이어져 있으면 걸음 수를 다시 읽습니다(사용자가 정함, 2026-11-07).
      *

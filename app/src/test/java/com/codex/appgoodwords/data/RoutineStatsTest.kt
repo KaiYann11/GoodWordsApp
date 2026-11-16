@@ -142,6 +142,31 @@ class RoutineStatsTest {
         assertNull(all.getValue(2L).lastDoneDate)
     }
 
+    @Test fun aRoutineOnChosenDaysRunsOverTheDaysOff() {
+        // 월·수·금 루틴(사용자가 정함, 2026-11-17). 화·목을 건너뛰어도 끊기지 않습니다 — 날마다 세면 늘 1입니다.
+        val gym = routine.copy(weekdays = RoutineSchedule.maskOf(listOf(1, 3, 5)))
+        val checks = listOf(check("2026-10-05"), check("2026-10-07"), check("2026-10-12"), check("2026-10-14"), check("2026-10-16"))
+
+        val report = RoutineStatsCalculator.build(gym, checks, today, zone)
+
+        // 10월 9일(금)이 비어 끊겼습니다. 12·14·16일이 이어진 3, 5·7일이 2입니다.
+        assertEquals(3, report.currentStreakDays)
+        assertEquals(3, report.bestStreakDays)
+        assertEquals(1, build(checks).currentStreakDays)
+    }
+
+    @Test fun aCheckOnADayOffNeitherBreaksNorAddsToTheRun() {
+        val gym = routine.copy(weekdays = RoutineSchedule.maskOf(listOf(1, 3, 5)))
+        // 오늘(금)은 아직, 13일(화)은 쉬는 날에 한 것입니다.
+        val checks = listOf(check("2026-10-12"), check("2026-10-13"), check("2026-10-14"))
+
+        val report = RoutineStatsCalculator.build(gym, checks, today, zone)
+
+        assertEquals(2, report.currentStreakDays)
+        assertEquals(3, report.doneDays)
+        assertEquals(3, report.totalChecks)
+    }
+
     @Test fun eachRoutineKeepsItsOwnRun() {
         val checks = listOf(
             check("2026-10-15"),

@@ -23,6 +23,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val routineId = intent.getLongExtra(AppNotifications.extraRoutineId, 0L)
         val shouldRecordView = intent.getBooleanExtra(AppNotifications.extraRecordView, true)
         val notificationId = intent.getIntExtra(AppNotifications.extraNotificationId, 0)
+        // 루틴 알람은 태그로 가립니다. 태그 없이 거두면 남습니다.
+        val notificationTag = intent.getStringExtra(AppNotifications.extraNotificationTag)
         if (contentItemId <= 0L && routineId <= 0L) return
 
         val pendingResult = goAsync()
@@ -51,7 +53,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 }
 
                 if (notificationId != 0) {
-                    NotificationManagerCompat.from(context).cancel(notificationId)
+                    NotificationManagerCompat.from(context).cancel(notificationTag, notificationId)
                 }
             } finally {
                 pendingResult.finish()

@@ -160,7 +160,7 @@ object DailyCoachPrompt {
 
         // 아직 안 밟은 루틴을 추리는 규칙은 한 곳에 있습니다. 화면의 가벼운 한 줄
         // ([RoutineNudge])과 AI에게 보내는 목록이 다른 루틴을 가리키면 안 됩니다.
-        val restRoutines = RoutineNudgeCalculator.restOfToday(routines, todayChecks)
+        val restRoutines = RoutineNudgeCalculator.restOfToday(routines, todayChecks, today)
             .map { it.title.trim() }
             .filter { it.isNotBlank() }
             .take(MAX_REST_ROUTINES)

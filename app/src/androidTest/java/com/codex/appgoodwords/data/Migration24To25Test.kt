@@ -31,6 +31,8 @@ class Migration24To25Test {
             before.openHelper.writableDatabase.execSQL("DROP TABLE goal_time_logs")
             before.openHelper.writableDatabase.execSQL("DROP TABLE record_links")
             before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN imageUris")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN weekdays")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN timeOfDay")
             before.openHelper.writableDatabase.version = 24
         } finally {
             before.close()
@@ -38,10 +40,15 @@ class Migration24To25Test {
 
         // 지금 판까지 잇습니다. 25→26은 표 하나만, 26→27은 할 일에 칸 하나만 더하므로 여기서 본 것을 건드리지 않습니다.
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_24_25, AppDatabase.MIGRATION_25_26, AppDatabase.MIGRATION_26_27)
+            .addMigrations(
+                AppDatabase.MIGRATION_24_25,
+                AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28
+            )
             .build()
         try {
-            assertEquals(27, after.openHelper.writableDatabase.version)
+            assertEquals(28, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(goal, after.contentItemDao().getById(goal.id))
             assertEquals(1, after.contentMemoDao().getByContentItemId(goal.id).size)

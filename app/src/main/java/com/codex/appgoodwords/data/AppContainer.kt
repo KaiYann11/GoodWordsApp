@@ -6,6 +6,7 @@ import coil.ImageLoader
 import coil.disk.DiskCache
 import com.codex.appgoodwords.BuildConfig
 import com.codex.appgoodwords.work.ReminderScheduler
+import com.codex.appgoodwords.work.RoutineAlarm
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 
@@ -45,7 +46,8 @@ class AppContainer(
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
                 AppDatabase.MIGRATION_25_26,
-                AppDatabase.MIGRATION_26_27
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -112,6 +114,11 @@ class AppContainer(
 
     val todoAlarmScheduler: TodoAlarmScheduler by lazy {
         TodoAlarmScheduler(appContext)
+    }
+
+    /** 시각을 정한 루틴의 알람. 루틴·체크가 바뀔 때마다 다시 겁니다([RoutineAlarm.watch]). */
+    val routineAlarm: RoutineAlarm by lazy {
+        RoutineAlarm(appContext)
     }
 
     val appDataExporter: AppDataExporter by lazy {

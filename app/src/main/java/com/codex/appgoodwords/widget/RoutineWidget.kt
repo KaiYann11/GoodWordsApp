@@ -32,6 +32,8 @@ import com.codex.appgoodwords.MainActivity
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineOrder
+import com.codex.appgoodwords.data.RoutineSchedule
+import java.time.LocalDate
 
 /**
  * 홈 화면에서 오늘 루틴을 바로 밟는 위젯입니다.
@@ -58,8 +60,10 @@ class RoutineWidget : GlanceAppWidget() {
         /** 위젯에 늘어놓을 줄 수. */
         const val VISIBLE_COUNT = 3
 
-        suspend fun loadState(container: AppContainer): RoutineWidgetState {
+        suspend fun loadState(container: AppContainer, today: LocalDate = LocalDate.now()): RoutineWidgetState {
+            // 오늘 요일에 하는 루틴만 셉니다(사용자가 정함, 2026-11-17). 홈의 다음 차례·루틴 탭의 오늘 진행과 같은 줄입니다.
             val routines = RoutineOrder.sorted(container.database.routineDao().getAll())
+                .filter { RoutineSchedule.isOn(it, today) }
             val (start, end) = container.repository.todayRangeMillis()
             val checkedIds = container.database.routineCheckDao().getAll()
                 .filter { it.checkedAt in start..end }

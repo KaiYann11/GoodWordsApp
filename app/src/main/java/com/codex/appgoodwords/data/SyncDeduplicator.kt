@@ -153,7 +153,13 @@ object SyncDeduplicator {
         item.createdAt.toString().takeIf { item.type == ContentType.HAPPY_MOMENT }
     ).joinToString("|")
 
-    private fun routineFingerprint(routine: RoutineEntity): String = normalize(routine.title)
+    // 요일과 시각도 봅니다(사용자가 정함, 2026-11-17). 평일 06:30과 주말 08:00에 따로 둔 두 "기상"을 이름만 보고 합치면
+    // 한쪽이 지워집니다. 서버 routineFingerprint와 같은 꼴이어야 합니다(요일은 ISO 번호, 시각은 HH:mm).
+    private fun routineFingerprint(routine: RoutineEntity): String = listOf(
+        normalize(routine.title),
+        RoutineSchedule.isoDaysOf(routine.weekdays).joinToString(","),
+        RoutineSchedule.clockText(routine.timeOfDay)
+    ).joinToString("|")
 
     // 날씨와 기분도 함께 봅니다. 글 없이 기분만 남긴 날이 있을 수 있어서,
     // 빼면 같은 날 남긴 두 기분 중 하나가 조용히 사라집니다.

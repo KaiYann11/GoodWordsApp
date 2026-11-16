@@ -284,6 +284,29 @@ class ServerSyncClientIntegrationTest {
         assertEquals(42, book?.currentPage)
     }
 
+    @Test
+    fun mergeSnapshot_carriesRoutineDaysAndTime() = runBlocking {
+        // 요일·시각(사용자가 정함, 2026-11-17)이 서버를 지나 그대로 돌아와야 합니다. 서버가 칸을 모르면 여기서 빠지고,
+        // 다음 동기화가 기기의 루틴까지 매일·상시로 되돌립니다. 같은 이름이라도 요일·시각이 다르면 둘 다 남습니다.
+        val suffix = SyncIdentity.newId()
+        val weekday = RoutineEntity(
+            syncId = "e2e-weekday-$suffix", updatedAt = 2_000L, title = "기상 $suffix",
+            weekdays = RoutineSchedule.WEEKDAYS, timeOfDay = 6 * 60 + 30, createdAt = 2_000L
+        )
+        val weekend = weekday.copy(syncId = "e2e-weekend-$suffix", weekdays = RoutineSchedule.WEEKEND, timeOfDay = 8 * 60)
+        val anytime = RoutineEntity(syncId = "e2e-anytime-$suffix", updatedAt = 2_000L, title = "물 한 컵 $suffix", createdAt = 2_000L)
+
+        val merged = client.mergeSnapshot(settings, snapshotWith(routines = listOf(weekday, weekend, anytime)))
+
+        val bySync = merged.routines.associateBy { it.syncId }
+        assertEquals(RoutineSchedule.WEEKDAYS, bySync[weekday.syncId]?.weekdays)
+        assertEquals(6 * 60 + 30, bySync[weekday.syncId]?.timeOfDay)
+        assertEquals(RoutineSchedule.WEEKEND, bySync[weekend.syncId]?.weekdays)
+        assertEquals(8 * 60, bySync[weekend.syncId]?.timeOfDay)
+        assertEquals(RoutineSchedule.EVERY_DAY, bySync[anytime.syncId]?.weekdays)
+        assertEquals(null, bySync[anytime.syncId]?.timeOfDay)
+    }
+
     private fun snapshotWith(
         items: List<ContentItemEntity> = emptyList(),
         deletions: List<DeletionEntity> = emptyList(),
@@ -291,11 +314,12 @@ class ServerSyncClientIntegrationTest {
         todos: List<TodoEntity> = emptyList(),
         bookReadingLogs: List<BookReadingLogEntity> = emptyList(),
         books: List<BookEntity> = emptyList(),
-        recordLinks: List<RecordLinkEntity> = emptyList()
+        recordLinks: List<RecordLinkEntity> = emptyList(),
+        routines: List<RoutineEntity> = emptyList()
     ) = AppDataSnapshot(
         items = items,
         events = emptyList(),
-        routines = emptyList(),
+        routines = routines,
         routineChecks = emptyList(),
         routineMemos = emptyList(),
         settings = ReminderSettings(),

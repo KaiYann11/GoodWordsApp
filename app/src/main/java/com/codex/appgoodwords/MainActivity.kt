@@ -101,6 +101,11 @@ class MainActivity : FragmentActivity() {
             intent?.removeExtra(AppNotifications.extraOpenWalk)
             viewModel.handleOpenWalkRequest()
         }
+        val routineId = intent?.getLongExtra(AppNotifications.extraOpenRoutineId, 0L) ?: 0L
+        if (routineId > 0L) {
+            intent?.removeExtra(AppNotifications.extraOpenRoutineId)
+            viewModel.handleOpenRoutineRequest(routineId)
+        }
         if (contentId > 0L) {
             viewModel.handleOpenItemRequest(
                 itemId = contentId,

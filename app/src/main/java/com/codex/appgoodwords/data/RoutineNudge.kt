@@ -53,7 +53,8 @@ object RoutineNudgeCalculator {
     const val STREAK_MIN_DAYS = 2
 
     /**
-     * 오늘 아직 안 밟은 루틴. 사용자가 정한 차례대로입니다.
+     * 오늘 아직 안 밟은 루틴. 사용자가 정한 차례대로입니다. **오늘 요일에 하는 루틴만** 봅니다(사용자가 정함, 2026-11-17) —
+     * 주말 루틴이 수요일의 "다음 차례"가 되지 않습니다.
      *
      * **체크는 `routineSyncId`로 루틴을 찾습니다.** 숫자 id로 묶으면 다른 기기에서 온 남의
      * 기록이 섞입니다. syncId가 비어 있는 옛 체크만 숫자 id로 찾습니다
@@ -62,7 +63,8 @@ object RoutineNudgeCalculator {
      */
     fun restOfToday(
         routines: List<RoutineEntity>,
-        todayChecks: List<RoutineCheckEntity>
+        todayChecks: List<RoutineCheckEntity>,
+        today: LocalDate
     ): List<RoutineEntity> {
         val doneSyncIds = todayChecks.mapNotNullTo(mutableSetOf()) { it.routineSyncId.takeIf(String::isNotBlank) }
         // **syncId가 있는 체크는 숫자 id를 보지 않습니다.** 둘 다 보면, 다른 기기에서 온
@@ -70,7 +72,9 @@ object RoutineNudgeCalculator {
         val doneIds = todayChecks
             .filter { it.routineSyncId.isBlank() }
             .mapTo(mutableSetOf()) { it.routineId }
-        return RoutineOrder.sorted(routines).filterNot { it.syncId in doneSyncIds || it.id in doneIds }
+        return RoutineOrder.sorted(routines)
+            .filter { RoutineSchedule.isOn(it, today) }
+            .filterNot { it.syncId in doneSyncIds || it.id in doneIds }
     }
 
     /**
@@ -78,6 +82,7 @@ object RoutineNudgeCalculator {
      *
      * 적어 둔 루틴이 없는 사람에게 "루틴을 만들어 보세요"라고 하지 않습니다. 그 권유는
      * 루틴 탭이 이미 하고 있고, 홈에서 또 하면 빈 카드가 매일 자리를 차지합니다.
+     * 오늘 요일에 하는 루틴이 없는 날도 null입니다 — 쉬는 날에 "모두 밟았습니다"라고 하면 사실이 아닙니다.
      */
     fun build(
         routines: List<RoutineEntity>,
@@ -85,10 +90,10 @@ object RoutineNudgeCalculator {
         today: LocalDate,
         zoneId: ZoneId = ZoneId.systemDefault()
     ): RoutineNudge? {
-        if (routines.isEmpty()) return null
+        if (routines.none { RoutineSchedule.isOn(it, today) }) return null
 
         val todayChecks = checks.filter { toDate(it.checkedAt, zoneId) == today }
-        val rest = restOfToday(routines, todayChecks)
+        val rest = restOfToday(routines, todayChecks, today)
         if (rest.isEmpty()) {
             return RoutineNudge(
                 kind = RoutineNudge.Kind.ALL_DONE,

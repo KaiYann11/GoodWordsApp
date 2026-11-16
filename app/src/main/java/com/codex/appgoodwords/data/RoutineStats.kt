@@ -28,9 +28,12 @@ data class RoutineStatsReport(
     val totalChecks: Int,
     /** 수행한 날수. 하루에 여러 번 밟아도 하루입니다. */
     val doneDays: Int,
-    /** 오늘까지 이어 온 날수([DayStreak.current]). */
+    /**
+     * 오늘까지 이어 온 날수([DayStreak.current]). 요일을 정한 루틴은 하는 날만 셉니다 — 월·수·금 루틴이 화요일마다
+     * 끊기지 않습니다(사용자가 정함, 2026-11-17).
+     */
     val currentStreakDays: Int,
-    /** 가장 길게 이어 온 날수. */
+    /** 가장 길게 이어 온 날수. 하는 날만 셉니다. */
     val bestStreakDays: Int,
     /** 처음 밟은 날. 한 번도 없으면 null입니다. */
     val firstDoneDate: LocalDate?,
@@ -117,11 +120,13 @@ object RoutineStatsCalculator {
         }
 
         return routines.associate { routine ->
-            routine.id to report(datesByRoutine[routine.id].orEmpty(), today)
+            routine.id to report(datesByRoutine[routine.id].orEmpty(), today, routine.weekdays)
         }
     }
 
-    private fun report(dates: List<LocalDate>, today: LocalDate): RoutineStatsReport {
+    /** [scheduledDays]는 그 루틴을 하는 요일([RoutineEntity.weekdays])입니다. 아래의 요일 칸(`weekdays`)과 다릅니다. */
+    private fun report(dates: List<LocalDate>, today: LocalDate, scheduledDays: Int): RoutineStatsReport {
+        val isActive: (LocalDate) -> Boolean = { RoutineSchedule.isOn(scheduledDays, it.dayOfWeek) }
         val days = dates.toSet()
         val weekdayDays = days.groupingBy { it.dayOfWeek }.eachCount()
         val weekdays = WEEK_ORDER.map { day ->
@@ -133,8 +138,8 @@ object RoutineStatsCalculator {
         return RoutineStatsReport(
             totalChecks = dates.size,
             doneDays = days.size,
-            currentStreakDays = DayStreak.current(days, today),
-            bestStreakDays = DayStreak.best(days),
+            currentStreakDays = DayStreak.current(days, today, isActive),
+            bestStreakDays = DayStreak.best(days, isActive),
             firstDoneDate = days.minOrNull(),
             lastDoneDate = days.maxOrNull(),
             weekdays = weekdays,

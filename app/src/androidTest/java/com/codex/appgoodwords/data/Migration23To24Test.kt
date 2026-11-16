@@ -33,6 +33,8 @@ class Migration23To24Test {
             before.openHelper.writableDatabase.execSQL("DROP TABLE goal_time_logs")
             before.openHelper.writableDatabase.execSQL("DROP TABLE record_links")
             before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN imageUris")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN weekdays")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN timeOfDay")
             before.openHelper.writableDatabase.version = 23
         } finally {
             before.close()
@@ -44,11 +46,12 @@ class Migration23To24Test {
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
                 AppDatabase.MIGRATION_25_26,
-                AppDatabase.MIGRATION_26_27
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28
             )
             .build()
         try {
-            assertEquals(27, after.openHelper.writableDatabase.version)
+            assertEquals(28, after.openHelper.writableDatabase.version)
             // 쓰던 기록이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다.
             assertEquals(quote, after.contentItemDao().getById(quote.id))
             assertEquals(1, after.routineDao().getAll().size)

@@ -1,7 +1,9 @@
 package com.codex.appgoodwords.ui.screen
 
+import android.app.TimePickerDialog
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -73,8 +77,10 @@ import com.codex.appgoodwords.data.RoutineMergeChoice
 import com.codex.appgoodwords.data.RoutineMergeText
 import com.codex.appgoodwords.data.RoutineMemoEntity
 import com.codex.appgoodwords.data.RoutineOrder
+import com.codex.appgoodwords.data.RoutineSchedule
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.RoutineStatsReport
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -98,6 +104,32 @@ internal fun routineCategoryTag(category: String?): String = when (category) {
 /** 고치기 창에서 이미 쓰는 갈래를 눌러 채우는 알약. */
 internal fun routineCategorySuggestionTag(category: String): String = "routine_category_suggestion_$category"
 
+/** 요일 알약. null은 전체입니다. 개수와 "(오늘)"이 같이 적혀서 글자만으로는 짚기 어렵습니다. */
+internal fun routineDayTag(day: DayOfWeek?): String = "routine_day_${day?.name ?: "ALL"}"
+
+/** 요일 알약 줄. 옆으로 밀리는 줄이라 화면 밖 알약은 굴려서 짚습니다. */
+internal const val routineDayRowTag = "routine_day_row"
+
+/** 카드에 적힌 정해 둔 시각. */
+internal fun routineTimeTag(routineId: Long): String = "routine_time_$routineId"
+
+/** 고치기 창의 요일 칸 하나. */
+internal fun routineEditDayTag(day: DayOfWeek): String = "routine_edit_day_${day.name}"
+
+/** 고치기 창의 매일·평일·주말. [name]은 "EVERY_DAY"·"WEEKDAYS"·"WEEKEND"입니다. */
+internal fun routineEditPresetTag(name: String): String = "routine_edit_preset_$name"
+
+/** 고치기 창의 상시·지정 시간과 시각 단추. */
+internal const val routineEditAnytimeTag = "routine_edit_anytime"
+internal const val routineEditTimedTag = "routine_edit_timed"
+internal const val routineEditTimeTag = "routine_edit_time"
+
+/** 요일 알약의 "전체". 고른 요일 이름 대신 저장합니다. */
+private const val ALL_DAYS = "ALL"
+
+/** 지정 시간을 처음 고를 때의 시각. 시계 창에서 바꿉니다. */
+private const val DEFAULT_TIME_OF_DAY = 9 * 60
+
 /** 쌓인 기록으로 들어가는 줄. 카드마다 하나씩 있어 글자만으로는 짚기 어렵습니다. */
 internal fun routineStatsOpenTag(routineId: Long): String = "routine_stats_open_$routineId"
 
@@ -119,8 +151,8 @@ internal fun routineMergeChoiceTag(field: String, choice: RoutineMergeChoice): S
 /**
  * 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다.
  *
- * 거르개는 오늘 줄과 갈래 줄 둘이지만 한 자리에 둡니다. 갈래 줄은 갈래가 있을 때만 생겨서,
- * 따로 두면 이 수가 그때그때 달라져 검색에서 고른 루틴으로 굴려 줄 자리가 어긋납니다.
+ * 거르개는 요일 줄·오늘 줄·갈래 줄 셋이지만 한 자리에 둡니다. 갈래 줄은 갈래가 있을 때만, 오늘 줄은 오늘이나 전체를 볼
+ * 때만 생겨서, 따로 두면 이 수가 그때그때 달라져 검색에서 고른 루틴으로 굴려 줄 자리가 어긋납니다.
  */
 private const val HEADER_ITEM_COUNT = 3
 
@@ -180,7 +212,9 @@ fun RoutineScreen(
     /** 검색에서 고른 루틴. 그 자리로 굴려 주고 잠깐 강조합니다. */
     focusId: Long? = null,
     /** [merge]를 [keep]에 합칩니다. 이름과 메모는 합치기 창에서 고르거나 고친 것입니다. */
-    onMergeRoutines: (keep: RoutineEntity, merge: RoutineEntity, title: String, note: String) -> Unit = { _, _, _, _ -> }
+    onMergeRoutines: (keep: RoutineEntity, merge: RoutineEntity, title: String, note: String) -> Unit = { _, _, _, _ -> },
+    /** 오늘. 요일 알약이 처음 고르는 날이고, 진행·다음 차례가 이날의 루틴만 셉니다. */
+    today: LocalDate = LocalDate.now()
 ) {
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     // 합치기(사용자가 정함, 2026-11-02): 고치던 루틴이 남습니다. 고치기 창에서 고치던 이름·메모를 이어받아, 합치기 창의
@@ -202,18 +236,32 @@ fun RoutineScreen(
     // 하루를 밟는 차례입니다. 수행한 것을 아래로 내리지 않습니다. 자리가 움직이면 어디까지 했는지
     // 눈으로 짚기 어렵고, 사용자가 정한 순서라는 약속도 깨집니다.
     val sortedRoutines = RoutineOrder.sorted(routines)
+    // 오늘 요일에 하는 루틴(사용자가 정함, 2026-11-17). 진행·다음 차례는 이 줄만 셉니다 — 홈·위젯과 같습니다.
+    val todaysRoutines = sortedRoutines.filter { RoutineSchedule.isOn(it, today) }
     // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다.
-    val nextRoutine = sortedRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }
+    val nextRoutine = todaysRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }
     val nextRoutineId = nextRoutine?.id
-    val doneCount = sortedRoutines.count { (todayCounts[it.id] ?: 0) > 0 }
+    val doneCount = todaysRoutines.count { (todayCounts[it.id] ?: 0) > 0 }
+
+    // 요일 알약. null이면 오늘을 따릅니다 — 자정을 넘겨 열어 둬도 새 오늘로 넘어갑니다. [ALL_DAYS]면 전체입니다.
+    var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedDay: DayOfWeek? = when (pickedDay) {
+        null -> today.dayOfWeek
+        ALL_DAYS -> null
+        else -> DayOfWeek.valueOf(pickedDay!!)
+    }
+    // 안 한 것·한 것은 오늘 체크를 보고 거릅니다. 다른 요일을 볼 때는 뜻이 없어 두지 않고 전체로 셉니다.
+    fun showsTodayFilter(day: DayOfWeek?): Boolean = day == null || day == today.dayOfWeek
+    fun onDay(routine: RoutineEntity, day: DayOfWeek?): Boolean = day == null || RoutineSchedule.isOn(routine.weekdays, day)
 
     var selectedFilter by rememberSaveable { mutableStateOf(RoutineFilter.ALL.name) }
-    val currentFilter = RoutineFilter.valueOf(selectedFilter)
+    val pickedFilter = RoutineFilter.valueOf(selectedFilter)
+    val currentFilter = if (showsTodayFilter(selectedDay)) pickedFilter else RoutineFilter.ALL
     val categories = remember(sortedRoutines) { RoutineCategories.ordered(sortedRoutines) }
     // null이면 전체입니다. 고른 갈래가 사라지면(이름을 바꾸거나 그 루틴을 지움) 전체로 봅니다.
     var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
     val currentCategory = selectedCategory?.takeIf { it in categories }
-    val rows = remember(sortedRoutines, todayCounts, currentFilter, currentCategory) {
+    val rows = remember(sortedRoutines, todayCounts, currentFilter, currentCategory, selectedDay) {
         sortedRoutines
             .mapIndexed { index, routine ->
                 RoutineRow(
@@ -224,16 +272,20 @@ fun RoutineScreen(
                 )
             }
             .filter { row ->
-                currentFilter.matches(todayCounts[row.routine.id] ?: 0) &&
+                onDay(row.routine, selectedDay) &&
+                    currentFilter.matches(todayCounts[row.routine.id] ?: 0) &&
                     RoutineCategories.matches(row.routine, currentCategory)
             }
     }
 
-    // 검색에서 고른 루틴이 지금 거르개에 걸려 안 보이면, 찾아 놓고도 빈 화면을 보게 됩니다.
-    LaunchedEffect(focusId, currentFilter, currentCategory, sortedRoutines) {
-        if (focusId != null && sortedRoutines.any { it.id == focusId } && rows.none { it.routine.id == focusId }) {
+    // 검색이나 알람에서 고른 루틴이 지금 거르개에 걸려 안 보이면, 찾아 놓고도 빈 화면을 보게 됩니다.
+    // 오늘 하는 루틴이면 오늘에 두고, 아니면 요일을 전체로 엽니다.
+    LaunchedEffect(focusId, currentFilter, currentCategory, selectedDay, sortedRoutines) {
+        val focused = sortedRoutines.firstOrNull { it.id == focusId }
+        if (focused != null && rows.none { it.routine.id == focusId }) {
             selectedFilter = RoutineFilter.ALL.name
             selectedCategory = null
+            pickedDay = if (RoutineSchedule.isOn(focused, today)) null else ALL_DAYS
         }
     }
 
@@ -385,31 +437,76 @@ fun RoutineScreen(
             item {
                 RoutineProgressCard(
                     doneCount = doneCount,
-                    totalCount = sortedRoutines.size,
-                    nextRoutine = nextRoutine
+                    totalCount = todaysRoutines.size,
+                    nextRoutine = nextRoutine,
+                    restDay = todaysRoutines.isEmpty()
                 )
             }
 
-            // 두 줄은 함께 걸립니다. 알약의 숫자는 눌렀을 때 보일 줄 수입니다 — 다른 줄에서 고른 것까지 셉니다.
+            // 세 줄은 함께 걸립니다. 알약의 숫자는 눌렀을 때 보일 줄 수입니다 — 다른 줄에서 고른 것까지 셉니다.
             // 그러지 않으면 "공부 11"을 눌렀는데 셋만 보여, 나머지가 어디 갔는지 찾게 됩니다.
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(RoutineFilter.entries) { filter ->
+                    // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있고, 일요일부터 늘어놓습니다(달력과 같은 차례).
+                    val dayOptions: List<DayOfWeek?> = listOf<DayOfWeek?>(null) + RoutineStatsCalculator.WEEK_ORDER
+                    val dayRowState = rememberLazyListState(
+                        initialFirstVisibleItemIndex = (dayOptions.indexOf(today.dayOfWeek) - 2).coerceAtLeast(0)
+                    )
+                    LazyRow(
+                        state = dayRowState,
+                        modifier = Modifier.testTag(routineDayRowTag),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(dayOptions) { day ->
+                            val dayFilter = if (showsTodayFilter(day)) pickedFilter else RoutineFilter.ALL
                             CountFilterPill(
-                                title = filter.label,
-                                count = sortedRoutines.count { routine ->
-                                    RoutineCategories.matches(routine, currentCategory) &&
-                                        filter.matches(todayCounts[routine.id] ?: 0)
+                                title = if (day == null) {
+                                    "전체"
+                                } else if (day == today.dayOfWeek) {
+                                    "${RoutineSchedule.shortLabel(day)}(오늘)"
+                                } else {
+                                    RoutineSchedule.shortLabel(day)
                                 },
-                                selected = currentFilter == filter,
-                                onClick = { selectedFilter = filter.name },
-                                modifier = Modifier.testTag(routineFilterTag(filter.name))
+                                count = sortedRoutines.count { routine ->
+                                    onDay(routine, day) &&
+                                        RoutineCategories.matches(routine, currentCategory) &&
+                                        dayFilter.matches(todayCounts[routine.id] ?: 0)
+                                },
+                                selected = selectedDay == day,
+                                onClick = {
+                                    pickedDay = if (day == null) {
+                                        ALL_DAYS
+                                    } else if (day == today.dayOfWeek) {
+                                        null
+                                    } else {
+                                        day.name
+                                    }
+                                },
+                                modifier = Modifier.testTag(routineDayTag(day))
                             )
                         }
                     }
+                    if (showsTodayFilter(selectedDay)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(RoutineFilter.entries) { filter ->
+                                CountFilterPill(
+                                    title = filter.label,
+                                    count = sortedRoutines.count { routine ->
+                                        onDay(routine, selectedDay) &&
+                                            RoutineCategories.matches(routine, currentCategory) &&
+                                            filter.matches(todayCounts[routine.id] ?: 0)
+                                    },
+                                    selected = currentFilter == filter,
+                                    onClick = { selectedFilter = filter.name },
+                                    modifier = Modifier.testTag(routineFilterTag(filter.name))
+                                )
+                            }
+                        }
+                    }
                     if (categories.isNotEmpty()) {
-                        val inToday = sortedRoutines.filter { currentFilter.matches(todayCounts[it.id] ?: 0) }
+                        val inToday = sortedRoutines.filter {
+                            onDay(it, selectedDay) && currentFilter.matches(todayCounts[it.id] ?: 0)
+                        }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             item {
                                 CountFilterPill(
@@ -448,10 +545,13 @@ fun RoutineScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = if (currentFilter == RoutineFilter.UNDONE) {
-                                    "오늘 ${scope}루틴을 모두 밟았습니다."
-                                } else {
-                                    "아직 밟은 ${scope}루틴이 없습니다."
+                                text = when {
+                                    currentFilter == RoutineFilter.UNDONE -> "오늘 ${scope}루틴을 모두 밟았습니다."
+                                    currentFilter == RoutineFilter.DONE -> "아직 밟은 ${scope}루틴이 없습니다."
+                                    selectedDay == today.dayOfWeek -> "오늘 하는 ${scope}루틴이 없습니다."
+                                    selectedDay != null ->
+                                        "${RoutineSchedule.shortLabel(selectedDay)}요일에 하는 ${scope}루틴이 없습니다."
+                                    else -> "${scope}루틴이 없습니다."
                                 },
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -501,7 +601,9 @@ fun RoutineScreen(
 private fun RoutineProgressCard(
     doneCount: Int,
     totalCount: Int,
-    nextRoutine: RoutineEntity?
+    nextRoutine: RoutineEntity?,
+    /** 루틴은 있지만 오늘 요일에 하는 것이 없는 날. */
+    restDay: Boolean = false
 ) {
     val ratio = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
     val animatedRatio by animateFloatAsState(targetValue = ratio, label = "routineProgress")
@@ -540,6 +642,7 @@ private fun RoutineProgressCard(
 
             Text(
                 text = when {
+                    restDay -> "오늘 요일에 하는 루틴이 없습니다."
                     totalCount == 0 -> "루틴을 추가하면 여기에 오늘 진행이 보입니다."
                     nextRoutine == null -> "오늘 몫을 다 밟았습니다."
                     else -> "다음 차례: ${nextRoutine.title}"
@@ -866,16 +969,41 @@ private fun RoutineCard(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
-                    Text(
-                        text = routine.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (checkedToday) {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = routine.title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (checkedToday) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                        // 지정 시간 루틴만 시각을 적습니다. 상시는 적지 않습니다 — 대부분이 상시라 줄마다 같은 글자가 됩니다.
+                        if (routine.timeOfDay != null) {
+                            Text(
+                                text = RoutineSchedule.clockText(routine.timeOfDay),
+                                modifier = Modifier.testTag(routineTimeTag(routine.id)),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
-                    )
+                    }
+                    // 매일 하는 루틴에는 적지 않습니다. 요일을 고른 것만 어느 날인지 보입니다.
+                    if (RoutineSchedule.normalized(routine.weekdays) != RoutineSchedule.EVERY_DAY) {
+                        Text(
+                            text = RoutineSchedule.daysLabel(routine.weekdays),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     if (routine.note.isNotBlank()) {
                         Text(
                             text = routine.note,
@@ -1330,6 +1458,13 @@ private fun RoutineEditorDialog(
     var reminderEnabled by rememberSaveable(initialDraft.id) {
         mutableStateOf(initialDraft.reminderEnabled)
     }
+    // 요일과 시각(사용자가 정함, 2026-11-17). 새 루틴은 매일·상시로 시작합니다.
+    var weekdays by rememberSaveable(initialDraft.id) {
+        mutableStateOf(initialDraft.weekdays and RoutineSchedule.EVERY_DAY)
+    }
+    var timeOfDay by rememberSaveable(initialDraft.id) { mutableStateOf(initialDraft.timeOfDay) }
+    val context = LocalContext.current
+    val noDay = weekdays == 0
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1337,7 +1472,11 @@ private fun RoutineEditorDialog(
             Text(if (initialDraft.id == 0L) "루틴 추가" else "루틴 수정")
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 요일·시각이 더해져 작은 화면에서는 넘칩니다. 창 안에서 굴립니다.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -1372,6 +1511,83 @@ private fun RoutineEditorDialog(
                         }
                     }
                 }
+                Text(text = "요일", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    RoutineStatsCalculator.WEEK_ORDER.forEach { day ->
+                        RoutineDayToggle(
+                            label = RoutineSchedule.shortLabel(day),
+                            checked = weekdays and RoutineSchedule.bit(day) != 0,
+                            onToggle = { weekdays = RoutineSchedule.toggled(weekdays, day) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag(routineEditDayTag(day))
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        Triple("EVERY_DAY", "매일", RoutineSchedule.EVERY_DAY),
+                        Triple("WEEKDAYS", "평일", RoutineSchedule.WEEKDAYS),
+                        Triple("WEEKEND", "주말", RoutineSchedule.WEEKEND)
+                    ).forEach { (name, label, mask) ->
+                        FilterChip(
+                            selected = weekdays == mask,
+                            onClick = { weekdays = mask },
+                            label = { Text(label) },
+                            modifier = Modifier.testTag(routineEditPresetTag(name))
+                        )
+                    }
+                }
+                if (noDay) {
+                    Text(
+                        text = "요일을 하나 이상 고르세요.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Text(text = "언제", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = timeOfDay == null,
+                        onClick = { timeOfDay = null },
+                        label = { Text("상시") },
+                        modifier = Modifier.testTag(routineEditAnytimeTag)
+                    )
+                    FilterChip(
+                        selected = timeOfDay != null,
+                        onClick = { if (timeOfDay == null) timeOfDay = DEFAULT_TIME_OF_DAY },
+                        label = { Text("지정 시간") },
+                        modifier = Modifier.testTag(routineEditTimedTag)
+                    )
+                }
+                val pickedTime = timeOfDay
+                if (pickedTime != null) {
+                    OutlinedButton(
+                        onClick = {
+                            // 할 일 알람과 같은 시계 창입니다(24시간).
+                            TimePickerDialog(
+                                context,
+                                { _, hour, minute -> timeOfDay = hour * 60 + minute },
+                                pickedTime / 60,
+                                pickedTime % 60,
+                                true
+                            ).show()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(routineEditTimeTag)
+                    ) {
+                        Text("알람 ${RoutineSchedule.clockText(pickedTime)}")
+                    }
+                    Text(
+                        text = "30분 전에 알리고, 시각이 지나도 안 했으면 1시간마다 세 번까지 다시 알립니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1402,11 +1618,14 @@ private fun RoutineEditorDialog(
                             title = title,
                             note = note,
                             category = category,
-                            reminderEnabled = reminderEnabled
+                            reminderEnabled = reminderEnabled,
+                            weekdays = weekdays,
+                            timeOfDay = timeOfDay
                         )
                     )
                 },
-                enabled = title.isNotBlank()
+                // 요일이 하나도 없으면 어느 날에도 보이지 않습니다. 저장하지 않습니다.
+                enabled = title.isNotBlank() && !noDay
             ) {
                 Text("저장")
             }
@@ -1417,6 +1636,37 @@ private fun RoutineEditorDialog(
             }
         }
     )
+}
+
+/**
+ * 고치기 창의 요일 한 칸. 켠 요일은 채워 보입니다.
+ *
+ * 일곱 칸이 창 너비를 나눠 가집니다 — 고정 크기로 두면 좁은 휴대폰에서 토요일이 창 밖으로 밀립니다.
+ */
+@Composable
+private fun RoutineDayToggle(
+    label: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .toggleable(value = checked, role = Role.Checkbox, onValueChange = { onToggle() }),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (checked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 /**
