@@ -1897,26 +1897,66 @@ function shiftIso(iso, delta) {
   return isoOfDate(date);
 }
 
+/** 루틴의 요일(ISO 번호, 월=1 … 일=7). 서버 `routineWeekdays`·앱 `RoutineSchedule`과 같게 — 없으면 매일입니다. */
+function routineDays(weekdays) {
+  const days = Array.isArray(weekdays)
+    ? [...new Set(weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))]
+    : [];
+  return days.length ? days.sort((a, b) => a - b) : [1, 2, 3, 4, 5, 6, 7];
+}
+
+/** `yyyy-MM-dd`의 ISO 요일 번호. */
+function isoWeekdayOf(iso) {
+  const day = new Date(`${iso}T00:00:00`).getDay();
+  return day === 0 ? 7 : day;
+}
+
+/**
+ * 카드에 적을 요일·시각(사용자가 정함, 2026-11-17). 매일·상시면 빈 글자입니다 — 앱 카드처럼 고른 것만 적습니다.
+ * 요일은 일요일부터 늘어놓고 매일·평일·주말은 이름으로 씁니다(앱 `RoutineSchedule.daysLabel`).
+ */
+function routineScheduleLabel(routine) {
+  const days = routineDays(routine.weekdays);
+  const key = days.join(",");
+  const dayText =
+    key === "1,2,3,4,5,6,7" ? "" :
+    key === "1,2,3,4,5" ? "평일" :
+    key === "6,7" ? "주말" :
+    [7, 1, 2, 3, 4, 5, 6].filter((day) => days.includes(day)).map((day) => weekdayLabels[day % 7]).join("·");
+  return [dayText, routine.time || ""].filter(Boolean).join(" · ");
+}
+
 /**
  * 루틴 하나를 지금까지 어떻게 밟아 왔는지.
  *
- * **앱 `RoutineStatsCalculator`와 규칙이 같아야 합니다.** 셋입니다 —
+ * **앱 `RoutineStatsCalculator`와 규칙이 같아야 합니다.** 넷입니다 —
  * **날수로 셉니다**(하루에 세 번 눌러도 하루),
- * **오늘이 아직 비어 있어도 어제까지 이어졌으면 이어 온 것으로 봅니다**(아침에 0일로 보이면
+ * **오늘이 아직 비어 있어도 앞의 하는 날까지 이어졌으면 이어 온 것으로 봅니다**(아침에 0일로 보이면
  * 어제까지 쌓은 것이 사라진 것처럼 느껴집니다),
+ * **요일을 고른 루틴은 하는 날만 이어 셉니다**(월·수·금 루틴이 화요일마다 끊기지 않습니다 — 사용자가 정함, 2026-11-17),
  * **으뜸 요일은 유일하고 두 날 이상일 때만 말합니다**(한 번뿐인 요일을 으뜸이라 부르면 처음
  * 밟은 날이 그대로 "내 요일"이 됩니다).
  * 한쪽만 고치면 같은 기록을 두고 폰과 웹이 다른 날수를 말하게 됩니다.
  */
-function routineStatsOf(checks, today) {
+function routineStatsOf(checks, today, weekdays) {
   const days = new Set();
   for (const check of checks) days.add(dayIso(check.checkedAt));
 
+  const active = new Set(routineDays(weekdays));
+  const isActive = (iso) => active.has(isoWeekdayOf(iso));
+  const previousActive = (iso) => {
+    for (let step = 1; step <= 7; step += 1) {
+      const candidate = shiftIso(iso, -step);
+      if (isActive(candidate)) return candidate;
+    }
+    return null;
+  };
+
   let currentStreakDays = 0;
-  let cursor = days.has(today) ? today : shiftIso(today, -1);
-  while (days.has(cursor)) {
+  let cursor = isActive(today) && days.has(today) ? today : previousActive(today);
+  while (cursor && days.has(cursor)) {
     currentStreakDays += 1;
-    cursor = shiftIso(cursor, -1);
+    cursor = previousActive(cursor);
   }
 
   const weekdayDays = new Array(7).fill(0);
@@ -1932,13 +1972,15 @@ function routineCard(routine, checksByRoutine, memosByRoutine, index, total) {
   const checks = checksByRoutine.get(routine.id) || [];
   const memos = memosByRoutine.get(routine.id) || [];
   const todayCount = checks.filter((check) => isToday(check.checkedAt)).length;
-  const stats = routineStatsOf(checks, todayIso());
+  const stats = routineStatsOf(checks, todayIso(), routine.weekdays);
+  const schedule = routineScheduleLabel(routine);
   return `
     <article class="item">
       <div class="itemHeader">
         <div>
           <h3>${index + 1}. ${escapeHtml(routine.title)}</h3>
           <div class="meta">
+            ${schedule ? `<span class="chip">${escapeHtml(schedule)}</span>` : ""}
             ${routine.category ? `<span class="chip">${escapeHtml(routine.category)}</span>` : ""}
             ${routine.sourceContentSyncId ? `<span class="chip">글귀에서 뽑음</span>` : ""}
             <span class="chip">오늘 ${todayCount}회</span>

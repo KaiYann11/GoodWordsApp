@@ -22,34 +22,48 @@ object DayStreak {
      * 아침에 앱을 열었을 때 0일로 보이면 어제까지 쌓은 것이 사라진 것처럼 느껴집니다.
      * 지킬 것이 있어야 오늘도 하게 됩니다. 하루가 통째로 비어야 끊긴 것으로 봅니다.
      */
-    fun current(days: Set<LocalDate>, today: LocalDate): Int {
+    fun current(days: Set<LocalDate>, today: LocalDate): Int = current(days, today, isActive = { true })
+
+    /**
+     * 하는 날만 세는 이어 온 날수 — 요일을 정한 루틴(사용자가 정함, 2026-11-17).
+     *
+     * **쉬는 날은 끊지도 더하지도 않습니다.** 월·수·금 루틴을 월·수·금 밟았으면 3입니다. 날마다 세면 화요일마다 끊겨
+     * 늘 1이 됩니다. 쉬는 날에 밟은 것은 날수에 넣지 않습니다 — 넣으면 같은 한 주가 요일을 바꾼 것만으로 다른 숫자가 됩니다.
+     * 오늘이 하는 날인데 아직 비어 있으면 앞의 하는 날까지로 셉니다(위와 같은 규칙).
+     */
+    fun current(days: Set<LocalDate>, today: LocalDate, isActive: (LocalDate) -> Boolean): Int {
         if (days.isEmpty()) return 0
 
-        var cursor = when {
-            today in days -> today
-            today.minusDays(1) in days -> today.minusDays(1)
-            else -> return 0
-        }
-
+        var cursor = if (isActive(today) && today in days) today else previousActive(today, isActive) ?: return 0
         var streak = 0
         while (cursor in days) {
             streak += 1
-            cursor = cursor.minusDays(1)
+            cursor = previousActive(cursor, isActive) ?: break
         }
         return streak
     }
 
     /** 지금까지 가장 길게 이어 온 날수. */
-    fun best(days: Set<LocalDate>): Int {
-        if (days.isEmpty()) return 0
+    fun best(days: Set<LocalDate>): Int = best(days, isActive = { true })
 
-        val sorted = days.sorted()
+    /** 하는 날만 세는 가장 긴 날수. 쉬는 날은 건너뜁니다([current]와 같은 규칙). */
+    fun best(days: Set<LocalDate>, isActive: (LocalDate) -> Boolean): Int {
+        val sorted = days.filter(isActive).sorted()
+        if (sorted.isEmpty()) return 0
+
         var best = 1
         var run = 1
         for (index in 1 until sorted.size) {
-            run = if (sorted[index - 1].plusDays(1) == sorted[index]) run + 1 else 1
+            run = if (nextActive(sorted[index - 1], isActive) == sorted[index]) run + 1 else 1
             if (run > best) best = run
         }
         return best
     }
+
+    /** 일주일 안에 하는 날이 없으면 null — 요일 규칙은 일주일마다 되풀이되므로 그보다 멀리 볼 것이 없습니다. */
+    private fun previousActive(date: LocalDate, isActive: (LocalDate) -> Boolean): LocalDate? =
+        (1L..7L).map { date.minusDays(it) }.firstOrNull(isActive)
+
+    private fun nextActive(date: LocalDate, isActive: (LocalDate) -> Boolean): LocalDate? =
+        (1L..7L).map { date.plusDays(it) }.firstOrNull(isActive)
 }

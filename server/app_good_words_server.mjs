@@ -9,11 +9,11 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 할 일에 사진 칸(imageUris)이 생겼습니다(사용자가 정함, 2026-11-15). 옛 서버는 할 일의 모르는 칸을 버리고, 옛 앱은 받은
-// 사진을 버린 채 할 일을 고쳐 올려 여기 사진까지 지우므로 형식을 올립니다. 같은 할 일 판정에도 사진이 들어갑니다. 27은 행복한
-// 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07),
-// 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-const schemaVersion = 28;
+// 루틴에 요일(weekdays)과 시각(time)이 생겼습니다(사용자가 정함, 2026-11-17). 옛 서버는 루틴의 모르는 칸을 버리고, 옛 앱은
+// 받은 요일·시각을 버린 채 루틴을 고쳐 올려 여기 것까지 매일·상시로 되돌리므로 형식을 올립니다. 같은 루틴 판정에도 요일·시각이
+// 들어갑니다. 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인
+// 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 29;
 /** 한 번에 남길 수 있는 들인 시간(분). 앱 `GoalTime.MAX_MINUTES`와 같다 — 타이머를 잊어도 하루를 넘겨 쌓이지 않게. */
 const maxGoalTimeMinutes = 24 * 60;
 /** 시간 기록에 적은 글(과정)의 길이 한도. 하루치 일기보다 길 까닭이 없다. */
@@ -1789,8 +1789,10 @@ function itemFingerprint(item) {
   ].join("|");
 }
 
+// 요일과 시각도 본다(사용자가 정함, 2026-11-17). 평일 06:30과 주말 08:00에 따로 둔 두 "기상"을 이름만 보고 합치면 한쪽이
+// 지워진다. 앱 routineFingerprint와 같은 꼴이어야 한다(요일은 ISO 번호, 시각은 HH:mm).
 function routineFingerprint(routine) {
-  return norm(routine.title);
+  return [norm(routine.title), routineWeekdays(routine.weekdays).join(","), routineTime(routine.time)].join("|");
 }
 
 // 날씨와 기분도 함께 본다. 앱의 diaryFingerprint와 같은 항목이어야 한다.
@@ -2631,7 +2633,31 @@ function normalizeRoutine(routine) {
     sourceContentSyncId: text(routine.sourceContentSyncId),
     reminderEnabled: routine.reminderEnabled !== false,
     createdAt: integer(routine.createdAt, nowMs()),
+    // 하는 요일(ISO 번호, 월=1 … 일=7)과 정해 둔 시각(HH:mm, 상시는 빈 글자). 빠뜨리면 병합 때마다 매일·상시로 돌아간다.
+    weekdays: routineWeekdays(routine.weekdays),
+    time: routineTime(routine.time),
   };
+}
+
+/**
+ * 루틴의 요일. 앱 `RoutineSchedule`과 같은 규칙이다 — 모르는 번호는 버리고, 남는 것이 없으면(요일이 생기기 전의 루틴도)
+ * 매일이다. 어느 날에도 보이지 않는 루틴은 지울 수도 고칠 수도 없게 숨는다.
+ */
+function routineWeekdays(value) {
+  const days = Array.isArray(value)
+    ? [...new Set(value.map((day) => integer(day, 0)).filter((day) => day >= 1 && day <= 7))].sort((a, b) => a - b)
+    : [];
+  return days.length ? days : [1, 2, 3, 4, 5, 6, 7];
+}
+
+/** 루틴의 시각 `HH:mm`. 꼴이 틀리거나 비었으면 상시(빈 글자)다. 앱 `RoutineSchedule.parseClock`과 같다. */
+function routineTime(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text(value));
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
 }
 
 function normalizeRoutineCheck(check) {

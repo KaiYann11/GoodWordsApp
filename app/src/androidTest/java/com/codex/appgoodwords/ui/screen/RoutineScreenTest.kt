@@ -5,8 +5,11 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -14,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import com.codex.appgoodwords.data.RoutineCategories
@@ -21,11 +26,14 @@ import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineMergeChoice
+import com.codex.appgoodwords.data.RoutineSchedule
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.RoutineStatsReport
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -216,7 +224,8 @@ class RoutineScreenTest {
         }
 
         compose.onAllNodesWithContentDescription("루틴 수정")[0].performClick()
-        compose.onNodeWithTag(routineMergeStartTag).performClick()
+        // 요일·시각이 더해져 창이 길어졌습니다. 맨 아래 단추는 굴려서 누릅니다.
+        compose.onNodeWithTag(routineMergeStartTag).performScrollTo().performClick()
         // 고치던 루틴은 고를 수 없습니다. 쌓인 체크 수를 보고 고릅니다.
         compose.onNodeWithTag(routineMergeCandidateTag(1)).assertDoesNotExist()
         compose.onNodeWithText("체크 30회").assertIsDisplayed()
@@ -240,7 +249,8 @@ class RoutineScreenTest {
         showMerge(routines, emptyMap()) { _, _, title, _ -> merged += title }
 
         compose.onAllNodesWithContentDescription("루틴 수정")[1].performClick()
-        compose.onNodeWithTag(routineMergeStartTag).performClick()
+        // 요일·시각이 더해져 창이 길어졌습니다. 맨 아래 단추는 굴려서 누릅니다.
+        compose.onNodeWithTag(routineMergeStartTag).performScrollTo().performClick()
         compose.onNodeWithTag(routineMergeCandidateTag(3)).performClick()
         compose.onNodeWithTag(routineMergeChoiceTag("title", RoutineMergeChoice.THAT)).performClick()
         compose.onNodeWithTag(routineMergeTitleTag).assertTextContains("책 한 쪽")
@@ -422,7 +432,8 @@ class RoutineScreenTest {
         onOpenStats: (RoutineEntity) -> Unit = {},
         onSaveRoutine: (RoutineDraft) -> Unit = {},
         onMoveRoutine: (RoutineEntity, Boolean) -> Unit = { _, _ -> },
-        onMoveRoutineTo: (RoutineEntity, Int) -> Unit = { _, _ -> }
+        onMoveRoutineTo: (RoutineEntity, Int) -> Unit = { _, _ -> },
+        on: LocalDate = LocalDate.now()
     ) {
         compose.setContent {
             RoutineScreen(
@@ -437,9 +448,172 @@ class RoutineScreenTest {
                 onDeleteMemo = {},
                 onCheckRoutine = {},
                 onMoveRoutine = onMoveRoutine,
-                onMoveRoutineTo = onMoveRoutineTo
+                onMoveRoutineTo = onMoveRoutineTo,
+                today = on
             )
         }
+    }
+
+    // ---- 요일·시각(사용자가 정함, 2026-11-17) ----
+
+    /** 오늘(10월 16일)은 금요일입니다. 헬스장은 월·수·금 19:00, 대청소는 주말입니다. */
+    private val weekRoutines = listOf(
+        routine(id = 1, title = "기상 후 물 한 컵", orderIndex = 0),
+        routine(id = 2, title = "주말 대청소", orderIndex = 1).copy(weekdays = RoutineSchedule.WEEKEND),
+        routine(id = 3, title = "헬스장", orderIndex = 2)
+            .copy(weekdays = RoutineSchedule.maskOf(listOf(1, 3, 5)), timeOfDay = 19 * 60)
+    )
+
+    private fun dayPill(day: DayOfWeek?) = compose.onNodeWithTag(routineDayTag(day))
+
+    /** 요일 알약 줄은 옆으로 밀립니다. 화면 밖 알약은 굴려 와서 짚습니다. */
+    private fun scrollToDay(day: DayOfWeek?) {
+        compose.onNodeWithTag(routineDayRowTag).performScrollToNode(hasTestTag(routineDayTag(day)))
+    }
+
+    @Test
+    fun theTabOpensOnTodayAndShowsOnlyTodaysRoutines() {
+        showRoutines(routines = weekRoutines, on = today)
+
+        dayPill(DayOfWeek.FRIDAY).assertIsSelected()
+        compose.onNodeWithText("금(오늘) 2").assertIsDisplayed()
+        compose.onNodeWithText("기상 후 물 한 컵").assertIsDisplayed()
+        compose.onNodeWithText("헬스장").assertIsDisplayed()
+        compose.onNodeWithText("주말 대청소").assertDoesNotExist()
+        // 차례 번호는 전체 줄의 것입니다. 금요일에 쉬는 2번이 빠져도 헬스장은 3번입니다.
+        compose.onNodeWithContentDescription("3 번째. 차례 옮기기").assertIsDisplayed()
+        // 오늘 진행도 오늘 하는 루틴만 셉니다.
+        compose.onNodeWithText("0 / 2 · 0%").assertIsDisplayed()
+    }
+
+    @Test
+    fun anotherDayShowsItsRoutinesAndAllShowsEveryRoutine() {
+        showRoutines(routines = weekRoutines, on = today)
+
+        scrollToDay(DayOfWeek.SATURDAY)
+        dayPill(DayOfWeek.SATURDAY).performClick()
+        compose.onNodeWithText("주말 대청소").assertIsDisplayed()
+        compose.onNodeWithText("헬스장").assertDoesNotExist()
+        // 안 한 것·한 것은 오늘 체크로 거르는 것이라, 다른 요일을 볼 때는 두지 않습니다.
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).assertDoesNotExist()
+
+        scrollToDay(null)
+        dayPill(null).performClick()
+        compose.onNodeWithText("주말 대청소").assertIsDisplayed()
+        compose.onNodeWithText("헬스장").assertIsDisplayed()
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).assertIsDisplayed()
+    }
+
+    @Test
+    fun theCardShowsTheTimeAndTheChosenDaysOnly() {
+        showRoutines(routines = weekRoutines, on = today)
+
+        compose.onNodeWithTag(routineTimeTag(3)).assertTextContains("19:00")
+        compose.onNodeWithText("월·수·금").assertIsDisplayed()
+        // 매일·상시 루틴에는 아무것도 붙이지 않습니다 — 대부분이 그래서 줄마다 같은 글자가 됩니다.
+        compose.onNodeWithTag(routineTimeTag(1)).assertDoesNotExist()
+        assertTrue(compose.onAllNodesWithText("매일").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun aDayWithoutRoutinesSaysSoInsteadOfShowingNothing() {
+        // 10월 17일은 토요일입니다. 평일 루틴만 있으면 오늘은 할 것이 없는 날입니다.
+        val weekdaysOnly = routines.map { it.copy(weekdays = RoutineSchedule.WEEKDAYS) }
+        showRoutines(routines = weekdaysOnly, on = today.plusDays(1))
+
+        compose.onNodeWithText("오늘 요일에 하는 루틴이 없습니다.").assertIsDisplayed()
+        compose.onNodeWithText("오늘 하는 루틴이 없습니다.").assertIsDisplayed()
+
+        scrollToDay(DayOfWeek.SUNDAY)
+        dayPill(DayOfWeek.SUNDAY).performClick()
+        compose.onNodeWithText("일요일에 하는 루틴이 없습니다.").assertIsDisplayed()
+    }
+
+    @Test
+    fun theEditorSavesTheChosenDaysAndTime() {
+        val saved = mutableListOf<RoutineDraft>()
+        showRoutines(onSaveRoutine = { saved += it }, on = today)
+
+        compose.onNodeWithText("루틴 추가").performClick()
+        compose.onNodeWithText("루틴 이름").performTextInput("헬스장")
+        // 새 루틴은 매일·상시로 시작합니다.
+        compose.onNodeWithTag(routineEditPresetTag("EVERY_DAY")).performScrollTo().assertIsSelected()
+        compose.onNodeWithTag(routineEditAnytimeTag).performScrollTo().assertIsSelected()
+
+        compose.onNodeWithTag(routineEditPresetTag("WEEKDAYS")).performScrollTo().performClick()
+        compose.onNodeWithTag(routineEditDayTag(DayOfWeek.MONDAY)).performScrollTo().performClick()
+        compose.onNodeWithTag(routineEditDayTag(DayOfWeek.MONDAY)).assertIsOff()
+        compose.onNodeWithTag(routineEditTimedTag).performScrollTo().performClick()
+        compose.onNodeWithTag(routineEditTimeTag).performScrollTo().assertTextContains("알람 09:00")
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals(1, saved.size)
+        assertEquals(RoutineSchedule.maskOf(listOf(2, 3, 4, 5)), saved.single().weekdays)
+        assertEquals(9 * 60, saved.single().timeOfDay)
+    }
+
+    @Test
+    fun turningOffEveryDayBlocksSaving() {
+        // 어느 날에도 보이지 않는 루틴은 고칠 수도 지울 수도 없게 숨습니다.
+        showRoutines(on = today)
+
+        compose.onNodeWithText("루틴 추가").performClick()
+        compose.onNodeWithText("루틴 이름").performTextInput("숨을 루틴")
+        RoutineStatsCalculator.WEEK_ORDER.forEach { day ->
+            compose.onNodeWithTag(routineEditDayTag(day)).performScrollTo().performClick()
+        }
+
+        compose.onNodeWithText("요일을 하나 이상 고르세요.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("저장").assertIsNotEnabled()
+    }
+
+    @Test
+    fun editingShowsTheRoutinesDaysAndTimeAndCanMakeItAnytime() {
+        val saved = mutableListOf<RoutineDraft>()
+        showRoutines(routines = weekRoutines, onSaveRoutine = { saved += it }, on = today)
+
+        // 오늘(금) 줄에서 헬스장은 둘째 카드입니다.
+        compose.onAllNodesWithContentDescription("루틴 수정")[1].performClick()
+        compose.onNodeWithTag(routineEditDayTag(DayOfWeek.MONDAY)).performScrollTo().assertIsOn()
+        compose.onNodeWithTag(routineEditDayTag(DayOfWeek.TUESDAY)).performScrollTo().assertIsOff()
+        compose.onNodeWithTag(routineEditTimeTag).performScrollTo().assertTextContains("알람 19:00")
+
+        compose.onNodeWithTag(routineEditAnytimeTag).performScrollTo().performClick()
+        compose.onNodeWithTag(routineEditTimeTag).assertDoesNotExist()
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals(3L, saved.single().id)
+        assertEquals(RoutineSchedule.maskOf(listOf(1, 3, 5)), saved.single().weekdays)
+        assertNull(saved.single().timeOfDay)
+    }
+
+    @Test
+    fun aRoutineFoundOnAnotherDayOpensWithAllDays() {
+        // 검색이나 알람에서 고른 루틴이 오늘 쉬는 것이면, 오늘 줄에 없어 찾아 놓고도 빈 화면을 보게 됩니다.
+        val focus = mutableStateOf<Long?>(null)
+        compose.setContent {
+            RoutineScreen(
+                routines = weekRoutines,
+                todayCounts = emptyMap(),
+                memos = emptyList(),
+                onSaveRoutine = {},
+                onDeleteRoutine = {},
+                onSaveMemo = { _, _ -> },
+                onDeleteMemo = {},
+                onCheckRoutine = {},
+                onMoveRoutine = { _, _ -> },
+                onMoveRoutineTo = { _, _ -> },
+                focusId = focus.value,
+                today = today
+            )
+        }
+        compose.onNodeWithText("주말 대청소").assertDoesNotExist()
+
+        compose.runOnIdle { focus.value = 2L }
+
+        compose.onNodeWithText("주말 대청소").assertIsDisplayed()
+        scrollToDay(null)
+        dayPill(null).assertIsSelected()
     }
 
     private fun routine(id: Long, title: String, orderIndex: Int, category: String = "") = RoutineEntity(

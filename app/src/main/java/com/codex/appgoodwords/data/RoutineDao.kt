@@ -31,8 +31,15 @@ interface RoutineDao {
     @Query("SELECT * FROM routines WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): RoutineEntity?
 
-    @Query("SELECT * FROM routines WHERE reminderEnabled = 1 ORDER BY RANDOM() LIMIT 1")
-    suspend fun getRandomReminderRoutine(): RoutineEntity?
+    /**
+     * 주기 알림에 실을 루틴 하나. [dayBit]는 오늘 요일의 비트([RoutineSchedule.bit])입니다 — 오늘 쉬는 루틴을 알리지 않습니다.
+     * 요일이 0인 옛 값은 매일로 봅니다([RoutineSchedule.normalized]와 같은 규칙).
+     */
+    @Query(
+        "SELECT * FROM routines WHERE reminderEnabled = 1 " +
+            "AND ((weekdays & 127) = 0 OR (weekdays & :dayBit) != 0) ORDER BY RANDOM() LIMIT 1"
+    )
+    suspend fun getRandomReminderRoutine(dayBit: Int): RoutineEntity?
 
     @Query("DELETE FROM routines WHERE id = :id")
     suspend fun deleteById(id: Long)

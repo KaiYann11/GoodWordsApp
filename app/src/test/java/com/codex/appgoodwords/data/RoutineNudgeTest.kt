@@ -149,7 +149,7 @@ class RoutineNudgeTest {
         val routines = listOf(routine(1, "물 한 컵", 0), routine(2, "저녁 산책", 1), routine(3, "스트레칭", 2))
         val todayChecks = listOf(check(1, "물 한 컵", today))
 
-        val rest = RoutineNudgeCalculator.restOfToday(routines, todayChecks)
+        val rest = RoutineNudgeCalculator.restOfToday(routines, todayChecks, today)
 
         assertEquals(listOf("저녁 산책", "스트레칭"), rest.map { it.title })
         assertEquals(rest.first().id, build(routines, todayChecks)!!.routineId)
@@ -165,6 +165,42 @@ class RoutineNudgeTest {
 
         assertEquals("먼저 것", nudge.title)
         assertTrue(nudge.hasPlaceToGo)
+    }
+
+    @Test
+    fun aRoutineRestingTodayIsNotNext() {
+        // 10월 18일은 일요일입니다. 평일에만 하는 루틴이 일요일의 "다음 차례"가 되면 안 됩니다(사용자가 정함, 2026-11-17).
+        val routines = listOf(
+            routine(1, "출근 준비", order = 0).copy(weekdays = RoutineSchedule.WEEKDAYS),
+            routine(2, "저녁 산책", order = 1)
+        )
+
+        assertEquals(listOf("저녁 산책"), RoutineNudgeCalculator.restOfToday(routines, emptyList(), today).map { it.title })
+        assertEquals("저녁 산책", build(routines, emptyList())!!.title)
+    }
+
+    @Test
+    fun aDayWithNoRoutinesSaysNothing() {
+        // 쉬는 날에 "오늘 루틴을 모두 밟았습니다"라고 하면 사실이 아닙니다. 카드를 두지 않습니다.
+        val routines = listOf(routine(1, "출근 준비", order = 0).copy(weekdays = RoutineSchedule.WEEKDAYS))
+
+        assertNull(build(routines, emptyList()))
+    }
+
+    @Test
+    fun aRunOnChosenDaysSkipsTheDaysOff() {
+        // 화·목·일 루틴을 목(15일)·화(13일)에 밟았으면, 사이의 수·금·토를 건너 이어진 2일입니다.
+        val gym = routine(1, "헬스장", order = 0).copy(
+            weekdays = RoutineSchedule.maskOf(listOf(2, 4, 7))
+        )
+        val nudge = build(
+            routines = listOf(gym, routine(2, "물 한 컵", order = 1)),
+            checks = listOf(check(1, "헬스장", today.minusDays(3)), check(1, "헬스장", today.minusDays(5)))
+        )!!
+
+        assertEquals(RoutineNudge.Kind.STREAK, nudge.kind)
+        assertEquals(1L, nudge.routineId)
+        assertEquals(2, nudge.streakDays)
     }
 
     private fun build(

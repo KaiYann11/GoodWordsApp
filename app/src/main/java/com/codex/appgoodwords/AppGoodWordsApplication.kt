@@ -38,6 +38,12 @@ class AppGoodWordsApplication : Application() {
             container.repository.seedDefaultsIfNeeded()
             container.reminderScheduler.sync(container.settingsStore.getSettings())
         }
+
+        // 시각을 정한 루틴의 알람(사용자가 정함, 2026-11-17). 앱이 떠 있는 동안 루틴·체크가 바뀔 때마다 다시 겁니다 —
+        // 앱·위젯·알림에서 체크해도, 동기화·가져오기로 루틴이 바뀌어도 같은 자리에서 잡습니다.
+        applicationScope.launch {
+            container.routineAlarm.watch(container.database)
+        }
     }
 }
 

@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.RoutineEntity
+import com.codex.appgoodwords.data.RoutineSchedule
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.RoutineStatsReport
 import java.time.DayOfWeek
@@ -113,6 +114,19 @@ private fun StreakCard(routine: RoutineEntity, report: RoutineStatsReport, today
                     text = routine.category,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary
+                )
+            }
+            // 요일을 고른 루틴은 하는 날만 이어 셉니다(사용자가 정함, 2026-11-17). 그 규칙을 숫자 옆에 적어 둡니다 —
+            // 월·수·금 루틴이 화요일을 건너뛰고도 이어지는 까닭을 알 수 있게.
+            val everyDay = RoutineSchedule.normalized(routine.weekdays) == RoutineSchedule.EVERY_DAY
+            if (!everyDay || routine.timeOfDay != null) {
+                Text(
+                    text = listOfNotNull(
+                        RoutineSchedule.daysLabel(routine.weekdays),
+                        routine.timeOfDay?.let { RoutineSchedule.clockText(it) }
+                    ).joinToString(" · ") + if (everyDay) "" else " — 하는 요일만 이어 셉니다",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 

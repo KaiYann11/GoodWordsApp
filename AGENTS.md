@@ -126,7 +126,8 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 |---|---|
 | 이어 온 날수 · 하루 점수·오늘 한 것 · 하루의 걸음 | `DayStreak` · `DayScoreCalculator.digest` · `DailyLoopCalculator` |
 | 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
-| 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴 · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
+| 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴(오늘 요일의 것만) · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
+| 루틴의 요일·시각(비트·ISO 번호·`HH:mm`·매일/평일/주말 이름, 없으면 매일·상시) · 시각 루틴을 알릴 때(30분 전, 지나도 체크가 없으면 1시간마다 세 번 — 사용자가 정함, 2026-11-17) | `RoutineSchedule` · `RoutineAlarms`. 연속은 하는 요일만 셉니다(`DayStreak`의 `isActive`) |
 | 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄·들인 시간) | `GoalTracking` |
 | 목표에 들인 시간(분 표시·누적·최근 4주·직접 적은 시간·타이머로 잰 분 — 사용자가 정함, 2026-11-08) | 앱 `GoalTime` · 웹 `formatMinutes`·`recentGoalMinutes` |
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
@@ -155,6 +156,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 첨부를 붙이는 기록(일기·보관함·할 일) | 앱 `AttachmentUploader`(빠지면 다른 기기·웹에서 "기기 안 파일")·`AttachmentGallery` · 같은 내용 합치기의 지문(앱·서버 모두 첨부까지) · 서버 `normalize…`(빠뜨리면 병합 때마다 사라짐)·`referencedAttachmentIds`(빠지면 쓰는 사진을 안 쓰는 것으로 셈) · 웹 카드와 `hydrateAttachments` |
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
+| 루틴의 요일·시각(`weekdays`·`timeOfDay`) | 앱 `AppDataJson`(ISO 번호·`HH:mm`) · `RoutineDraft`와 고치기 창(저장은 루틴을 통째로 새로 적어서, 빠지면 이름만 고쳐도 매일·상시로 돌아갑니다) · 서버 `normalizeRoutine`(빠뜨리면 병합 때마다 사라짐) · 같은 루틴 판정(앱 `SyncDeduplicator`·서버 `routineFingerprint`) · 웹 `routineStatsOf`·`routineScheduleLabel` · 오늘 요일로 거르는 곳(`restOfToday`·`RoutineWidget`·`RoutineDao.getRandomReminderRoutine`·루틴 탭의 오늘 진행) |
 | 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |
 | 같은 내용 합치기(기분 `moodLogFingerprint` 포함, 행복한 순간은 `itemFingerprint`에 `createdAt`까지) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
@@ -191,11 +193,14 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   (`ContentItemDao.clearCategory`의 `kept`)가 행복 칸을 뺍니다 — 섞이면 "음식"이 알림 카테고리에 끼고, 글귀 카테고리를 지울 때
   같은 이름의 갈래가 함께 지워집니다.
 - **정한 때에 오는 것은 알람이 깨웁니다** — 오늘의 한마디(`DailyCoachAlarm`), 일일 집계·AI 돌아보기 자동 실행·뜸할 때 알림
-  (`DailyAlarm`), 할 일(`TodoAlarmScheduler`). 오래 걸리거나 인터넷이 드는 일은 울린 참에 곧바로 도는 일꾼에게 넘깁니다.
+  (`DailyAlarm`), 할 일(`TodoAlarmScheduler`), 시각을 정한 루틴(`RoutineAlarm` — 모든 루틴을 통틀어 알람 하나, 울리면 그때까지
+  지난 것을 알리고 다음 것을 겁니다). 루틴 알람은 앱이 떠 있는 동안 루틴·체크가 바뀔 때마다 다시 겁니다(`RoutineAlarm.watch`,
+  `AppGoodWordsApplication`) — 고치는 자리마다 부르면 하나를 빠뜨려 이미 한 루틴이 한 시간 뒤에 또 울립니다. 루틴 알람은 태그
+  (`routine_alarm:<id>:<그날>`)로 가리므로 거둘 때도 태그와 번호를 함께 줍니다(`NotificationActionReceiver`). 오래 걸리거나 인터넷이 드는 일은 울린 참에 곧바로 도는 일꾼에게 넘깁니다.
   WorkManager에 "주기 뒤"로 미루면 휴대폰을 내려놓은 동안 몇 시간씩 밀려 앱을 열 때만 왔습니다. **WorkManager 반복 예약을
   `UPDATE`로 다시 걸면 정한 시각을 못 지킵니다** — 처음 건 시각은 그대로 두고 시작 지연만 새로 받아 다시 걸 때마다 앞당겨지고,
   한 번 돈 뒤로는 시작 지연을 아예 보지 않습니다(1.18.0까지 일일 집계가 그래서 엉뚱한 때 왔습니다). 알람은 재부팅·업데이트로
-  사라지니 `DailyCoachAlarmReceiver`·`DailyAlarmReceiver`가 다시 겁니다. 홈의 물음은 앱이 화면에 있을 때만 나갑니다(Android 15는
+  사라지니 `DailyCoachAlarmReceiver`·`DailyAlarmReceiver`·`RoutineAlarmReceiver`가 다시 겁니다(루틴은 시계·시간대가 바뀔 때도). 홈의 물음은 앱이 화면에 있을 때만 나갑니다(Android 15는
   화면 밖 앱의 통신을 끊습니다).
 - **오늘의 한마디 상태는 `SettingsStore.updateDailyCoachState`로만 고칩니다**(읽고 고치고 쓰기를 한 번에). 따로 읽고 쓰면
   묻는 몇 분 사이에 보낸 내 말·담기 표시를 묻기 전 상태로 덮습니다. 코치의 말은 물은 때의 차례에 끼웁니다(`withCoachLine`).

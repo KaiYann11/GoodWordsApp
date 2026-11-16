@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GoalTimeLogEntity::class,
         RecordLinkEntity::class
     ],
-    version = 27,
+    version = 28,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -50,6 +50,19 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recordLinkDao(): RecordLinkDao
 
     companion object {
+        /**
+         * 루틴에 요일과 시각을 더합니다(사용자가 정함, 2026-11-17). 다른 표는 건드리지 않습니다.
+         *
+         * 요일은 매일(127)을 기본값으로 둡니다 — 이미 있는 루틴도 매일입니다. 시각은 NULL이 상시입니다.
+         * 칸 이름은 [RoutineEntity.weekdays]·[RoutineEntity.timeOfDay]와 정확히 같아야 합니다.
+         */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE routines ADD COLUMN weekdays INTEGER NOT NULL DEFAULT 127")
+                database.execSQL("ALTER TABLE routines ADD COLUMN timeOfDay INTEGER")
+            }
+        }
+
         /**
          * 할 일에 사진 칸을 더합니다(사용자가 정함, 2026-11-15). 다른 표는 건드리지 않습니다.
          *

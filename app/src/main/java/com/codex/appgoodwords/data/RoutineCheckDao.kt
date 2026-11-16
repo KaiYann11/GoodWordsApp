@@ -33,6 +33,13 @@ interface RoutineCheckDao {
     @Query("SELECT * FROM routine_checks")
     suspend fun getAll(): List<RoutineCheckEntity>
 
+    /** [start] 뒤의 체크. 루틴 알람([RoutineAlarms])은 오늘 체크했는지만 보므로 지난 기록을 다 읽지 않습니다. */
+    @Query("SELECT * FROM routine_checks WHERE checkedAt >= :start")
+    suspend fun getSince(start: Long): List<RoutineCheckEntity>
+
+    @Query("SELECT * FROM routine_checks WHERE checkedAt >= :start")
+    fun observeSince(start: Long): Flow<List<RoutineCheckEntity>>
+
     @Query("SELECT * FROM routine_checks WHERE routineId = :routineId")
     suspend fun getByRoutineId(routineId: Long): List<RoutineCheckEntity>
 

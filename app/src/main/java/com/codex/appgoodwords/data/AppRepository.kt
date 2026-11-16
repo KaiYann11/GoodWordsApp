@@ -611,7 +611,9 @@ class AppRepository(
                     .orEmpty()
                     .ifBlank { draft.sourceContentSyncId.trim() },
                 reminderEnabled = draft.reminderEnabled,
-                createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                weekdays = RoutineSchedule.normalized(draft.weekdays),
+                timeOfDay = RoutineSchedule.normalizedTime(draft.timeOfDay)
             )
         )
     }
@@ -779,8 +781,9 @@ class AppRepository(
             RoutineMergeResult(routine = kept, movedChecks = oldChecks.size, movedMemos = memos.size)
         }
 
-    suspend fun getRandomReminderRoutine(): RoutineEntity? {
-        return routineDao.getRandomReminderRoutine()
+    /** 주기 알림에 실을 루틴. 오늘 요일에 하는 것만 고릅니다(사용자가 정함, 2026-11-17). */
+    suspend fun getRandomReminderRoutine(today: LocalDate = LocalDate.now()): RoutineEntity? {
+        return routineDao.getRandomReminderRoutine(RoutineSchedule.bit(today.dayOfWeek))
     }
 
     suspend fun markRoutineDone(routineId: Long): Int {

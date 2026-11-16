@@ -63,6 +63,7 @@ async function loadRoutineStats() {
   vm.runInContext(source.slice(start, end), context);
   return {
     routineStatsOf: context.routineStatsOf,
+    routineScheduleLabel: context.routineScheduleLabel,
     // const 선언은 컨텍스트 객체에 올라오지 않아 안에서 꺼냅니다.
     weekdayLabels: vm.runInContext("weekdayLabels", context),
   };
@@ -112,6 +113,35 @@ test("으뜸 요일은 유일할 때만 말한다", async () => {
     today,
   );
   assert.equal(tied.topWeekday, null);
+});
+
+test("요일을 고른 루틴은 하는 날만 이어 센다", async () => {
+  const { routineStatsOf } = await loadRoutineStats();
+  // 10월 12일 월·14일 수·16일(오늘) 금. 앱 RoutineStatsTest와 같은 날짜입니다.
+  const monWedFri = [1, 3, 5];
+
+  // 화·목을 건너뛰어도 끊기지 않습니다(사용자가 정함, 2026-11-17). 날마다 세면 늘 1입니다.
+  assert.equal(routineStatsOf(checksOn(["2026-10-12"], ["2026-10-14"], ["2026-10-16"]), today, monWedFri).currentStreakDays, 3);
+  assert.equal(routineStatsOf(checksOn(["2026-10-12"], ["2026-10-14"], ["2026-10-16"]), today).currentStreakDays, 1);
+  // 오늘(금)이 아직이면 앞의 하는 날(수)까지로 셉니다.
+  assert.equal(routineStatsOf(checksOn(["2026-10-12"], ["2026-10-14"]), today, monWedFri).currentStreakDays, 2);
+  // 쉬는 날(화)에 한 것은 날수에 넣지 않습니다.
+  assert.equal(routineStatsOf(checksOn(["2026-10-12"], ["2026-10-13"], ["2026-10-14"]), today, monWedFri).currentStreakDays, 2);
+  // 하는 날(수)이 비면 끊깁니다.
+  assert.equal(routineStatsOf(checksOn(["2026-10-12"]), today, monWedFri).currentStreakDays, 0);
+});
+
+test("카드에는 고른 요일과 시각만 적는다", async () => {
+  const { routineScheduleLabel } = await loadRoutineStats();
+
+  assert.equal(routineScheduleLabel({ weekdays: [1, 3, 5], time: "19:00" }), "월·수·금 · 19:00");
+  assert.equal(routineScheduleLabel({ weekdays: [1, 2, 3, 4, 5], time: "" }), "평일");
+  assert.equal(routineScheduleLabel({ weekdays: [6, 7] }), "주말");
+  // 일요일부터 늘어놓습니다(앱 요일 알약과 같은 차례).
+  assert.equal(routineScheduleLabel({ weekdays: [1, 7] }), "일·월");
+  assert.equal(routineScheduleLabel({ weekdays: [1, 2, 3, 4, 5, 6, 7], time: "07:00" }), "07:00");
+  // 매일·상시(요일이 생기기 전의 루틴 포함)는 아무것도 적지 않습니다.
+  assert.equal(routineScheduleLabel({ title: "옛 루틴" }), "");
 });
 
 test("한 번뿐인 요일은 으뜸이라 부르지 않는다", async () => {

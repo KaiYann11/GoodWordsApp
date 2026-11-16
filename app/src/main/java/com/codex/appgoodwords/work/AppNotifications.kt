@@ -21,8 +21,10 @@ import com.codex.appgoodwords.data.DailySummary
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
+import com.codex.appgoodwords.data.RoutineAlarms
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.Walking
+import java.time.LocalDate
 
 object AppNotifications {
     const val contentChannelId = "daily_good_words_sound"
@@ -30,6 +32,10 @@ object AppNotifications {
     const val summaryChannelId = "daily_good_words_summary_sound"
     const val summarySilentChannelId = "daily_good_words_summary_silent"
     const val todoChannelId = "good_words_todo_alarm"
+    /** 시각을 정한 루틴의 알람(사용자가 정함, 2026-11-17). 할 일 알람처럼 따로 두어 휴대폰 설정에서 이것만 끌 수 있습니다. */
+    const val routineAlarmChannelId = "good_words_routine_alarm"
+    /** 루틴 알람은 모두 이 번호를 쓰고 태그(`routine_alarm:<루틴 id>:<그날>`)로 가립니다. */
+    const val routineAlarmNotificationId = 9_030
     const val coachChannelId = "good_words_daily_coach"
     /** 걷기를 기록하는 동안 떠 있는 알림. 소리 없이 자리만 지킵니다. */
     const val walkChannelId = "good_words_walk"
@@ -43,6 +49,10 @@ object AppNotifications {
     const val extraMarkConfirmed = "extra_mark_confirmed"
     const val extraRecordView = "extra_record_view"
     const val extraNotificationId = "extra_notification_id"
+    /** 태그로 가리는 알림(루틴 알람). 수행을 누르면 이 태그와 번호로 거둡니다. */
+    const val extraNotificationTag = "extra_notification_tag"
+    /** 루틴 알람. 루틴 탭의 그 루틴으로 데려갑니다. */
+    const val extraOpenRoutineId = "extra_open_routine_id"
     const val extraTodoId = "extra_todo_id"
     /** 위젯의 적기 버튼. 앱을 열자마자 번뜩인 것 담는 칸을 띄웁니다. */
     const val extraCaptureIdea = "extra_capture_idea"
@@ -123,6 +133,18 @@ object AppNotifications {
         manager.createNotificationChannel(summarySilentChannel)
         manager.createNotificationChannel(todoChannel)
         manager.createNotificationChannel(coachChannel)
+
+        // 루틴의 시각도 사용자가 직접 정한 것이라 할 일 알람처럼 높게 둡니다.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                routineAlarmChannelId,
+                "${context.getString(R.string.app_name)} 루틴 알람",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "시각을 정한 루틴을 30분 전에, 지나도 안 했으면 1시간마다 세 번까지 알려 주는 알람"
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+            }
+        )
 
         // 걷는 동안 내내 떠 있으므로 낮게 둡니다. 기록 중이라는 것과 끝내는 단추만 있으면 됩니다.
         manager.createNotificationChannel(
@@ -324,6 +346,93 @@ object AppNotifications {
 
     /** 글귀 알림은 항목 id를 그대로 쓰므로, 할 일과 겹치지 않게 따로 떨어뜨립니다. */
     private fun todoNotificationId(todoId: Long): Int = (todoId % 10_000L).toInt() + 20_000
+
+    /**
+     * 루틴 알람 하나([RoutineAlarms]). 같은 루틴·같은 날의 알림은 한 자리에 덮어써서 쌓이지 않습니다.
+     *
+     * 그날이 끝나면 저절로 거둡니다 — 자정을 넘겨 체크하면 다음 날 몫으로 적혀, 남은 알림이 가리키는 날과 어긋납니다.
+     * [silent]는 여럿이 한꺼번에 울릴 때 둘째부터 소리를 내지 않게 합니다.
+     */
+    fun showRoutineAlarmNotification(
+        context: Context,
+        alarm: RoutineAlarms.Alarm,
+        silent: Boolean,
+        now: Long = System.currentTimeMillis()
+    ) {
+        if (!canPostNotifications(context)) return
+        val routine = alarm.routine
+        val tag = routineAlarmTag(routine.id, alarm.date)
+
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            putExtra(extraOpenRoutineId, routine.id)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            routineAlarmRequestCode(routine.id),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val checkIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+            action = actionCheckRoutine
+            putExtra(extraRoutineId, routine.id)
+            putExtra(extraNotificationId, routineAlarmNotificationId)
+            putExtra(extraNotificationTag, tag)
+        }
+        val checkPendingIntent = PendingIntent.getBroadcast(
+            context,
+            routineAlarmRequestCode(routine.id) + 1,
+            checkIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val message = RoutineAlarms.message(alarm)
+        val notification = NotificationCompat.Builder(context, routineAlarmChannelId)
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setContentTitle(routine.title)
+            .setContentText(message)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(if (routine.note.isBlank()) message else "$message\n\n${routine.note}")
+                    .setSummaryText("루틴")
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setContentIntent(contentIntent)
+            .addAction(android.R.drawable.checkbox_on_background, "수행", checkPendingIntent)
+            .setAutoCancel(true)
+            .setSilent(silent)
+            .setTimeoutAfter((alarm.dayEndsAt - now).coerceAtLeast(1L))
+            .build()
+
+        NotificationManagerCompat.from(context).notify(tag, routineAlarmNotificationId, notification)
+    }
+
+    /**
+     * 떠 있는 루틴 알람 가운데 [keep]이 거짓인 것을 거둡니다. 알림 목록을 한 번만 읽습니다 — 루틴마다 거두기를 부르면
+     * 루틴이 마흔 개일 때 바뀔 때마다 마흔 번 시스템을 부릅니다.
+     */
+    fun clearRoutineAlarmNotifications(context: Context, keep: (routineId: Long, date: LocalDate) -> Boolean) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val active = runCatching { manager.activeNotifications }.getOrNull() ?: return
+        for (status in active) {
+            if (status.id != routineAlarmNotificationId) continue
+            val tag = status.tag ?: continue
+            val parts = tag.split(':')
+            if (parts.size != 3 || parts[0] != ROUTINE_ALARM_TAG) continue
+            val routineId = parts[1].toLongOrNull() ?: continue
+            val date = runCatching { LocalDate.parse(parts[2]) }.getOrNull() ?: continue
+            if (!keep(routineId, date)) manager.cancel(tag, routineAlarmNotificationId)
+        }
+    }
+
+    private const val ROUTINE_ALARM_TAG = "routine_alarm"
+
+    private fun routineAlarmTag(routineId: Long, date: LocalDate): String = "$ROUTINE_ALARM_TAG:$routineId:$date"
+
+    /** 할 일(20_000~)·루틴 주기 알림(200_000~)과 겹치지 않게 떨어뜨립니다. 수행 단추는 그 다음 번호를 씁니다. */
+    private fun routineAlarmRequestCode(routineId: Long): Int = ((routineId % 100_000L).toInt() * 2) + 400_000
 
     fun showContentNotification(
         context: Context,
