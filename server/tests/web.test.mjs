@@ -471,13 +471,39 @@ async function renderTodoCard(todo, today) {
   vm.runInContext(source.slice(source.indexOf("const attachmentScheme ="), source.indexOf("/**\n * 받아 둔 첨부의 blob 주소.")), context);
   vm.runInContext(source.slice(source.indexOf("function escapeHtml("), source.indexOf("/**\n * 톡 찍어 둔 기분.")), context);
   vm.runInContext(source.slice(source.indexOf("function attachmentMedia("), source.indexOf("function diaryCard(")), context);
-  // 할 일 카드 함수 하나만 떼어 옵니다(맨 앞 칸의 닫는 괄호까지).
-  const start = source.indexOf("function todoCard(");
-  const end = source.indexOf("\n}\n", start) + 3;
-  assert.ok(start >= 0 && end > start, "할 일 카드 토막을 찾지 못했습니다.");
-  vm.runInContext(source.slice(start, end), context);
+  // 할 일 카드 함수와 반복 이름 함수만 떼어 옵니다(맨 앞 칸의 닫는 괄호까지).
+  for (const name of ["function todoCard(", "function todoRepeatLabel("]) {
+    const start = source.indexOf(name);
+    const end = source.indexOf("\n}\n", start) + 3;
+    assert.ok(start >= 0 && end > start, `${name} 토막을 찾지 못했습니다.`);
+    vm.runInContext(source.slice(start, end), context);
+  }
   return context.todoCard(todo, today);
 }
+
+test("반복하는 할 일은 카드에 반복 이름을 보이고, 이름은 앱과 같은 꼴을 읽는다", async () => {
+  const monthly = await renderTodoCard(
+    { id: 5, title: "월세 내기", note: "", dueDate: "2026-11-25", imageUris: [], repeatRule: "MONTHLY:25" },
+    "2026-11-19",
+  );
+  assert.match(monthly, /↻ 매달 25일/);
+  // 2026-11-19는 목요일입니다. 매주·2주마다의 요일은 날짜에서 따옵니다.
+  const weekly = await renderTodoCard(
+    { id: 6, title: "분리수거", note: "", dueDate: "2026-11-19", imageUris: [], repeatRule: "BIWEEKLY" },
+    "2026-11-19",
+  );
+  assert.match(weekly, /↻ 2주마다 목요일/);
+  const yearly = await renderTodoCard(
+    { id: 7, title: "기념일", note: "", dueDate: "2027-02-28", imageUris: [], repeatRule: "YEARLY:02-29" },
+    "2026-11-19",
+  );
+  assert.match(yearly, /↻ 매년 2월 29일/);
+  // 옛 서버가 준 할 일(칸 없음)과 읽을 수 없는 꼴은 반복 칩이 없습니다.
+  for (const repeatRule of [undefined, "", "DAILY", "MONTHLY:40"]) {
+    const html = await renderTodoCard({ id: 8, title: "물 사기", note: "", dueDate: "2026-11-19", repeatRule }, "2026-11-19");
+    assert.doesNotMatch(html, /↻/);
+  }
+});
 
 test("할 일 카드는 붙여 둔 사진을 서버에서 받아 보이고, 사진이 없으면 사진 칸도 없다", async () => {
   const photo = `appgoodwords://attachment/${"b".repeat(64)}.jpg`;

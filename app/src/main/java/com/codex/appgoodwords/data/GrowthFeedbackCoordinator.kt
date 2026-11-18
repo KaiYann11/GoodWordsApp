@@ -170,7 +170,9 @@ class GrowthFeedbackCoordinator(
             goalSteps = settingsStore.getWalkGoalSteps()
         ),
         // 목표를 보내지 않으면 들인 시간도 읽지 않습니다.
-        goalTimeLogs = if (includeGoals) database.goalTimeLogDao().getAll() else emptyList()
+        goalTimeLogs = if (includeGoals) database.goalTimeLogDao().getAll() else emptyList(),
+        // 하루 돌아보기의 [어제와 견준 것]이 편 책의 수를 셉니다(하루 점수와 같은 셈).
+        readingLogs = if (period == ReportPeriod.DAILY) database.bookReadingLogDao().getAll() else emptyList()
     )
 
     companion object {

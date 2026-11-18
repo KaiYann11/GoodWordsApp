@@ -111,13 +111,36 @@ class TodoBucketsTest {
         assertTrue(grouped.getValue(TodoBucket.SOMEDAY).map { it.id } == listOf(2L, 1L))
     }
 
+    @Test
+    fun aFinishedRoundOfARepeatingTodoFoldsAwayFromTheNextDay() {
+        // 반복하는 할 일을 끝내 다음 회차가 생긴 지난 회차는 끝낸 다음 날부터 접습니다(2026-11-19) — 매주 하는 일이 "지난 일"에
+        // 해마다 쉰 줄씩 쌓이지 않게. 끝낸 그날은 줄이 그어진 채 남고, 한 번뿐인 할 일은 지금처럼 남습니다.
+        val zone = java.time.ZoneId.systemDefault()
+        val yesterdayNoon = today.minusDays(1).atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val todayNoon = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val grouped = TodoBuckets.group(
+            listOf(
+                todo(id = 1, due = "2026-08-20", doneAt = yesterdayNoon, repeatedAt = yesterdayNoon),
+                todo(id = 2, due = "2026-08-20", doneAt = todayNoon, repeatedAt = todayNoon),
+                todo(id = 3, due = "2026-08-20", doneAt = yesterdayNoon),
+                todo(id = 4, due = "2026-08-27", repeatRule = "WEEKLY")
+            ),
+            today
+        )
+
+        assertEquals(listOf(2L, 3L), grouped.getValue(TodoBucket.OVERDUE).map { it.id }.sorted())
+        assertEquals(listOf(4L), grouped.getValue(TodoBucket.THIS_WEEK).map { it.id })
+    }
+
     private fun bucketOf(todo: TodoEntity) = TodoBuckets.bucketOf(todo, today)
 
     private fun todo(
         id: Long = 1,
         due: String = "2026-08-26",
         doneAt: Long? = null,
-        createdAt: Long = 0L
+        createdAt: Long = 0L,
+        repeatRule: String = "",
+        repeatedAt: Long? = null
     ) = TodoEntity(
         id = id,
         syncId = "todo-$id",
@@ -125,6 +148,8 @@ class TodoBucketsTest {
         title = "할 일 $id",
         dueDate = due,
         doneAt = doneAt,
-        createdAt = createdAt
+        createdAt = createdAt,
+        repeatRule = repeatRule,
+        repeatedAt = repeatedAt
     )
 }

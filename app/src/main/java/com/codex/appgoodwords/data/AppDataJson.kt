@@ -61,12 +61,13 @@ data class AppDataSnapshot(
 }
 
 object AppDataJson {
-    // 루틴에 요일(`weekdays`)과 시각(`time`)이 생겼습니다(사용자가 정함, 2026-11-17). 옛 서버는 루틴의 모르는 칸을 버리고, 옛 앱은
-    // 받은 요일·시각을 버린 채 루틴을 고쳐 올려 서버의 것까지 매일·상시로 되돌리므로 형식을 올립니다. 같은 루틴 판정에도 요일·시각이
-    // 들어갑니다(평일 06:30과 주말 08:00의 "기상"은 다른 루틴). Room은 28입니다.
-    // 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08),
-    // 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-    const val schemaVersion: Int = 29
+    // 할 일에 반복(`repeatRule`)과 다음 회차를 만든 때(`repeatedAt`)가 생겼습니다(사용자가 정함, 2026-11-19). 옛 서버는 할 일의 모르는
+    // 칸을 버리고, 옛 앱은 받은 반복을 버린 채 할 일을 고쳐 올려 서버의 것까지 한 번뿐인 할 일로 되돌리므로 형식을 올립니다. 같은 할 일
+    // 판정에도 반복이 들어갑니다(같은 날 한 번뿐인 "월세"와 매달 "월세"는 다른 할 일). Room은 29입니다.
+    // 29는 루틴의 요일·시각(2026-11-17), 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12),
+    // 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고
+    // 올렸습니다(2026-10-29).
+    const val schemaVersion: Int = 30
 
     fun toJson(snapshot: AppDataSnapshot): JSONObject = JSONObject()
         .put("appName", "오늘의 글귀")
@@ -601,6 +602,8 @@ object AppDataJson {
         .put("doneAt", doneAt)
         .put("createdAt", createdAt)
         .put("imageUris", JSONArray(imageUris))
+        .put("repeatRule", repeatRule)
+        .put("repeatedAt", repeatedAt)
 
     private fun JSONArray?.toTodos(): List<TodoEntity> {
         if (this == null) return emptyList()
@@ -627,7 +630,10 @@ object AppDataJson {
                         doneAt = todo.optNullableLong("doneAt"),
                         createdAt = todo.optLong("createdAt", System.currentTimeMillis()),
                         // 옛 파일·옛 서버의 할 일에는 사진 칸이 없습니다. 빈 목록으로 읽습니다.
-                        imageUris = todo.optJSONArray("imageUris").toStringList()
+                        imageUris = todo.optJSONArray("imageUris").toStringList(),
+                        // 반복(사용자가 정함, 2026-11-19). 옛 파일에는 없고, 읽을 수 없는 꼴은 반복하지 않는 것으로 봅니다.
+                        repeatRule = TodoRepeats.normalize(todo.optString("repeatRule")),
+                        repeatedAt = todo.optNullableLong("repeatedAt")
                     )
                 )
             }

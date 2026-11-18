@@ -388,6 +388,23 @@ class SyncDeduplicatorTest {
     }
 
     @Test
+    fun aRepeatingTodoIsNotTheOneOffOfTheSameDay() {
+        // 같은 날 한 번뿐인 "월세"와 매달 "월세"는 다른 할 일입니다(2026-11-19). 휴대폰과 웹이 같은 회차를 끝내 다음 회차를
+        // 둘 다 만들면 반복까지 같아 하나로 합칩니다(서버 todoFingerprint와 같게).
+        val merged = snapshotOf(
+            todos = listOf(
+                TodoEntity(syncId = "once", title = "월세", dueDate = "2026-12-25", updatedAt = 1_000L),
+                TodoEntity(syncId = "monthly", title = "월세", dueDate = "2026-12-25", updatedAt = 1_000L, repeatRule = "MONTHLY:25"),
+                TodoEntity(syncId = "web-made", title = "월세", dueDate = "2026-12-25", updatedAt = 2_000L, repeatRule = "MONTHLY:25")
+            )
+        )
+
+        val result = SyncDeduplicator.deduplicate(merged)
+
+        assertEquals(listOf("", "MONTHLY:25"), result.todos.map { it.repeatRule }.sorted())
+    }
+
+    @Test
     fun theSameRoutineNameOnOtherDaysOrTimesIsLeftAlone() {
         // 평일 06:30과 주말 08:00에 따로 둔 두 "기상"은 서로 다른 루틴입니다(사용자가 정함, 2026-11-17).
         // 이름만 보고 합치면 한쪽이 지워집니다. 요일·시각까지 같은 것은 하나로 합칩니다(서버 routineFingerprint와 같게).

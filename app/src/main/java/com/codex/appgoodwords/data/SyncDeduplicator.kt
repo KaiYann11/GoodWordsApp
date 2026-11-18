@@ -192,12 +192,15 @@ object SyncDeduplicator {
     ).joinToString("|")
 
     // 사진도 봅니다(보관함·일기와 같게). 같은 날 "반품하기" 둘에 영수증이 하나씩 붙어 있으면 서로 다른 할 일입니다 —
-    // 빼면 하나로 합쳐지면서 한쪽 사진이 사라집니다. 서버 todoFingerprint와 같아야 합니다.
+    // 빼면 하나로 합쳐지면서 한쪽 사진이 사라집니다. 반복도 봅니다(2026-11-19) — 같은 날 한 번뿐인 "월세"와 매달 "월세"는
+    // 다른 할 일입니다. 휴대폰과 웹이 같은 회차를 끝내 다음 회차를 둘 다 만들면 반복까지 같아 하나로 합쳐집니다.
+    // 서버 todoFingerprint와 같아야 합니다.
     private fun todoFingerprint(todo: TodoEntity): String = listOf(
         todo.dueDate.trim(),
         normalize(todo.title),
         normalize(todo.note),
-        todo.imageUris.joinToString(",")
+        todo.imageUris.joinToString(","),
+        todo.repeatRule.trim()
     ).joinToString("|")
 
     /**

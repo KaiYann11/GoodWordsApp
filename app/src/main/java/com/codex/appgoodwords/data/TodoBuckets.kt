@@ -52,6 +52,8 @@ object TodoBuckets {
      */
     fun group(todos: List<TodoEntity>, today: LocalDate): Map<TodoBucket, List<TodoEntity>> {
         return todos
+            // 반복하는 할 일의 지난 회차(끝내서 다음 회차가 있고, 끝낸 날이 지난 것)는 접습니다 — [TodoRepeats.isPastRound].
+            .filterNot { TodoRepeats.isPastRound(it, today) }
             .groupBy { bucketOf(it, today) }
             .mapValues { (_, list) -> list.sortedWith(inBucketOrder()) }
             // enum 차례대로 내놓습니다. groupBy는 만난 차례를 그대로 두어 화면이 뒤죽박죽입니다.

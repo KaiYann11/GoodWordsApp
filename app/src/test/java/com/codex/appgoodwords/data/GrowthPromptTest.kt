@@ -48,6 +48,30 @@ class GrowthPromptTest {
     }
 
     @Test
+    fun theDailyLookBackComparesWithYesterdayAsNumbersOnly() {
+        // 사용자가 정함(2026-11-19 — 하루 돌아보기에 싣기): 어제 하루 전체와 오늘 지금까지의 한 일 수만 갑니다.
+        val routines = listOf(RoutineEntity(id = 1, syncId = "r1", title = "아침 달리기"))
+        val checks = listOf(
+            check(1, today),
+            check(1, today.minusDays(1)),
+            check(1, today.minusDays(1)).copy(id = 900, syncId = "check-again")
+        )
+
+        val daily = digest(period = ReportPeriod.DAILY, routines = routines, checks = checks, diaries = listOf(diary), includeDiaryBody = false)
+
+        assertEquals(listOf("루틴: 어제 2번 · 오늘 1번", "일기: 어제 1편 · 오늘 0편"), daily.comparisonLines)
+        val prompt = GrowthPrompt.userPrompt(daily)
+        assertTrue(prompt, prompt.contains("[어제와 견준 것 (어제 하루 전체 · 오늘 지금까지, 한 일의 수)]"))
+        // 어제 일기는 수로만 갑니다 — 제목(본문 첫머리일 수 있음)·본문은 나가지 않습니다.
+        assertFalse(prompt.contains("마음이 무거웠다"))
+        assertFalse(prompt.substringAfter("[어제와 견준 것").contains(diary.title))
+        // 한 주·한 달 돌아보기에는 "어제"가 없습니다.
+        assertTrue(digest(period = ReportPeriod.WEEKLY, routines = routines, checks = checks, includeDiaryBody = false).comparisonLines.isEmpty())
+        // 적은 것을 나무라지 말라는 규칙이 함께 갑니다.
+        assertTrue(GrowthPrompt.systemPrompt().contains("[어제와 견준 것]이 있으면"))
+    }
+
+    @Test
     fun goalTimeGoesAsNumbersOnlyAndOnlyWhenGoalsAreShared() {
         // 사용자가 정함(2026-11-08): 목표를 보내기로 했을 때만 누적·최근 4주 시간이 붙고, 그때 한 것의 글은 나가지 않습니다.
         val goal = ContentItemEntity(id = 61, syncId = "g-1", type = ContentType.GOAL, title = "하프 마라톤 완주", body = "")

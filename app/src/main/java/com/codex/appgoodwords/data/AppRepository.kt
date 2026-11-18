@@ -1184,22 +1184,59 @@ class AppRepository(
             // 고칠 때 완료 상태를 잃으면 끝낸 일이 되살아난다.
             doneAt = existing?.doneAt,
             createdAt = existing?.createdAt ?: System.currentTimeMillis(),
-            imageUris = draft.imageUris.map(String::trim).filter(String::isNotBlank).distinct()
+            imageUris = draft.imageUris.map(String::trim).filter(String::isNotBlank).distinct(),
+            // 날짜가 없으면 반복하지 않습니다. 종류·날짜가 그대로면 있던 규칙(매달 31일 같은 날)을 지킵니다.
+            repeatRule = TodoRepeats.ruleFor(draft.repeat, draft.dueDate, existing),
+            // 고칠 때 잃으면 끝냄을 거뒀다 다시 끝낼 때 다음 회차가 또 생깁니다.
+            repeatedAt = existing?.repeatedAt
         )
         val id = dao.insert(todo)
         return todo.copy(id = if (todo.id == 0L) id else todo.id)
     }
 
-    /** 완료 표시를 뒤집고 결과를 돌려줍니다. 끝낸 일의 알람은 부르는 쪽이 지웁니다. */
-    suspend fun toggleTodoDone(id: Long): TodoEntity? {
-        val dao = todoDao ?: return null
-        val existing = dao.getById(id) ?: return null
-        val updated = existing.copy(
-            doneAt = if (existing.isDone) null else System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis()
+    /**
+     * 완료 표시를 뒤집고 결과를 돌려줍니다. 끝낸 일의 알람은 부르는 쪽이 지웁니다.
+     *
+     * 반복하는 할 일을 끝내면 **다음 회차를 새 할 일로 함께 만듭니다**(사용자가 정함, 2026-11-19 — [TodoRepeats.nextOf]).
+     * 한 번 만든 뒤로는 끝냄을 거뒀다 다시 끝내도 또 만들지 않습니다([TodoEntity.repeatedAt]). 다음 회차의 알람도 부르는 쪽이
+     * 겁니다.
+     */
+    suspend fun toggleTodoDone(
+        id: Long,
+        today: LocalDate = LocalDate.now(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): TodoToggle? = database.withTransaction {
+        val dao = todoDao ?: return@withTransaction null
+        val existing = dao.getById(id) ?: return@withTransaction null
+        val now = System.currentTimeMillis()
+        if (existing.isDone) {
+            val undone = existing.copy(doneAt = null, updatedAt = now)
+            dao.insert(undone)
+            return@withTransaction TodoToggle(undone)
+        }
+        val next = TodoRepeats.nextOf(existing, today, now, zoneId)?.let { made ->
+            made.copy(id = dao.insert(made))
+        }
+        val done = existing.copy(
+            doneAt = now,
+            updatedAt = now,
+            repeatedAt = if (next != null) now else existing.repeatedAt
         )
-        dao.insert(updated)
-        return updated
+        dao.insert(done)
+        TodoToggle(done, next)
+    }
+
+    /**
+     * 반복하는 할 일을 끝낸 것을 바로 되돌립니다(스낵바의 되돌리기). 끝냄을 거두고, 그때 만든 다음 회차를 지우고 표식을 남깁니다 —
+     * 표식 없이 지우면 이미 올라간 다음 회차가 서버·웹에 남습니다. 거둔 할 일을 돌려줍니다.
+     */
+    suspend fun undoTodoRepeat(doneId: Long, nextSyncId: String): TodoEntity? = database.withTransaction {
+        val dao = todoDao ?: return@withTransaction null
+        val done = dao.getById(doneId) ?: return@withTransaction null
+        if (dao.deleteBySyncId(nextSyncId) > 0) recordDeletion(nextSyncId, SyncEntityType.TODO)
+        val restored = done.copy(doneAt = null, repeatedAt = null, updatedAt = System.currentTimeMillis())
+        dao.insert(restored)
+        restored
     }
 
     suspend fun deleteTodo(id: Long) {
@@ -1215,17 +1252,6 @@ class AppRepository(
     }
 
     fun todayRangeMillis(): Pair<Long, Long> = todayRange()
-
-    suspend fun buildTodaySummary(): DailySummary {
-        val (start, end) = todayRange()
-        val events = exposureEventDao.getEventsBetween(start, end)
-        val shown = summarize(events, ExposureEventType.SHOWN)
-        val confirmed = summarize(events, ExposureEventType.CONFIRMED)
-        return DailySummary(
-            shownItems = shown,
-            confirmedItems = confirmed
-        )
-    }
 
     suspend fun setFavorite(id: Long, isFavorite: Boolean) {
         contentItemDao.updateFavorite(id, isFavorite, System.currentTimeMillis())
@@ -1289,24 +1315,6 @@ class AppRepository(
                 )
             )
         )
-    }
-
-    private fun summarize(
-        events: List<ExposureEventEntity>,
-        eventType: ExposureEventType
-    ): List<DailySummaryLine> {
-        return events
-            .filter { it.eventType == eventType }
-            .groupingBy { it.contentTitle }
-            .eachCount()
-            .entries
-            .sortedByDescending { it.value }
-            .map { (title, count) ->
-                DailySummaryLine(
-                    title = title,
-                    count = count
-                )
-            }
     }
 
     private fun todayRange(): Pair<Long, Long> {

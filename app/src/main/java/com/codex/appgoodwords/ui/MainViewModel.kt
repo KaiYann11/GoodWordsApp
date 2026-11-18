@@ -32,6 +32,7 @@ import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineCheckResult
 import com.codex.appgoodwords.data.FeedbackWriter
 import com.codex.appgoodwords.data.GoalTracking
@@ -44,6 +45,7 @@ import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineNudgeCalculator
+import com.codex.appgoodwords.data.RoutineSchedule
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
@@ -51,6 +53,9 @@ import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.DailyCoachPrompt
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DayClose
+import com.codex.appgoodwords.data.DayComparison
+import com.codex.appgoodwords.data.DayComparisons
 import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
@@ -66,6 +71,7 @@ import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.data.SyncStatus
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
+import com.codex.appgoodwords.data.TodoToggle
 import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.HomeQuote
 import com.codex.appgoodwords.ui.screen.HomeQuoteSwipe
@@ -78,6 +84,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -87,7 +94,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -301,6 +310,21 @@ class MainViewModel(
     }
 
     /**
+     * 1분마다 지금 시각. 화면이 보는 동안만 돕니다. 하루 마무리 카드가 마무리 시각에 맞춰 뜨고(사용자가 정함, 2026-11-19),
+     * 화면을 켜 둔 채 자정을 넘기면 오늘·어제가 넘어갑니다 — 전에는 기록이 바뀌기 전까지 어제가 "오늘"로 남았습니다.
+     */
+    private val minuteTicks: Flow<Long> = flow {
+        while (true) {
+            val now = System.currentTimeMillis()
+            emit(now)
+            delay(MINUTE_MILLIS - now % MINUTE_MILLIS)
+        }
+    }.shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    /** 오늘 날짜. 날이 바뀔 때만 내보냅니다. */
+    private val currentDate: Flow<LocalDate> = minuteTicks.map { LocalDate.now() }.distinctUntilChanged()
+
+    /**
      * 최근 네 주의 점수 흐름.
      *
      * 저장하지 않고 그때그때 기록에서 셉니다. 하루의 축을 바꾸면 지난날 점수도 곧바로
@@ -311,10 +335,11 @@ class MainViewModel(
             DayInputs(events, checks, todoList, diaryList, logs)
         },
         container.settingsStore.dailyStepsFlow,
-        walkRecords
-    ) { inputs, steps, walking ->
+        walkRecords,
+        currentDate
+    ) { inputs, steps, walking, date ->
         DayScoreCalculator.trend(
-            today = LocalDate.now(),
+            today = date,
             events = inputs.events,
             routineChecks = inputs.routineChecks,
             todos = inputs.todos,
@@ -341,10 +366,11 @@ class MainViewModel(
         },
         moodLogs,
         container.settingsStore.dailyStepsFlow,
-        walkRecords
-    ) { inputs, logs, steps, walking ->
+        walkRecords,
+        currentDate
+    ) { inputs, logs, steps, walking, date ->
         DayScoreCalculator.digest(
-            date = LocalDate.now(),
+            date = date,
             events = inputs.events,
             routineChecks = inputs.routineChecks,
             todos = inputs.todos,
@@ -378,6 +404,91 @@ class MainViewModel(
     val todayScore = todayDigest
         .map { it.score }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), todayDigest.value.score)
+
+    /** 어제 하루. 어제보다 카드가 오늘과 견줍니다 — 오늘과 같은 셈([DayScoreCalculator.digest])입니다. */
+    private val yesterdayDigest = combine(
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
+        },
+        moodLogs,
+        container.settingsStore.dailyStepsFlow,
+        walkRecords,
+        currentDate
+    ) { inputs, logs, steps, walking, date ->
+        DayScoreCalculator.digest(
+            date = date.minusDays(1),
+            events = inputs.events,
+            routineChecks = inputs.routineChecks,
+            todos = inputs.todos,
+            diaries = inputs.diaries,
+            moodLogs = logs,
+            steps = steps,
+            readingLogs = inputs.readingLogs,
+            walkRecords = walking
+        )
+    }
+
+    /**
+     * 어제의 나와 비교 — 오늘 지금까지와 어제 하루 전체(사용자가 정함, 2026-11-19). 홈 돌아보기 칸의 "어제보다" 카드가 씁니다.
+     * 견줄 것이 없는 날에는 null입니다([DayComparison.shown]).
+     */
+    val dayComparison: StateFlow<DayComparison?> = combine(todayDigest, yesterdayDigest) { today, yesterday ->
+        // 오늘이 막 넘어가 두 날이 이어지지 않는 순간(어제의 "오늘"과 새 "어제")에는 견주지 않습니다.
+        if (yesterday.score.date != today.score.date.minusDays(1)) return@combine null
+        DayComparisons.of(today, yesterday).takeIf { it.shown }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * 홈에 하루 마무리 카드를 둘 때(사용자가 정함, 2026-11-19 — 알림을 마무리로 + 홈). 마무리 시각(설정의 하루 마무리 알림,
+     * 예전 일일 집계 시각)이 지났고 그날 아직 마무리하지 않았으면 true입니다. 1분마다 다시 봅니다.
+     */
+    val dayCloseDue: StateFlow<Boolean> = combine(
+        minuteTicks,
+        container.settingsStore.settingsFlow,
+        container.settingsStore.dayClosedDateFlow
+    ) { _, reminder, closedDate ->
+        DayClose.isDue(java.time.LocalDateTime.now(), reminder.summaryHour, reminder.summaryMinute, closedDate)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /**
+     * 하루 마무리의 루틴 칸 — 오늘 요일의 루틴 가운데 아직 안 적은 것([RoutineNudgeCalculator.restOfToday])과, 오늘 할 루틴이
+     * 하나라도 있는지(없으면 칸을 두지 않습니다).
+     */
+    val dayCloseRoutines: StateFlow<DayCloseRoutines> = combine(routines, routineChecks, currentDate) { list, checks, date ->
+        val zone = ZoneId.systemDefault()
+        val todayChecks = checks.filter { Instant.ofEpochMilli(it.checkedAt).atZone(zone).toLocalDate() == date }
+        DayCloseRoutines(
+            rest = RoutineNudgeCalculator.restOfToday(list, todayChecks, date),
+            hasToday = list.any { RoutineSchedule.isOn(it, date) }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DayCloseRoutines())
+
+    private val _openDayCloseRequest = MutableStateFlow(false)
+
+    /** 하루 마무리 알림을 눌러 왔습니다. 앱이 마무리 화면을 엽니다. */
+    val openDayCloseRequest: StateFlow<Boolean> = _openDayCloseRequest.asStateFlow()
+
+    fun handleOpenDayCloseRequest() {
+        _openDayCloseRequest.value = true
+    }
+
+    fun consumeOpenDayCloseRequest() {
+        _openDayCloseRequest.value = false
+    }
+
+    /**
+     * 하루를 마무리합니다(사용자가 정함, 2026-11-19). 감사 한 줄은 오늘의 감사 일기로, 내일 할 일 하나는 내일 날짜의 할 일로
+     * 남기고(둘 다 비어 있으면 남기지 않음), 그날을 마무리한 날로 적어 홈 카드와 알림을 거둡니다. 스낵바에 띄울 말을 돌려줍니다.
+     */
+    suspend fun finishDayClose(gratitude: String, tomorrowTodo: String): Result<String> = runCatching {
+        val today = LocalDate.now()
+        val diary = DayClose.gratitudeDiary(gratitude, today)?.also { container.repository.saveDiary(it) }
+        val todo = DayClose.tomorrowTodo(tomorrowTodo, today)?.let { draft ->
+            container.repository.saveTodo(draft).also(container.todoAlarmScheduler::sync)
+        }
+        container.settingsStore.setDayClosed(today)
+        DayClose.finishedMessage(wroteGratitude = diary != null, wroteTodo = todo != null)
+    }
 
     /** 오늘 받아 둔 한마디. 날이 바뀌면 빈 상태입니다. */
     val dailyCoach = container.settingsStore.dailyCoachStateFlow
@@ -1286,10 +1397,26 @@ class MainViewModel(
         container.todoAlarmScheduler.sync(saved)
     }
 
-    suspend fun toggleTodoDone(id: Long): Result<Unit> = runCatching {
+    /**
+     * 끝냄을 뒤집습니다. 반복하는 할 일을 끝내 다음 회차가 생겼으면 결과의 `next`에 담겨 화면이 "다음은 …"과 되돌리기를
+     * 띄웁니다(사용자가 정함, 2026-11-19).
+     */
+    suspend fun toggleTodoDone(id: Long): Result<TodoToggle?> = runCatching {
+        val toggle = container.repository.toggleTodoDone(id) ?: return@runCatching null
         // 끝낸 일의 알람이 그대로 울리면 이미 한 일을 다시 하라고 하는 셈이다.
-        container.repository.toggleTodoDone(id)?.let(container.todoAlarmScheduler::sync)
-        Unit
+        container.todoAlarmScheduler.sync(toggle.todo)
+        // 다음 회차의 알람은 지금 겁니다. 다음에 앱을 열 때까지 기다리면 그 사이 울릴 것을 놓칩니다.
+        toggle.next?.let(container.todoAlarmScheduler::sync)
+        toggle
+    }
+
+    /** 반복하는 할 일을 끝낸 것을 바로 되돌립니다 — 끝냄을 거두고 그때 만든 다음 회차를 지웁니다(알람까지). */
+    suspend fun undoTodoRepeat(toggle: TodoToggle): Result<Boolean> = runCatching {
+        val next = toggle.next ?: return@runCatching false
+        container.todoAlarmScheduler.cancel(next)
+        val restored = container.repository.undoTodoRepeat(toggle.todo.id, next.syncId) ?: return@runCatching false
+        container.todoAlarmScheduler.sync(restored)
+        true
     }
 
     suspend fun deleteTodo(id: Long): Result<Unit> = runCatching {
@@ -1801,6 +1928,9 @@ class MainViewModel(
     private suspend fun currentSnapshot(): AppDataSnapshot = container.syncCoordinator.currentSnapshot()
 
     private companion object {
+        /** 오늘·지금 시각을 다시 보는 간격. 하루 마무리 카드가 이만큼 늦게 뜰 수 있습니다. */
+        const val MINUTE_MILLIS = 60_000L
+
         /**
          * 이만큼 넘게 앱을 떠나 있었으면 다시 켠 것으로 봅니다.
          *
@@ -1820,6 +1950,12 @@ class MainViewModel(
         const val WALK_REFRESH_GAP_MS = 60 * 1000L
     }
 }
+
+/** 하루 마무리의 루틴 칸에 쓰는 것. */
+data class DayCloseRoutines(
+    val rest: List<RoutineEntity> = emptyList(),
+    val hasToday: Boolean = false
+)
 
 /** 하루 요약에 넣을 기록들. combine이 한 번에 넷까지만 받아서 묶습니다. */
 private data class DayInputs(

@@ -34,16 +34,18 @@ class Migration26To27Test {
             before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN imageUris")
             before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN weekdays")
             before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN timeOfDay")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN repeatRule")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN repeatedAt")
             before.openHelper.writableDatabase.version = 26
         } finally {
             before.close()
         }
 
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_26_27, AppDatabase.MIGRATION_27_28)
+            .addMigrations(AppDatabase.MIGRATION_26_27, AppDatabase.MIGRATION_27_28, AppDatabase.MIGRATION_28_29)
             .build()
         try {
-            assertEquals(28, after.openHelper.writableDatabase.version)
+            assertEquals(29, after.openHelper.writableDatabase.version)
             // 쓰던 할 일이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다. 옛 할 일의 사진은 빈 목록으로 읽힙니다 —
             // NULL이면 읽는 쪽마다 "없음"과 "빈 목록"을 따로 다뤄야 합니다.
             assertEquals(listOf(dated, someday), after.todoDao().getAll().sortedBy { it.id })

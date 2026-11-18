@@ -97,7 +97,12 @@ data class TodoDraft(
     /** 알람 시각(epoch millis). null이면 알리지 않습니다. */
     val remindAt: Long? = null,
     /** 붙여 둔 사진. 고치기에서 빼거나 더합니다. */
-    val imageUris: List<String> = emptyList()
+    val imageUris: List<String> = emptyList(),
+    /**
+     * 반복의 종류(사용자가 정함, 2026-11-19). 날짜가 없으면 반복할 수 없어 저장할 때 "반복 안 함"이 됩니다.
+     * 매달·매년이 들고 있는 날은 저장할 때 날짜에서 정합니다([TodoRepeats.ruleFor]).
+     */
+    val repeat: TodoRepeatKind = TodoRepeatKind.NONE
 ) {
     companion object {
         fun from(todo: TodoEntity): TodoDraft = TodoDraft(
@@ -106,7 +111,8 @@ data class TodoDraft(
             note = todo.note,
             dueDate = runCatching { LocalDate.parse(todo.dueDate) }.getOrNull(),
             remindAt = todo.remindAt,
-            imageUris = todo.imageUris
+            imageUris = todo.imageUris,
+            repeat = TodoRepeats.kindOf(todo.repeatRule)
         )
     }
 }

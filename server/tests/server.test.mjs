@@ -1722,6 +1722,109 @@ describe("첨부 파일", () => {
     const fresh = await (await api("/api/todos", { method: "POST", body: { title: "물 사기", dueDate: "2026-11-16" } })).json();
     assert.deepEqual(fresh.imageUris, []);
   });
+
+  it("반복하는 할 일은 병합을 지나고, 웹에서 끝내면 같은 규칙으로 다음 회차가 한 번만 생긴다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    // 오늘보다 한참 뒤의 날을 씁니다 — 다음 회차는 "오늘이나 그 뒤의 첫 회차"라 지난 날이면 시험 날짜에 따라 달라집니다.
+    const remindAt = new Date(2099, 0, 30, 21, 30).getTime(); // 마감 전날 저녁
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [{
+            syncId: "rent", updatedAt: 1000, title: "월세 내기", note: "계좌", dueDate: "2099-01-31", createdAt: 1000,
+            remindAt, imageUris: [], repeatRule: "MONTHLY:31",
+          }],
+        }),
+      })
+    ).json();
+    const rent = merged.todos.find((todo) => todo.syncId === "rent");
+    // 서버가 칸을 모르면 여기서 반복이 빠지고, 다음 동기화가 기기의 반복까지 지운다.
+    assert.equal(rent.repeatRule, "MONTHLY:31");
+    assert.equal(rent.repeatedAt, null);
+
+    const done = await (await api(`/api/todos/${rent.id}/toggle-done`, { method: "POST" })).json();
+    assert.ok(done.doneAt > 0);
+    assert.ok(done.repeatedAt > 0);
+    // 1월 31일의 매달은 2월에는 마지막 날입니다. 알람은 같은 날 차이(전날)·같은 시각으로 따라갑니다.
+    assert.equal(done.nextTodo.dueDate, "2099-02-28");
+    assert.equal(done.nextTodo.repeatRule, "MONTHLY:31");
+    assert.equal(done.nextTodo.remindAt, new Date(2099, 1, 27, 21, 30).getTime());
+    assert.equal(done.nextTodo.note, "계좌");
+    assert.equal(done.nextTodo.doneAt, null);
+    assert.notEqual(done.nextTodo.syncId, "rent");
+
+    // 끝냄을 거뒀다 다시 끝내도 다음 회차는 하나뿐입니다.
+    await api(`/api/todos/${rent.id}/toggle-done`, { method: "POST" });
+    const again = await (await api(`/api/todos/${rent.id}/toggle-done`, { method: "POST" })).json();
+    assert.equal(again.nextTodo, undefined);
+    const stored = await (await api("/api/snapshot")).json();
+    assert.equal(stored.todos.length, 2);
+
+    // 2월 28일 회차를 끝내면 3월에는 다시 31일입니다.
+    const february = stored.todos.find((todo) => todo.dueDate === "2099-02-28");
+    const third = await (await api(`/api/todos/${february.id}/toggle-done`, { method: "POST" })).json();
+    assert.equal(third.nextTodo.dueDate, "2099-03-31");
+  });
+
+  it("웹에서 반복 칸 없이 고쳐도 반복은 남고, 날짜를 옮기면 매달의 날도 옮겨 간다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const monthly = await (
+      await api("/api/todos", { method: "POST", body: { title: "카드값", dueDate: "2099-05-10", repeatRule: "MONTHLY:10" } })
+    ).json();
+    const renamed = await (
+      await api(`/api/todos/${monthly.id}`, { method: "PUT", body: { title: "카드값 이체", dueDate: "2099-05-10", note: "" } })
+    ).json();
+    assert.equal(renamed.repeatRule, "MONTHLY:10");
+    const moved = await (
+      await api(`/api/todos/${monthly.id}`, { method: "PUT", body: { title: "카드값 이체", dueDate: "2099-05-20", note: "" } })
+    ).json();
+    assert.equal(moved.repeatRule, "MONTHLY:20");
+
+    // 매주는 요일이 날짜에서 나오므로 규칙이 그대로입니다. 2주마다 회차는 14일 뒤입니다.
+    const biweekly = await (
+      await api("/api/todos", { method: "POST", body: { title: "분리수거", dueDate: "2099-05-07", repeatRule: "BIWEEKLY" } })
+    ).json();
+    const shifted = await (
+      await api(`/api/todos/${biweekly.id}`, { method: "PUT", body: { title: "분리수거", dueDate: "2099-05-08", note: "" } })
+    ).json();
+    assert.equal(shifted.repeatRule, "BIWEEKLY");
+    const next = (await (await api(`/api/todos/${biweekly.id}/toggle-done`, { method: "POST" })).json()).nextTodo;
+    assert.equal(next.dueDate, "2099-05-22");
+  });
+
+  it("읽을 수 없는 반복과 날짜 없는 반복은 버리고, 반복이 다르면 같은 날 같은 이름도 다른 할 일이다", async () => {
+    await api("/api/snapshot", { method: "PUT", body: emptySnapshot() });
+    const merged = await (
+      await api("/api/sync", {
+        method: "POST",
+        body: emptySnapshot({
+          todos: [
+            { syncId: "daily", updatedAt: 1000, title: "약 먹기", dueDate: "2099-01-01", createdAt: 1000, repeatRule: "DAILY" },
+            { syncId: "someday", updatedAt: 1000, title: "여행", dueDate: "", createdAt: 1000, repeatRule: "YEARLY:05-01" },
+            { syncId: "leap", updatedAt: 1000, title: "생일", dueDate: "2096-02-29", createdAt: 1000, repeatRule: "YEARLY:02-29" },
+            { syncId: "once", updatedAt: 1000, title: "월세", dueDate: "2099-03-05", createdAt: 1000 },
+            { syncId: "monthly", updatedAt: 1000, title: "월세", dueDate: "2099-03-05", createdAt: 1000, repeatRule: "MONTHLY:5" },
+            // 휴대폰과 웹이 같은 회차를 끝내 둘 다 다음 회차를 만든 경우 — 반복까지 같으면 하나로 합친다.
+            { syncId: "round-a", updatedAt: 1000, title: "분리수거", dueDate: "2099-03-12", createdAt: 1000, repeatRule: "WEEKLY" },
+            { syncId: "round-b", updatedAt: 1001, title: "분리수거", dueDate: "2099-03-12", createdAt: 1001, repeatRule: "WEEKLY" },
+          ],
+        }),
+      })
+    ).json();
+    const bySyncId = Object.fromEntries(merged.todos.map((todo) => [todo.syncId, todo]));
+    assert.equal(bySyncId.daily.repeatRule, "");
+    assert.equal(bySyncId.someday.repeatRule, "");
+    assert.equal(bySyncId.leap.repeatRule, "YEARLY:02-29");
+    assert.equal(bySyncId.once.repeatRule, "");
+    assert.equal(bySyncId.monthly.repeatRule, "MONTHLY:5");
+    assert.equal(merged.todos.filter((todo) => todo.title === "분리수거").length, 1);
+
+    // 2월 29일의 매년은 윤년이 아닌 해에 28일입니다.
+    const leap = await (await api(`/api/todos/${bySyncId.leap.id}/toggle-done`, { method: "POST" })).json();
+    assert.ok(leap.nextTodo.dueDate >= "2097-02-28");
+    assert.match(leap.nextTodo.dueDate, /-02-2[89]$/);
+  });
 });
 
 describe("라우팅", () => {
@@ -2835,7 +2938,7 @@ describe("임시저장소와 메모", () => {
     await api("/api/snapshot", { method: "PUT", body: emptySnapshot({ schemaVersion: 20, items }) });
     const stored = await (await api("/api/snapshot")).json();
     // 올린 것이 옛 형식이라도 돌려주는 것은 서버의 형식이다.
-    assert.equal(stored.schemaVersion, 29);
+    assert.equal(stored.schemaVersion, 30);
     assert.deepEqual(new Set(stored.items.map(item => item.type)), new Set(["INBOX", "MEMO", "CONCEPT"]));
   });
 
@@ -3050,12 +3153,13 @@ describe("오늘 기분", () => {
     assert.deepEqual(merged.moodLogs.map(log => log.syncId), ["last"]);
   });
 
-  it("루틴의 요일·시각을 모르는 옛 앱과 구별할 형식 29를 알린다", async () => {
+  it("할 일의 반복을 모르는 옛 앱과 구별할 형식 30을 알린다", async () => {
     // 24는 날짜로 기분을 합치는 옛 앱과, 25는 걸음 수·걷기를 버리는 옛 앱과, 26은 목표에 들인 시간을 버리는 옛 앱과,
     // 27은 행복한 순간·좋아하는 것을 글귀로 바꿔 읽고 이은 줄을 버리는 옛 앱과, 28은 할 일의 사진을 버린 채 고쳐 올리는
-    // 옛 앱과, 29는 루틴의 요일·시각을 버린 채 고쳐 올리는 옛 앱과 가르려고 올렸습니다.
+    // 옛 앱과, 29는 루틴의 요일·시각을 버린 채 고쳐 올리는 옛 앱과, 30은 할 일의 반복을 버린 채 고쳐 올리는 옛 앱과
+    // 가르려고 올렸습니다.
     const health = await (await api("/api/health")).json();
-    assert.equal(health.schemaVersion, 29);
+    assert.equal(health.schemaVersion, 30);
   });
 
   it("다른 날 기분은 합치지 않는다", async () => {
