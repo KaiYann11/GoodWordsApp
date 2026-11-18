@@ -125,6 +125,8 @@ enum class HomeTab(val label: String) {
  *
  * 홈을 왼쪽으로 밀어 아이디어 칸을 띄우던 몸짓은 칸 넘기기와 겹쳐 없앴습니다. 맨 위의 "아이디어 담기"와 위젯의
  * "적기"가 그 자리를 맡습니다. 한 줄로 적던 "번뜩인 것" 카드도 같은 일을 하는 단추가 바로 위에 있어 거뒀습니다.
+ * 글귀 카드를 왼쪽으로 미는 것은 읽음과 다음 글귀입니다(사용자가 정함, 2026-11-18). 칸 넘기기는 칸 이름 줄 아래의
+ * 칸들만 받으므로 둘이 겹치지 않습니다.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -140,6 +142,8 @@ fun HomeScreen(
     /** 읽음. 오늘의 걸음 "글귀 읽기"를 채웁니다. 다시 누르면 거둡니다. */
     onConfirmQuote: (ContentItemEntity) -> Unit = {},
     onNextQuote: () -> Unit = {},
+    /** 글귀 카드를 왼쪽으로 밀었습니다 — 안 읽었으면 읽음으로 적고 다음 글귀로 넘깁니다(사용자가 정함, 2026-11-18). */
+    onSwipeQuote: (ContentItemEntity) -> Unit = {},
     onOpenQuote: (ContentItemEntity) -> Unit = {},
     /** 보관함에 글귀가 하나도 없을 때 담으러 갑니다. */
     onAddQuote: () -> Unit = {},
@@ -256,6 +260,7 @@ fun HomeScreen(
                 confirmedToday = quoteConfirmedToday,
                 onConfirm = onConfirmQuote,
                 onNext = onNextQuote,
+                onSwipe = onSwipeQuote,
                 onOpen = onOpenQuote,
                 onAdd = onAddQuote,
                 pulseKey = quotePulse,

@@ -6,8 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -18,6 +22,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
@@ -116,6 +121,124 @@ class HomeScreenTest {
 
         compose.onNodeWithText("오늘 읽음").assertIsDisplayed()
         compose.onNodeWithText("읽었어요").assertIsDisplayed()
+    }
+
+    // 글귀 카드를 왼쪽으로 밀면 읽음과 다음 글귀입니다(사용자가 고른 시안, 2026-11-18).
+    @Test
+    fun draggingTheQuoteLeftPassesItOn() {
+        val swiped = mutableListOf<ContentItemEntity>()
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), onSwipeQuote = { swiped += it })
+        }
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+
+        assertEquals(listOf(quoteItem), swiped)
+    }
+
+    @Test
+    fun aShortDragSpringsBackWithoutPassingItOn() {
+        var swipes = 0
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), onSwipeQuote = { swipes += 1 })
+        }
+
+        // 3분의 1에 못 미치게, 천천히 밀고 놓습니다.
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput {
+            swipeLeft(startX = centerX, endX = centerX - width * 0.15f, durationMillis = 600)
+        }
+        compose.waitForIdle()
+
+        assertEquals(0, swipes)
+        compose.onNodeWithTag(homeQuoteSwipeHintTag).assertDoesNotExist()
+        compose.onNodeWithText(quoteItem.body).assertIsDisplayed()
+    }
+
+    @Test
+    fun draggingRightDoesNothing() {
+        var swipes = 0
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), onSwipeQuote = { swipes += 1 })
+        }
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeRight() }
+        compose.waitForIdle()
+
+        assertEquals(0, swipes)
+        compose.onNodeWithTag(homeQuoteSwipeHintTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun theStripBehindSaysItWillReadAndMoveOn() {
+        compose.setContent { homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true)) }
+
+        dragHalfwayLeft()
+
+        compose.onNodeWithTag(homeQuoteSwipeHintTag).assertTextContains("읽음").assertTextContains("+ 다음 글귀")
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { up() }
+    }
+
+    @Test
+    fun aQuoteReadAlreadyIsOnlyMovedOn() {
+        // 읽음 단추는 다시 누르면 거두지만, 미는 것은 넘기는 몸짓입니다. 띠에도 읽음이 없습니다.
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), quoteConfirmedToday = true)
+        }
+
+        dragHalfwayLeft()
+
+        compose.onNodeWithTag(homeQuoteSwipeHintTag).assertTextEquals("다음 글귀")
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { up() }
+    }
+
+    @Test
+    fun theNextQuoteComesInAfterASwipe() {
+        val next = ContentItemEntity(
+            id = 8L,
+            type = ContentType.QUOTE,
+            title = "",
+            body = "작은 일을 꾸준히 하는 사람이 결국 멀리 간다.",
+            author = "다른 책"
+        )
+        var quote by mutableStateOf(HomeQuote(item = quoteItem, hasCandidates = true))
+        compose.setContent {
+            homeScreen(quote = quote, onSwipeQuote = { quote = HomeQuote(item = next, hasCandidates = true) })
+        }
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeLeft() }
+        waitUntilSettled()
+
+        compose.onNodeWithText(next.body).assertIsDisplayed()
+        compose.onNodeWithText(quoteItem.body).assertDoesNotExist()
+    }
+
+    @Test
+    fun aSwipedCardComesBackWhenThereIsNoOtherQuote() {
+        // 넘길 다른 글귀가 없으면 같은 글귀 그대로입니다. 카드가 화면 밖에 남아 있으면 안 됩니다.
+        compose.setContent { homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true)) }
+        val restLeft = compose.onNodeWithTag(homeQuoteCardTag).fetchSemanticsNode().boundsInRoot.left
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeLeft() }
+        waitUntilSettled()
+
+        assertEquals(restLeft, compose.onNodeWithTag(homeQuoteCardTag).fetchSemanticsNode().boundsInRoot.left, 1f)
+        compose.onNodeWithText(quoteItem.body).assertIsDisplayed()
+    }
+
+    @Test
+    fun aScreenReaderGetsTheSameAsAnAction() {
+        // 밀기는 화면 읽기 프로그램으로 할 수 없습니다. 글귀에 같은 일을 하는 동작이 달려 있습니다.
+        val swiped = mutableListOf<ContentItemEntity>()
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), onSwipeQuote = { swiped += it })
+        }
+
+        val actions = compose.onNodeWithTag(homeQuoteTextTag).fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        val readAndMoveOn = actions.single { it.label == "읽음으로 적고 다음 글귀로 넘기기" }
+        compose.runOnUiThread { readAndMoveOn.action() }
+
+        assertEquals(listOf(quoteItem), swiped)
     }
 
     @Test
@@ -330,6 +453,24 @@ class HomeScreenTest {
         assertFalse(focusRequested)
     }
 
+    /** 손을 떼지 않고 카드 너비의 4할쯤 왼쪽으로 끕니다. 놓으면 넘어가는 자리(3분의 1)를 지났습니다. */
+    private fun dragHalfwayLeft() {
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput {
+            down(center)
+            moveBy(Offset(-width * 0.2f, 0f))
+            moveBy(Offset(-width * 0.2f, 0f))
+        }
+        compose.waitForIdle()
+    }
+
+    /** 민 카드가 떠났다 돌아올 때까지 기다립니다. 다음 글귀가 오지 않으면 카드는 1초를 기다렸다 돌아옵니다. */
+    private fun waitUntilSettled() {
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag(homeQuoteSwipeHintTag).fetchSemanticsNodes().isEmpty()
+        }
+        compose.waitForIdle()
+    }
+
     private fun topOf(tag: String): Float? =
         compose.onAllNodesWithTag(tag).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top
 
@@ -344,6 +485,7 @@ class HomeScreenTest {
         quoteConfirmedToday: Boolean = false,
         onConfirmQuote: (ContentItemEntity) -> Unit = {},
         onNextQuote: () -> Unit = {},
+        onSwipeQuote: (ContentItemEntity) -> Unit = {},
         onOpenQuote: (ContentItemEntity) -> Unit = {},
         onAddQuote: () -> Unit = {},
         dailyLoop: DailyProgress? = null,
@@ -362,6 +504,7 @@ class HomeScreenTest {
             quoteConfirmedToday = quoteConfirmedToday,
             onConfirmQuote = onConfirmQuote,
             onNextQuote = onNextQuote,
+            onSwipeQuote = onSwipeQuote,
             onOpenQuote = onOpenQuote,
             onAddQuote = onAddQuote,
             dailyLoop = dailyLoop,

@@ -21,6 +21,7 @@ import com.codex.appgoodwords.data.BookDraft
 import com.codex.appgoodwords.data.BookEntity
 import com.codex.appgoodwords.data.BookReadingLogEntity
 import com.codex.appgoodwords.data.ContentDraft
+import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ConceptExplanation
 import com.codex.appgoodwords.data.ContentNormalizer
 import com.codex.appgoodwords.data.ContentType
@@ -67,6 +68,7 @@ import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
 import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.HomeQuote
+import com.codex.appgoodwords.ui.screen.HomeQuoteSwipe
 import com.codex.appgoodwords.widget.QuoteWidget
 import com.codex.appgoodwords.work.AppNotifications
 import com.codex.appgoodwords.work.WalkRecordingService
@@ -1052,9 +1054,34 @@ class MainViewModel(
         viewModelScope.launch { pickHomeQuote(ExposureTrigger.MANUAL_REFRESH) }
     }
 
-    private suspend fun pickHomeQuote(trigger: ExposureTrigger) {
-        QuoteWidget.pickNextItem(container, trigger) ?: return
+    /**
+     * 홈 글귀를 왼쪽으로 민 것(사용자가 정함, 2026-11-18). 아직 안 읽었으면 읽음으로 적고 "다음 글귀"처럼 넘깁니다.
+     *
+     * 이미 읽은 글귀는 읽음을 그대로 둡니다 — 읽음 단추([toggleContentConfirmed])는 다시 누르면 거두지만, 미는 것은 넘기는
+     * 몸짓입니다. 돌려준 것으로 [undoHomeQuoteSwipe]가 되돌립니다.
+     */
+    suspend fun swipeHomeQuote(itemId: Long): Result<HomeQuoteSwipe> = runCatching {
+        val readNow = container.repository.markContentConfirmed(itemId, ExposureTrigger.DETAIL_CHECK)
+        if (readNow) _confirmedTodayIds.value = _confirmedTodayIds.value + itemId
+        val next = pickHomeQuote(ExposureTrigger.MANUAL_REFRESH)
+        HomeQuoteSwipe(previousId = itemId, readNow = readNow, moved = next != null && next.id != itemId)
+    }
+
+    /** 민 것을 되돌립니다. 앞 글귀를 다시 지금의 글귀로 두고(위젯도), 그 밀기로 적은 읽음이면 거둡니다. */
+    suspend fun undoHomeQuoteSwipe(swipe: HomeQuoteSwipe): Result<Unit> = runCatching {
+        if (swipe.moved) {
+            container.settingsStore.setWidgetContentId(swipe.previousId)
+            QuoteWidget().updateAll(container.appContext)
+        }
+        if (swipe.readNow && container.repository.withdrawTodayConfirmed(swipe.previousId)) {
+            _confirmedTodayIds.value = _confirmedTodayIds.value - swipe.previousId
+        }
+    }
+
+    private suspend fun pickHomeQuote(trigger: ExposureTrigger): ContentItemEntity? {
+        val item = QuoteWidget.pickNextItem(container, trigger) ?: return null
         QuoteWidget().updateAll(container.appContext)
+        return item
     }
 
     fun recordContentViewed(

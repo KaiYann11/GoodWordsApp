@@ -135,7 +135,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 담기 전 다듬기 · 읽음으로 세지 않는 종류 · AI 추천 글귀의 갈래 | `ContentNormalizer` · `ContentType.personalTypes` · `AI_CATEGORY` |
 | AI에 일기·목표가 어디까지 나가는지(목표에 들인 시간은 숫자만, 글은 안 감) | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
 | 오늘 나눈 말·앞서 받은 말을 AI에 다시 싣는 범위 | `DailyCoachPrompt.talkLines`·`givenTipLines`·`givenQuoteLines` (공통 `sharedTalk`·`DailyCoachSharing` — 받을 때 허용했던 범위를 지금 끄면 제외) |
-| 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` |
+| 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` · 홈 카드를 밀어 넘기기(안 읽었으면 읽음까지 — 사용자가 정함, 2026-11-18) `MainViewModel.swipeHomeQuote`(되돌리기 `undoHomeQuoteSwipe`) |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |
 | 걸은 날(정한 걸음 수 이상 **또는** 걷기를 기록한 날 — 사용자가 정함, 2026-11-07) | `Walking`(`walkedDays`·`stepsByDate`·AI에 가는 한 줄 `factLine`). 하루의 걸음·점수·연속·홈 카드·AI가 모두 여기서 셉니다 |
@@ -178,6 +178,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   같이 보지 않습니다. 부모를 지워도 뽑아 둔 것은 남기고(책↛글귀·독서 기록, 글귀↛루틴), 합치기로 부모가 줄면 남은 쪽으로 옮깁니다.
 - **일부만 실어 보내는 편집은 기존 값을 지킵니다**(앱 `saveContent`·`saveGoal`·`saveBook`·`saveRoutine`, 서버 `{...existing, ...payload}`).
 - **웹에서 저장·삭제할 때 `updatedAt`을 올리고 한 편마다 삭제 표식을 남깁니다**(`deleteWithTombstone`). 빠지면 기기의 옛 사본이 되살립니다.
+- **앱에서 덧붙기만 하는 기록(읽음·체크)을 지울 때도 한 편마다 표식을 남깁니다**(`recordDeletion` — 읽음 거두기
+  `withdrawTodayConfirmed`, 체크 되돌리기 `undoRoutineCheck`). 합집합으로 합치므로 표식 없이 지우면 이미 올라간 것이 서버와 웹에
+  남습니다(1.24.1까지 읽음 단추로 거둔 읽음이 그랬습니다).
 - 서버는 바뀐 레코드에만 새 리비전을 붙이고, 앱은 부분 응답을 `applyDelta`로 얹기만 합니다(없는 것은 지운 것이 아니라 안 바뀐 것).
 - **일기 답(`answers`)은 물음 자리에 맞춘 목록이라 가운데 빈칸을 버리지 않습니다**(`DiaryAnswers.normalize`·`normalizeAnswers`·
   `DiaryAnswerConverters`).

@@ -594,6 +594,33 @@ fun AppGoodWordsApp(
         }
     }
 
+    /**
+     * 홈 글귀를 왼쪽으로 민 것(사용자가 정함, 2026-11-18). 아래에 되돌리기를 4초쯤 띄웁니다 — 밀고 나면 앞 글귀가 홈에서
+     * 사라져 거기서는 읽음을 거둘 수 없습니다. 연달아 밀면 앞의 알림은 거두고 마지막 한 번만 되돌립니다.
+     */
+    fun swipeHomeQuote(item: ContentItemEntity) {
+        coroutineScope.launch {
+            val result = viewModel.swipeHomeQuote(item.id)
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val swipe = result.getOrNull()
+            if (swipe == null) {
+                snackbarHostState.showSnackbar(result.exceptionOrNull()?.message ?: "글귀를 넘기지 못했습니다.")
+                return@launch
+            }
+            val action = snackbarHostState.showSnackbar(
+                message = swipe.message,
+                actionLabel = "되돌리기".takeIf { swipe.canUndo },
+                duration = SnackbarDuration.Short
+            )
+            if (action == SnackbarResult.ActionPerformed) {
+                val undone = viewModel.undoHomeQuoteSwipe(swipe)
+                snackbarHostState.showSnackbar(
+                    if (undone.isSuccess) swipe.undoneMessage else undone.exceptionOrNull()?.message ?: "되돌리지 못했습니다."
+                )
+            }
+        }
+    }
+
     fun openItemDetail(
         tab: AppTab,
         itemId: Long,
@@ -1146,6 +1173,7 @@ fun AppGoodWordsApp(
                             quoteConfirmedToday = homeQuote?.item?.id?.let { it in confirmedTodayIds } == true,
                             onConfirmQuote = { item -> toggleConfirmed(item, showMessage = true) },
                             onNextQuote = { viewModel.nextHomeQuote() },
+                            onSwipeQuote = { item -> swipeHomeQuote(item) },
                             onOpenQuote = { item -> openItemDetail(AppTab.HOME, item.id) },
                             onAddQuote = { openFreshAddForm() },
                             // 되고 싶은 나와 목표·롤모델 하나를 매일 마주칩니다. 누르면 그 기록으로.
