@@ -552,16 +552,32 @@ class AppRepository(
         )
 
         return if (existingCount > 0) {
-            exposureEventDao.deleteEventsForRange(
-                contentItemId = contentItemId,
-                eventType = ExposureEventType.CONFIRMED,
-                start = start,
-                end = end
-            )
+            withdrawTodayConfirmed(contentItemId)
             false
         } else {
             markContentConfirmed(contentItemId, trigger)
         }
+    }
+
+    /**
+     * 오늘 적은 읽음을 거둡니다 — 읽음을 다시 누를 때와 홈 글귀를 민 것의 되돌리기. 거둔 것이 없으면 false.
+     *
+     * **지운 것마다 삭제 표식을 남깁니다.** 읽음은 덧붙기만 하는 기록이라(`mergeAppendOnly`), 표식 없이 지우면 이미 서버에
+     * 올라간 읽음이 서버와 웹에 그대로 남습니다(1.24.1까지 읽음을 다시 눌러 거둘 때가 그랬습니다).
+     */
+    suspend fun withdrawTodayConfirmed(contentItemId: Long): Boolean = database.withTransaction {
+        val (start, end) = todayRange()
+        val doomed = exposureEventDao.getEventsBetween(start, end)
+            .filter { it.contentItemId == contentItemId && it.eventType == ExposureEventType.CONFIRMED }
+        if (doomed.isEmpty()) return@withTransaction false
+        exposureEventDao.deleteEventsForRange(
+            contentItemId = contentItemId,
+            eventType = ExposureEventType.CONFIRMED,
+            start = start,
+            end = end
+        )
+        doomed.forEach { recordDeletion(it.syncId, SyncEntityType.EXPOSURE_EVENT) }
+        true
     }
 
     suspend fun clearTodayConfirmed(): Int {

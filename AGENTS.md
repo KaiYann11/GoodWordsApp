@@ -178,6 +178,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
   같이 보지 않습니다. 부모를 지워도 뽑아 둔 것은 남기고(책↛글귀·독서 기록, 글귀↛루틴), 합치기로 부모가 줄면 남은 쪽으로 옮깁니다.
 - **일부만 실어 보내는 편집은 기존 값을 지킵니다**(앱 `saveContent`·`saveGoal`·`saveBook`·`saveRoutine`, 서버 `{...existing, ...payload}`).
 - **웹에서 저장·삭제할 때 `updatedAt`을 올리고 한 편마다 삭제 표식을 남깁니다**(`deleteWithTombstone`). 빠지면 기기의 옛 사본이 되살립니다.
+- **앱에서 덧붙기만 하는 기록(읽음·체크)을 지울 때도 한 편마다 표식을 남깁니다**(`recordDeletion` — 읽음 거두기
+  `withdrawTodayConfirmed`, 체크 되돌리기 `undoRoutineCheck`). 합집합으로 합치므로 표식 없이 지우면 이미 올라간 것이 서버와 웹에
+  남습니다(1.24.1까지 읽음 단추로 거둔 읽음이 그랬습니다).
 - 서버는 바뀐 레코드에만 새 리비전을 붙이고, 앱은 부분 응답을 `applyDelta`로 얹기만 합니다(없는 것은 지운 것이 아니라 안 바뀐 것).
 - **일기 답(`answers`)은 물음 자리에 맞춘 목록이라 가운데 빈칸을 버리지 않습니다**(`DiaryAnswers.normalize`·`normalizeAnswers`·
   `DiaryAnswerConverters`).
