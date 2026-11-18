@@ -46,6 +46,10 @@ interface RoutineCheckDao {
     @Query("DELETE FROM routine_checks WHERE syncId IN (:syncIds)")
     suspend fun deleteBySyncIds(syncIds: List<String>)
 
+    /** 체크 하나를 지웁니다. 지운 줄 수(0이나 1). */
+    @Query("DELETE FROM routine_checks WHERE syncId = :syncId")
+    suspend fun deleteBySyncId(syncId: String): Int
+
     @Query("DELETE FROM routine_checks")
     suspend fun clearAll()
 }

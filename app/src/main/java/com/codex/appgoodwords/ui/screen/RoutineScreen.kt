@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.RoutineCategories
 import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineDays
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineMergeChoice
@@ -151,13 +152,13 @@ internal fun routineMergeChoiceTag(field: String, choice: RoutineMergeChoice): S
 /**
  * 추가 버튼·진행 카드·거르개. 목록은 이 뒤부터 시작합니다.
  *
- * 거르개는 요일 줄·오늘 줄·갈래 줄 셋이지만 한 자리에 둡니다. 갈래 줄은 갈래가 있을 때만, 오늘 줄은 오늘이나 전체를 볼
- * 때만 생겨서, 따로 두면 이 수가 그때그때 달라져 검색에서 고른 루틴으로 굴려 줄 자리가 어긋납니다.
+ * 거르개는 요일 줄·안 한 것 줄·갈래 줄 셋이지만 한 자리에 둡니다. 갈래 줄은 갈래가 있을 때만 생겨서, 따로 두면 이 수가
+ * 그때그때 달라져 검색에서 고른 루틴으로 굴려 줄 자리가 어긋납니다.
  */
 private const val HEADER_ITEM_COUNT = 3
 
 /**
- * 오늘 무엇을 볼지 고르는 거르개.
+ * 고른 날 무엇을 볼지 고르는 거르개. 요일 알약이 고른 날의 체크로 거릅니다 — 전체면 오늘입니다.
  *
  * 루틴이 서른 개가 넘으면 다 끝낸 것까지 함께 굴려야 남은 것을 찾을 수 있습니다.
  */
@@ -166,10 +167,10 @@ private enum class RoutineFilter(val label: String) {
     UNDONE("안 한 것"),
     DONE("한 것");
 
-    fun matches(todayCount: Int): Boolean = when (this) {
+    fun matches(dayCount: Int): Boolean = when (this) {
         ALL -> true
-        UNDONE -> todayCount == 0
-        DONE -> todayCount > 0
+        UNDONE -> dayCount == 0
+        DONE -> dayCount > 0
     }
 }
 
@@ -193,9 +194,11 @@ fun RoutineScreen(
     memos: List<RoutineMemoEntity>,
     onSaveRoutine: (RoutineDraft) -> Unit,
     onDeleteRoutine: (RoutineEntity) -> Unit,
-    onSaveMemo: (RoutineEntity, String) -> Unit,
+    /** 메모를 남기고 그날 한 번 한 것으로 셉니다. 날은 요일 알약으로 고른 날입니다(전체면 오늘). */
+    onSaveMemo: (RoutineEntity, String, LocalDate) -> Unit,
     onDeleteMemo: (RoutineMemoEntity) -> Unit,
-    onCheckRoutine: (RoutineEntity) -> Unit,
+    /** 그날 한 번 했다고 적습니다. 날은 요일 알약으로 고른 날입니다 — 지난날이면 그날로 적힙니다(사용자가 정함, 2026-11-18). */
+    onCheckRoutine: (RoutineEntity, LocalDate) -> Unit,
     /** 루틴을 한 칸 위(up=true)나 아래로 옮깁니다. */
     onMoveRoutine: (RoutineEntity, Boolean) -> Unit,
     /** 루틴을 그 자리(0부터)로 한 번에 옮깁니다. */
@@ -214,7 +217,14 @@ fun RoutineScreen(
     /** [merge]를 [keep]에 합칩니다. 이름과 메모는 합치기 창에서 고르거나 고친 것입니다. */
     onMergeRoutines: (keep: RoutineEntity, merge: RoutineEntity, title: String, note: String) -> Unit = { _, _, _, _ -> },
     /** 오늘. 요일 알약이 처음 고르는 날이고, 진행·다음 차례가 이날의 루틴만 셉니다. */
-    today: LocalDate = LocalDate.now()
+    today: LocalDate = LocalDate.now(),
+    /**
+     * 체크 기록. 요일 알약으로 고른 지난날의 회수를 여기서 셉니다 — 오늘 것은 [todayCounts]를 씁니다.
+     * 비어 있으면 지난날은 모두 0회로 보입니다(미리 보기·시험).
+     */
+    checks: List<RoutineCheckEntity> = emptyList(),
+    /** [checks]의 시각을 날짜로 바꿀 때 쓰는 시간대. */
+    zoneId: ZoneId = ZoneId.systemDefault()
 ) {
     var editingRoutineId by rememberSaveable { mutableStateOf<Long?>(null) }
     // 합치기(사용자가 정함, 2026-11-02): 고치던 루틴이 남습니다. 고치기 창에서 고치던 이름·메모를 이어받아, 합치기 창의
@@ -236,12 +246,6 @@ fun RoutineScreen(
     // 하루를 밟는 차례입니다. 수행한 것을 아래로 내리지 않습니다. 자리가 움직이면 어디까지 했는지
     // 눈으로 짚기 어렵고, 사용자가 정한 순서라는 약속도 깨집니다.
     val sortedRoutines = RoutineOrder.sorted(routines)
-    // 오늘 요일에 하는 루틴(사용자가 정함, 2026-11-17). 진행·다음 차례는 이 줄만 셉니다 — 홈·위젯과 같습니다.
-    val todaysRoutines = sortedRoutines.filter { RoutineSchedule.isOn(it, today) }
-    // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다.
-    val nextRoutine = todaysRoutines.firstOrNull { (todayCounts[it.id] ?: 0) == 0 }
-    val nextRoutineId = nextRoutine?.id
-    val doneCount = todaysRoutines.count { (todayCounts[it.id] ?: 0) > 0 }
 
     // 요일 알약. null이면 오늘을 따릅니다 — 자정을 넘겨 열어 둬도 새 오늘로 넘어갑니다. [ALL_DAYS]면 전체입니다.
     var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
@@ -250,18 +254,32 @@ fun RoutineScreen(
         ALL_DAYS -> null
         else -> DayOfWeek.valueOf(pickedDay!!)
     }
-    // 안 한 것·한 것은 오늘 체크를 보고 거릅니다. 다른 요일을 볼 때는 뜻이 없어 두지 않고 전체로 셉니다.
-    fun showsTodayFilter(day: DayOfWeek?): Boolean = day == null || day == today.dayOfWeek
+    // 알약이 가리키는 날(사용자가 정함, 2026-11-18): 그 요일이 마지막으로 있었던 날입니다 — 오늘이거나 앞 엿새 안.
+    // 전체는 오늘입니다. 고른 날의 카드·거르개·진행이 그날 체크를 따르고, 수행 +1은 그날로 적힙니다.
+    fun dateOf(day: DayOfWeek?): LocalDate = day?.let { RoutineDays.latest(it, today) } ?: today
+    val viewDate = dateOf(selectedDay)
+    val viewingPast = viewDate != today
+    val pastCounts = remember(checks, today, zoneId) {
+        RoutineDays.countsByDate(checks, today.minusDays(RoutineDays.PAST_DAYS), today.minusDays(1), zoneId)
+    }
+    fun countsOn(date: LocalDate): Map<Long, Int> = if (date == today) todayCounts else pastCounts[date].orEmpty()
+    val viewCounts = countsOn(viewDate)
     fun onDay(routine: RoutineEntity, day: DayOfWeek?): Boolean = day == null || RoutineSchedule.isOn(routine.weekdays, day)
 
+    // 그날 요일에 하는 루틴(사용자가 정함, 2026-11-17). 진행은 이 줄만 셉니다 — 오늘이면 홈·위젯과 같습니다.
+    val dayRoutines = sortedRoutines.filter { RoutineSchedule.isOn(it, viewDate) }
+    // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다. 지난날에는 차례가 없습니다.
+    val nextRoutine = if (viewingPast) null else dayRoutines.firstOrNull { (viewCounts[it.id] ?: 0) == 0 }
+    val nextRoutineId = nextRoutine?.id
+    val doneCount = dayRoutines.count { (viewCounts[it.id] ?: 0) > 0 }
+
     var selectedFilter by rememberSaveable { mutableStateOf(RoutineFilter.ALL.name) }
-    val pickedFilter = RoutineFilter.valueOf(selectedFilter)
-    val currentFilter = if (showsTodayFilter(selectedDay)) pickedFilter else RoutineFilter.ALL
+    val currentFilter = RoutineFilter.valueOf(selectedFilter)
     val categories = remember(sortedRoutines) { RoutineCategories.ordered(sortedRoutines) }
     // null이면 전체입니다. 고른 갈래가 사라지면(이름을 바꾸거나 그 루틴을 지움) 전체로 봅니다.
     var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
     val currentCategory = selectedCategory?.takeIf { it in categories }
-    val rows = remember(sortedRoutines, todayCounts, currentFilter, currentCategory, selectedDay) {
+    val rows = remember(sortedRoutines, viewCounts, currentFilter, currentCategory, selectedDay) {
         sortedRoutines
             .mapIndexed { index, routine ->
                 RoutineRow(
@@ -273,7 +291,7 @@ fun RoutineScreen(
             }
             .filter { row ->
                 onDay(row.routine, selectedDay) &&
-                    currentFilter.matches(todayCounts[row.routine.id] ?: 0) &&
+                    currentFilter.matches(viewCounts[row.routine.id] ?: 0) &&
                     RoutineCategories.matches(row.routine, currentCategory)
             }
     }
@@ -382,8 +400,9 @@ fun RoutineScreen(
             routine = memoRoutine,
             memos = memosByRoutine[memoRoutine.id].orEmpty(),
             onDismiss = { memoRoutineId = null },
-            onSaveMemo = { body -> onSaveMemo(memoRoutine, body) },
-            onDeleteMemo = onDeleteMemo
+            onSaveMemo = { body -> onSaveMemo(memoRoutine, body, viewDate) },
+            onDeleteMemo = onDeleteMemo,
+            pastDay = viewDate.takeIf { viewingPast }
         )
     }
 
@@ -437,9 +456,10 @@ fun RoutineScreen(
             item {
                 RoutineProgressCard(
                     doneCount = doneCount,
-                    totalCount = todaysRoutines.size,
+                    totalCount = dayRoutines.size,
                     nextRoutine = nextRoutine,
-                    restDay = todaysRoutines.isEmpty()
+                    restDay = dayRoutines.isEmpty(),
+                    pastDay = viewDate.takeIf { viewingPast }
                 )
             }
 
@@ -448,6 +468,7 @@ fun RoutineScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있고, 일요일부터 늘어놓습니다(달력과 같은 차례).
+                    // 알약 아랫줄은 그 알약이 가리키는 날입니다(2026-11-18) — 오늘보다 뒤 요일은 지난주 날짜가 적힙니다.
                     val dayOptions: List<DayOfWeek?> = listOf<DayOfWeek?>(null) + RoutineStatsCalculator.WEEK_ORDER
                     val dayRowState = rememberLazyListState(
                         initialFirstVisibleItemIndex = (dayOptions.indexOf(today.dayOfWeek) - 2).coerceAtLeast(0)
@@ -458,19 +479,19 @@ fun RoutineScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(dayOptions) { day ->
-                            val dayFilter = if (showsTodayFilter(day)) pickedFilter else RoutineFilter.ALL
+                            val date = dateOf(day)
+                            val dayCounts = countsOn(date)
                             CountFilterPill(
-                                title = if (day == null) {
-                                    "전체"
-                                } else if (day == today.dayOfWeek) {
-                                    "${RoutineSchedule.shortLabel(day)}(오늘)"
-                                } else {
-                                    RoutineSchedule.shortLabel(day)
+                                title = if (day == null) "전체" else RoutineSchedule.shortLabel(day),
+                                subtitle = when {
+                                    day == null -> "모든 요일"
+                                    date == today -> "오늘"
+                                    else -> "${date.dayOfMonth}일"
                                 },
                                 count = sortedRoutines.count { routine ->
                                     onDay(routine, day) &&
                                         RoutineCategories.matches(routine, currentCategory) &&
-                                        dayFilter.matches(todayCounts[routine.id] ?: 0)
+                                        currentFilter.matches(dayCounts[routine.id] ?: 0)
                                 },
                                 selected = selectedDay == day,
                                 onClick = {
@@ -486,32 +507,30 @@ fun RoutineScreen(
                             )
                         }
                     }
-                    if (showsTodayFilter(selectedDay)) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(RoutineFilter.entries) { filter ->
-                                CountFilterPill(
-                                    title = filter.label,
-                                    count = sortedRoutines.count { routine ->
-                                        onDay(routine, selectedDay) &&
-                                            RoutineCategories.matches(routine, currentCategory) &&
-                                            filter.matches(todayCounts[routine.id] ?: 0)
-                                    },
-                                    selected = currentFilter == filter,
-                                    onClick = { selectedFilter = filter.name },
-                                    modifier = Modifier.testTag(routineFilterTag(filter.name))
-                                )
-                            }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(RoutineFilter.entries) { filter ->
+                            CountFilterPill(
+                                title = filter.label,
+                                count = sortedRoutines.count { routine ->
+                                    onDay(routine, selectedDay) &&
+                                        RoutineCategories.matches(routine, currentCategory) &&
+                                        filter.matches(viewCounts[routine.id] ?: 0)
+                                },
+                                selected = currentFilter == filter,
+                                onClick = { selectedFilter = filter.name },
+                                modifier = Modifier.testTag(routineFilterTag(filter.name))
+                            )
                         }
                     }
                     if (categories.isNotEmpty()) {
-                        val inToday = sortedRoutines.filter {
-                            onDay(it, selectedDay) && currentFilter.matches(todayCounts[it.id] ?: 0)
+                        val inView = sortedRoutines.filter {
+                            onDay(it, selectedDay) && currentFilter.matches(viewCounts[it.id] ?: 0)
                         }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             item {
                                 CountFilterPill(
                                     title = "전체",
-                                    count = inToday.size,
+                                    count = inView.size,
                                     selected = currentCategory == null,
                                     onClick = { selectedCategory = null },
                                     modifier = Modifier.testTag(routineCategoryTag(null))
@@ -520,7 +539,7 @@ fun RoutineScreen(
                             items(categories) { category ->
                                 CountFilterPill(
                                     title = RoutineCategories.label(category),
-                                    count = inToday.count { RoutineCategories.matches(it, category) },
+                                    count = inView.count { RoutineCategories.matches(it, category) },
                                     selected = currentCategory == category,
                                     onClick = { selectedCategory = category },
                                     modifier = Modifier.testTag(routineCategoryTag(category))
@@ -546,7 +565,10 @@ fun RoutineScreen(
                         ) {
                             Text(
                                 text = when {
-                                    currentFilter == RoutineFilter.UNDONE -> "오늘 ${scope}루틴을 모두 밟았습니다."
+                                    currentFilter == RoutineFilter.UNDONE ->
+                                        "${RoutineDays.spoken(viewDate, today)} ${scope}루틴을 모두 밟았습니다."
+                                    currentFilter == RoutineFilter.DONE && viewingPast ->
+                                        "${RoutineDays.label(viewDate)}에 밟은 ${scope}루틴이 없습니다."
                                     currentFilter == RoutineFilter.DONE -> "아직 밟은 ${scope}루틴이 없습니다."
                                     selectedDay == today.dayOfWeek -> "오늘 하는 ${scope}루틴이 없습니다."
                                     selectedDay != null ->
@@ -573,13 +595,14 @@ fun RoutineScreen(
                         canMoveDown = row.canMoveDown,
                         focused = row.routine.id == focusId,
                         focusKey = focusId,
-                        todayCount = todayCounts[row.routine.id] ?: 0,
+                        dayCount = viewCounts[row.routine.id] ?: 0,
+                        dayLabel = if (viewingPast) "${viewDate.dayOfMonth}일" else "오늘",
                         stats = stats[row.routine.id],
                         onOpenStats = { onOpenStats(row.routine) },
                         memoCount = memosByRoutine[row.routine.id]?.size ?: 0,
                         latestMemo = memosByRoutine[row.routine.id]?.maxByOrNull { it.createdAt },
                         onOpenMemos = { memoRoutineId = row.routine.id },
-                        onCheckRoutine = onCheckRoutine,
+                        onCheckRoutine = { routine -> onCheckRoutine(routine, viewDate) },
                         onMoveRoutine = onMoveRoutine,
                         onOpenMove = { movingRoutineId = row.routine.id },
                         onEditRoutine = { editingRoutineId = row.routine.id },
@@ -592,24 +615,35 @@ fun RoutineScreen(
 }
 
 /**
- * 오늘 어디까지 왔는지.
+ * 오늘(또는 요일 알약으로 고른 지난날) 어디까지 왔는지.
  *
  * 개수만 적으면 "여덟 개 중 셋"이 얼마만큼인지 머리로 셈해야 합니다. 막대를 함께 둡니다.
  * 다 끝낸 날에는 남은 것을 세지 않고 끝났다고만 말합니다. 다그치지 않는 것이 이 앱의 규칙입니다.
+ *
+ * 지난날을 볼 때는 카드 빛깔과 제목("16일(월) 진행")을 바꿔, 수행 +1이 그날로 적힌다는 것을 눈에 띄게 합니다.
  */
 @Composable
 private fun RoutineProgressCard(
     doneCount: Int,
     totalCount: Int,
     nextRoutine: RoutineEntity?,
-    /** 루틴은 있지만 오늘 요일에 하는 것이 없는 날. */
-    restDay: Boolean = false
+    /** 루틴은 있지만 그날 요일에 하는 것이 없는 날. */
+    restDay: Boolean = false,
+    /** 요일 알약으로 고른 지난날. 오늘이면 null입니다. */
+    pastDay: LocalDate? = null
 ) {
     val ratio = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
     val animatedRatio by animateFloatAsState(targetValue = ratio, label = "routineProgress")
     val percent = (ratio * 100).roundToInt()
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = if (pastDay != null) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        }
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -620,7 +654,7 @@ private fun RoutineProgressCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "오늘 진행",
+                    text = if (pastDay != null) "${RoutineDays.label(pastDay)} 진행" else "오늘 진행",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -642,8 +676,10 @@ private fun RoutineProgressCard(
 
             Text(
                 text = when {
+                    restDay && pastDay != null -> "그날 요일에 하는 루틴이 없습니다."
                     restDay -> "오늘 요일에 하는 루틴이 없습니다."
                     totalCount == 0 -> "루틴을 추가하면 여기에 오늘 진행이 보입니다."
+                    pastDay != null -> "지난날 기록 중 · +1은 ${pastDay.dayOfMonth}일로 적힙니다."
                     nextRoutine == null -> "오늘 몫을 다 밟았습니다."
                     else -> "다음 차례: ${nextRoutine.title}"
                 },
@@ -904,7 +940,10 @@ private fun RoutineCard(
     isNext: Boolean,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
-    todayCount: Int,
+    /** 요일 알약으로 고른 날(전체면 오늘) 몇 번 했는지. */
+    dayCount: Int,
+    /** 그날을 부르는 말. "오늘"이나 "16일"입니다. */
+    dayLabel: String,
     /** 지금까지 쌓인 것. 한 번도 밟지 않았거나 아직 셈하지 않았으면 null입니다. */
     stats: RoutineStatsReport?,
     onOpenStats: () -> Unit,
@@ -920,7 +959,7 @@ private fun RoutineCard(
     focused: Boolean = false,
     focusKey: Any? = null
 ) {
-    val checkedToday = todayCount > 0
+    val checkedToday = dayCount > 0
     val haptics = rememberHaptics()
     Card(
         modifier = Modifier
@@ -1061,7 +1100,7 @@ private fun RoutineCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "오늘 $todayCount 회",
+                        text = "$dayLabel $dayCount 회",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = if (checkedToday) {
@@ -1072,7 +1111,7 @@ private fun RoutineCard(
                     )
                     Text(
                         text = when {
-                            checkedToday -> "오늘 수행됨 · ${if (routine.reminderEnabled) "알림 포함" else "알림 제외"}"
+                            checkedToday -> "$dayLabel 수행됨 · ${if (routine.reminderEnabled) "알림 포함" else "알림 제외"}"
                             routine.reminderEnabled -> "알림 포함"
                             else -> "알림 제외"
                         },
@@ -1087,7 +1126,7 @@ private fun RoutineCard(
                     Text("메모 $memoCount")
                 }
                 Button(
-                    // 기록이 남는 일이라 손에 한 번 닿게 합니다. 오늘 한 일이 하나 늘어납니다.
+                    // 기록이 남는 일이라 손에 한 번 닿게 합니다. 그날(보통 오늘) 한 일이 하나 늘어납니다.
                     onClick = {
                         haptics.commit()
                         onCheckRoutine(routine)
@@ -1343,7 +1382,9 @@ private fun RoutineMemoDialog(
     memos: List<RoutineMemoEntity>,
     onDismiss: () -> Unit,
     onSaveMemo: (String) -> Unit,
-    onDeleteMemo: (RoutineMemoEntity) -> Unit
+    onDeleteMemo: (RoutineMemoEntity) -> Unit,
+    /** 요일 알약으로 고른 지난날. 메모를 남기면 그날 한 번 한 것으로 셉니다. */
+    pastDay: LocalDate? = null
 ) {
     var memoText by rememberSaveable(routine.id) { mutableStateOf("") }
     val sortedMemos = memos.sortedByDescending { it.createdAt }
@@ -1353,6 +1394,13 @@ private fun RoutineMemoDialog(
         title = { Text("${routine.title} 메모") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (pastDay != null) {
+                    Text(
+                        text = "저장하면 ${RoutineDays.label(pastDay)}에 한 번 한 것으로 셉니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 OutlinedTextField(
                     value = memoText,
                     onValueChange = { memoText = it },

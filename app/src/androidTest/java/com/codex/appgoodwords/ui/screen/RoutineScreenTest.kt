@@ -287,9 +287,9 @@ class RoutineScreenTest {
                 memos = emptyList(),
                 onSaveRoutine = {},
                 onDeleteRoutine = {},
-                onSaveMemo = { _, _ -> },
+                onSaveMemo = { _, _, _ -> },
                 onDeleteMemo = {},
-                onCheckRoutine = {},
+                onCheckRoutine = { _, _ -> },
                 onMoveRoutine = { _, _ -> },
                 onMoveRoutineTo = { _, _ -> },
                 onMergeRoutines = onMerge
@@ -388,9 +388,9 @@ class RoutineScreenTest {
                 memos = emptyList(),
                 onSaveRoutine = {},
                 onDeleteRoutine = {},
-                onSaveMemo = { _, _ -> },
+                onSaveMemo = { _, _, _ -> },
                 onDeleteMemo = {},
-                onCheckRoutine = {},
+                onCheckRoutine = { _, _ -> },
                 onMoveRoutine = { _, _ -> },
                 onMoveRoutineTo = { _, _ -> },
                 focusId = focus.value
@@ -433,7 +433,10 @@ class RoutineScreenTest {
         onSaveRoutine: (RoutineDraft) -> Unit = {},
         onMoveRoutine: (RoutineEntity, Boolean) -> Unit = { _, _ -> },
         onMoveRoutineTo: (RoutineEntity, Int) -> Unit = { _, _ -> },
-        on: LocalDate = LocalDate.now()
+        on: LocalDate = LocalDate.now(),
+        checks: List<RoutineCheckEntity> = emptyList(),
+        onCheckRoutine: (RoutineEntity, LocalDate) -> Unit = { _, _ -> },
+        onSaveMemo: (RoutineEntity, String, LocalDate) -> Unit = { _, _, _ -> }
     ) {
         compose.setContent {
             RoutineScreen(
@@ -444,12 +447,14 @@ class RoutineScreenTest {
                 memos = emptyList(),
                 onSaveRoutine = onSaveRoutine,
                 onDeleteRoutine = {},
-                onSaveMemo = { _, _ -> },
+                onSaveMemo = onSaveMemo,
                 onDeleteMemo = {},
-                onCheckRoutine = {},
+                onCheckRoutine = onCheckRoutine,
                 onMoveRoutine = onMoveRoutine,
                 onMoveRoutineTo = onMoveRoutineTo,
-                today = on
+                today = on,
+                checks = checks,
+                zoneId = zone
             )
         }
     }
@@ -476,7 +481,7 @@ class RoutineScreenTest {
         showRoutines(routines = weekRoutines, on = today)
 
         dayPill(DayOfWeek.FRIDAY).assertIsSelected()
-        compose.onNodeWithText("금(오늘) 2").assertIsDisplayed()
+        dayPill(DayOfWeek.FRIDAY).assertTextContains("금 2").assertTextContains("오늘")
         compose.onNodeWithText("기상 후 물 한 컵").assertIsDisplayed()
         compose.onNodeWithText("헬스장").assertIsDisplayed()
         compose.onNodeWithText("주말 대청소").assertDoesNotExist()
@@ -494,8 +499,8 @@ class RoutineScreenTest {
         dayPill(DayOfWeek.SATURDAY).performClick()
         compose.onNodeWithText("주말 대청소").assertIsDisplayed()
         compose.onNodeWithText("헬스장").assertDoesNotExist()
-        // 안 한 것·한 것은 오늘 체크로 거르는 것이라, 다른 요일을 볼 때는 두지 않습니다.
-        compose.onNodeWithTag(routineFilterTag("UNDONE")).assertDoesNotExist()
+        // 토요일 알약은 지난 토요일(10일)입니다. 안 한 것·한 것은 그날 체크로 거릅니다(2026-11-18).
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).assertIsDisplayed()
 
         scrollToDay(null)
         dayPill(null).performClick()
@@ -598,9 +603,9 @@ class RoutineScreenTest {
                 memos = emptyList(),
                 onSaveRoutine = {},
                 onDeleteRoutine = {},
-                onSaveMemo = { _, _ -> },
+                onSaveMemo = { _, _, _ -> },
                 onDeleteMemo = {},
-                onCheckRoutine = {},
+                onCheckRoutine = { _, _ -> },
                 onMoveRoutine = { _, _ -> },
                 onMoveRoutineTo = { _, _ -> },
                 focusId = focus.value,
@@ -614,6 +619,120 @@ class RoutineScreenTest {
         compose.onNodeWithText("주말 대청소").assertIsDisplayed()
         scrollToDay(null)
         dayPill(null).assertIsSelected()
+    }
+
+    // ---- 지난날의 체크(사용자가 정함, 2026-11-18) ----
+    // 오늘(10월 16일)은 금요일입니다. 목요일 알약은 어제(15일), 토요일 알약은 엿새 전(10일)입니다.
+
+    /** [date]의 [hour]시에 한 체크. */
+    private fun checkOn(routineId: Long, date: LocalDate, hour: Int = 9) = RoutineCheckEntity(
+        syncId = "check-$routineId-$date-$hour",
+        routineId = routineId,
+        routineSyncId = "routine-$routineId",
+        routineTitle = "루틴 $routineId",
+        checkedAt = date.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+    )
+
+    @Test
+    fun eachDayPillShowsTheDateItPointsAt() {
+        showRoutines(on = today)
+
+        dayPill(DayOfWeek.FRIDAY).assertTextContains("오늘")
+        scrollToDay(DayOfWeek.SUNDAY)
+        dayPill(DayOfWeek.SUNDAY).assertTextContains("11일")
+        scrollToDay(DayOfWeek.THURSDAY)
+        dayPill(DayOfWeek.THURSDAY).assertTextContains("15일")
+        // 오늘보다 뒤 요일은 지난주 날입니다 — 앞날을 가리키는 알약은 없습니다.
+        scrollToDay(DayOfWeek.SATURDAY)
+        dayPill(DayOfWeek.SATURDAY).assertTextContains("10일")
+        scrollToDay(null)
+        dayPill(null).assertTextContains("모든 요일")
+    }
+
+    @Test
+    fun aPastDayShowsThatDaysChecksNotTodays() {
+        val yesterday = today.minusDays(1)
+        showRoutines(
+            on = today,
+            todayCounts = mapOf(2L to 1),
+            checks = listOf(checkOn(1, yesterday, 7), checkOn(1, yesterday, 21), checkOn(2, today))
+        )
+
+        scrollToDay(DayOfWeek.THURSDAY)
+        dayPill(DayOfWeek.THURSDAY).performClick()
+
+        compose.onNodeWithText("15일(목) 진행").assertIsDisplayed()
+        compose.onNodeWithText("1 / 3 · 33%").assertIsDisplayed()
+        compose.onNodeWithText("지난날 기록 중 · +1은 15일로 적힙니다.").assertIsDisplayed()
+        compose.onNodeWithText("15일 2 회").assertExists()
+        // 오늘 한 스트레칭은 그날 0회입니다.
+        assertTrue(compose.onAllNodesWithText("15일 0 회").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithText("오늘 1 회").fetchSemanticsNodes().isEmpty())
+        // 지난날에는 지금 할 차례가 없습니다.
+        assertTrue(compose.onAllNodesWithText("다음 차례").fetchSemanticsNodes().isEmpty())
+
+        // 안 한 것도 그날 체크로 거릅니다.
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).performClick()
+        compose.onNodeWithText("스트레칭").assertIsDisplayed()
+        compose.onNodeWithText("기상 후 물 한 컵").assertDoesNotExist()
+    }
+
+    @Test
+    fun theOldestPillStillReadsItsOwnDay() {
+        // 토요일 알약은 엿새 전(10일)입니다. 셈하는 범위의 끝이고, 이레 전 것은 들어오지 않습니다.
+        showRoutines(on = today, checks = listOf(checkOn(1, today.minusDays(6)), checkOn(1, today.minusDays(7))))
+
+        scrollToDay(DayOfWeek.SATURDAY)
+        dayPill(DayOfWeek.SATURDAY).performClick()
+
+        compose.onNodeWithText("10일(토) 진행").assertIsDisplayed()
+        compose.onNodeWithText("10일 1 회").assertExists()
+    }
+
+    @Test
+    fun plusOneWritesToThePickedDayAndAllMeansToday() {
+        val written = mutableListOf<Pair<Long, LocalDate>>()
+        showRoutines(on = today, onCheckRoutine = { routine, date -> written += routine.id to date })
+
+        scrollToDay(DayOfWeek.THURSDAY)
+        dayPill(DayOfWeek.THURSDAY).performClick()
+        compose.onAllNodesWithText("수행 +1")[0].performClick()
+
+        scrollToDay(DayOfWeek.FRIDAY)
+        dayPill(DayOfWeek.FRIDAY).performClick()
+        compose.onAllNodesWithText("수행 +1")[0].performClick()
+
+        scrollToDay(null)
+        dayPill(null).performClick()
+        compose.onAllNodesWithText("수행 +1")[0].performClick()
+
+        assertEquals(listOf(1L to today.minusDays(1), 1L to today, 1L to today), written)
+    }
+
+    @Test
+    fun aMemoOnAPastDaySaysItCountsForThatDay() {
+        val saved = mutableListOf<Pair<String, LocalDate>>()
+        showRoutines(on = today, onSaveMemo = { _, body, date -> saved += body to date })
+
+        scrollToDay(DayOfWeek.THURSDAY)
+        dayPill(DayOfWeek.THURSDAY).performClick()
+        compose.onAllNodesWithText("메모 0")[0].performClick()
+        compose.onNodeWithText("저장하면 15일(목)에 한 번 한 것으로 셉니다.").assertIsDisplayed()
+        compose.onNodeWithText("메모 기록").performTextInput("늦게 적음")
+        compose.onNodeWithText("메모 저장").performClick()
+
+        assertEquals(listOf("늦게 적음" to today.minusDays(1)), saved)
+    }
+
+    @Test
+    fun theDayCountsFollowEachDaysOwnChecks() {
+        // 안 한 것을 고른 채 요일을 훑으면, 알약 숫자가 그날 남은 수여야 합니다.
+        showRoutines(on = today, checks = listOf(checkOn(1, today.minusDays(1)), checkOn(2, today.minusDays(1))))
+        compose.onNodeWithTag(routineFilterTag("UNDONE")).performClick()
+
+        dayPill(DayOfWeek.FRIDAY).assertTextContains("금 3")
+        scrollToDay(DayOfWeek.THURSDAY)
+        dayPill(DayOfWeek.THURSDAY).assertTextContains("목 1")
     }
 
     private fun routine(id: Long, title: String, orderIndex: Int, category: String = "") = RoutineEntity(

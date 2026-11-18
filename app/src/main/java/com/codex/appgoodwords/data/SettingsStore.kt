@@ -112,6 +112,8 @@ class SettingsStore(
         val serverRev = longPreferencesKey("server_rev")
         /** 이 시각 뒤에 고친 레코드만 서버로 보냅니다. */
         val lastPushAt = longPreferencesKey("last_push_at")
+        /** [requestFullPush]를 부를 때마다 오르는 번호. 동기화가 도는 사이에 온 부탁을 알아보는 데 씁니다. */
+        val fullPushRequests = longPreferencesKey("full_push_requests")
         /** 서버가 통째로 교체될 때마다 오르는 세대 번호. 다르면 리비전 번호를 믿을 수 없습니다. */
         val serverEpoch = longPreferencesKey("server_epoch")
         /**
@@ -507,15 +509,22 @@ class SettingsStore(
         return SyncCursor(
             serverRev = preferences[Keys.serverRev] ?: 0L,
             serverEpoch = preferences[Keys.serverEpoch] ?: 0L,
-            lastPushAt = preferences[Keys.lastPushAt] ?: 0L
+            lastPushAt = preferences[Keys.lastPushAt] ?: 0L,
+            fullPushRequests = preferences[Keys.fullPushRequests] ?: 0L
         )
     }
 
+    /**
+     * [cursor]는 동기화를 시작할 때 읽은 [SyncCursor.fullPushRequests]를 들고 와야 합니다. 그 사이에 [requestFullPush]가
+     * 불렸으면(동기화 도중 지난날 체크를 적음) 보낸 시각을 적지 않고 0으로 둡니다 — 그 체크는 이번 스냅샷에 없었을 수
+     * 있고, 시각이 지난날이라 다음 "바뀐 것만"에도 잡히지 않습니다.
+     */
     suspend fun updateSyncCursor(cursor: SyncCursor) {
         context.dataStore.edit { preferences ->
             preferences[Keys.serverRev] = cursor.serverRev
             preferences[Keys.serverEpoch] = cursor.serverEpoch
-            preferences[Keys.lastPushAt] = cursor.lastPushAt
+            val askedMeanwhile = (preferences[Keys.fullPushRequests] ?: 0L) != cursor.fullPushRequests
+            preferences[Keys.lastPushAt] = if (askedMeanwhile) 0L else cursor.lastPushAt
         }
     }
 
@@ -524,10 +533,14 @@ class SettingsStore(
     /**
      * 다음 동기화에서 이 기기의 기록을 한 번 통째로 보내게 합니다. 받을 쪽 번호(serverRev)는 그대로 둡니다.
      *
-     * 지난 시각으로 새로 적은 기록(루틴 합치기로 옮겨 적은 체크)은 "이 시각 뒤에 바뀐 것"에 잡히지 않아 서버에 가지 않습니다.
+     * 지난 시각으로 새로 적은 기록(루틴 합치기로 옮겨 적은 체크, 요일 알약으로 지난날에 적은 체크)은 "이 시각 뒤에 바뀐 것"에
+     * 잡히지 않아 서버에 가지 않습니다. 동기화가 도는 중에 불려도 그 동기화가 부탁을 지우지 않습니다([updateSyncCursor]).
      */
     suspend fun requestFullPush() {
-        context.dataStore.edit { preferences -> preferences[Keys.lastPushAt] = 0L }
+        context.dataStore.edit { preferences ->
+            preferences[Keys.lastPushAt] = 0L
+            preferences[Keys.fullPushRequests] = (preferences[Keys.fullPushRequests] ?: 0L) + 1
+        }
     }
 }
 
@@ -542,7 +555,9 @@ data class SyncCursor(
      *
      * 이 기기의 시계로만 재는 값입니다. 다른 기기의 시계와 비교하지 않으므로 시차가 있어도 안전합니다.
      */
-    val lastPushAt: Long = 0L
+    val lastPushAt: Long = 0L,
+    /** 읽은 때의 [SettingsStore.requestFullPush] 횟수. 동기화가 끝날 때 그 사이에 부탁이 왔는지 봅니다. */
+    val fullPushRequests: Long = 0L
 ) {
     val isFresh: Boolean
         get() = serverRev <= 0L
