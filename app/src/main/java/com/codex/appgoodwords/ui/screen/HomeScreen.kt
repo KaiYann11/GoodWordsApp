@@ -63,6 +63,7 @@ import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
+import com.codex.appgoodwords.data.DayComparison
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.FeedbackKind
@@ -209,6 +210,8 @@ fun HomeScreen(
     /** 오늘 점수와 최근 흐름. null이면 카드를 두지 않습니다. */
     todayScore: DayScore? = null,
     scoreTrend: ScoreTrend? = null,
+    /** 어제보다 — 오늘 지금까지와 어제 하루(사용자가 정함, 2026-11-19). 견줄 것이 없는 날에는 null이라 카드가 없습니다. */
+    dayComparison: DayComparison? = null,
     /** 그날 요약을 펼칩니다. 그래프의 막대를 눌러도 옵니다. */
     onOpenDay: (LocalDate) -> Unit = {}
 ) {
@@ -349,6 +352,11 @@ fun HomeScreen(
                                     trend = scoreTrend,
                                     onOpenDay = onOpenDay
                                 )
+                            }
+
+                            // 하루 점수 바로 아래입니다(사용자가 고름, 2026-11-19). 한 일만 짚고, 두 날의 수는 눌러서 봅니다.
+                            dayComparison?.let { comparison ->
+                                DayComparisonCard(comparison = comparison, onOpenDay = onOpenDay)
                             }
 
                             FeedbackCard(notes = notes)

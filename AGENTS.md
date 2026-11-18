@@ -126,6 +126,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 |---|---|
 | 이어 온 날수 · 하루 점수·오늘 한 것 · 하루의 걸음 | `DayStreak` · `DayScoreCalculator.digest` · `DailyLoopCalculator` |
 | 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
+| 어제의 나와 비교(오늘 지금까지와 어제 하루 전체 · 카드는 오늘이 많거나 같은 것만, 앞선 것이 없으면 "어제처럼 오늘도" · 기분·점수는 견주지 않음 — 사용자가 정함, 2026-11-19) · AI 하루 돌아보기의 [어제와 견준 것](두 날 숫자만) | `DayComparisons`(셈은 두 날 모두 `DayScoreCalculator.digest`) · `GrowthPrompt.digest`의 `comparisonLines`(하루 돌아보기만) |
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴(오늘 요일의 것만) · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
 | 루틴의 요일·시각(비트·ISO 번호·`HH:mm`·매일/평일/주말 이름, 없으면 매일·상시) · 시각 루틴을 알릴 때(30분 전, 지나도 체크가 없으면 1시간마다 세 번 — 사용자가 정함, 2026-11-17) | `RoutineSchedule` · `RoutineAlarms`. 연속은 하는 요일만 셉니다(`DayStreak`의 `isActive`) |
 | 요일 알약이 가리키는 날(그 요일이 마지막으로 있었던 날, 오늘과 앞 엿새) · 지난날에 적는 체크의 시각(그날의 지금 시각) · 그날을 부르는 말("16일(월)") — 사용자가 정함, 2026-11-18 | `RoutineDays` · 체크 한 번은 `AppRepository.checkRoutineOn`(되돌리기 `undoRoutineCheck`) |

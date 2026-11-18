@@ -51,6 +51,8 @@ import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.DailyCoachPrompt
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DayComparison
+import com.codex.appgoodwords.data.DayComparisons
 import com.codex.appgoodwords.data.DayDigest
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
@@ -79,6 +81,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -88,7 +91,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -302,6 +307,21 @@ class MainViewModel(
     }
 
     /**
+     * 1분마다 지금 시각. 화면이 보는 동안만 돕니다. 하루 마무리 카드가 마무리 시각에 맞춰 뜨고(사용자가 정함, 2026-11-19),
+     * 화면을 켜 둔 채 자정을 넘기면 오늘·어제가 넘어갑니다 — 전에는 기록이 바뀌기 전까지 어제가 "오늘"로 남았습니다.
+     */
+    private val minuteTicks: Flow<Long> = flow {
+        while (true) {
+            val now = System.currentTimeMillis()
+            emit(now)
+            delay(MINUTE_MILLIS - now % MINUTE_MILLIS)
+        }
+    }.shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    /** 오늘 날짜. 날이 바뀔 때만 내보냅니다. */
+    private val currentDate: Flow<LocalDate> = minuteTicks.map { LocalDate.now() }.distinctUntilChanged()
+
+    /**
      * 최근 네 주의 점수 흐름.
      *
      * 저장하지 않고 그때그때 기록에서 셉니다. 하루의 축을 바꾸면 지난날 점수도 곧바로
@@ -312,10 +332,11 @@ class MainViewModel(
             DayInputs(events, checks, todoList, diaryList, logs)
         },
         container.settingsStore.dailyStepsFlow,
-        walkRecords
-    ) { inputs, steps, walking ->
+        walkRecords,
+        currentDate
+    ) { inputs, steps, walking, date ->
         DayScoreCalculator.trend(
-            today = LocalDate.now(),
+            today = date,
             events = inputs.events,
             routineChecks = inputs.routineChecks,
             todos = inputs.todos,
@@ -342,10 +363,11 @@ class MainViewModel(
         },
         moodLogs,
         container.settingsStore.dailyStepsFlow,
-        walkRecords
-    ) { inputs, logs, steps, walking ->
+        walkRecords,
+        currentDate
+    ) { inputs, logs, steps, walking, date ->
         DayScoreCalculator.digest(
-            date = LocalDate.now(),
+            date = date,
             events = inputs.events,
             routineChecks = inputs.routineChecks,
             todos = inputs.todos,
@@ -379,6 +401,39 @@ class MainViewModel(
     val todayScore = todayDigest
         .map { it.score }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), todayDigest.value.score)
+
+    /** 어제 하루. 어제보다 카드가 오늘과 견줍니다 — 오늘과 같은 셈([DayScoreCalculator.digest])입니다. */
+    private val yesterdayDigest = combine(
+        combine(historyEvents, routineChecks, todos, diaries, bookReadingLogs) { events, checks, todoList, diaryList, logs ->
+            DayInputs(events, checks, todoList, diaryList, logs)
+        },
+        moodLogs,
+        container.settingsStore.dailyStepsFlow,
+        walkRecords,
+        currentDate
+    ) { inputs, logs, steps, walking, date ->
+        DayScoreCalculator.digest(
+            date = date.minusDays(1),
+            events = inputs.events,
+            routineChecks = inputs.routineChecks,
+            todos = inputs.todos,
+            diaries = inputs.diaries,
+            moodLogs = logs,
+            steps = steps,
+            readingLogs = inputs.readingLogs,
+            walkRecords = walking
+        )
+    }
+
+    /**
+     * 어제의 나와 비교 — 오늘 지금까지와 어제 하루 전체(사용자가 정함, 2026-11-19). 홈 돌아보기 칸의 "어제보다" 카드가 씁니다.
+     * 견줄 것이 없는 날에는 null입니다([DayComparison.shown]).
+     */
+    val dayComparison: StateFlow<DayComparison?> = combine(todayDigest, yesterdayDigest) { today, yesterday ->
+        // 오늘이 막 넘어가 두 날이 이어지지 않는 순간(어제의 "오늘"과 새 "어제")에는 견주지 않습니다.
+        if (yesterday.score.date != today.score.date.minusDays(1)) return@combine null
+        DayComparisons.of(today, yesterday).takeIf { it.shown }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** 오늘 받아 둔 한마디. 날이 바뀌면 빈 상태입니다. */
     val dailyCoach = container.settingsStore.dailyCoachStateFlow
@@ -1818,6 +1873,9 @@ class MainViewModel(
     private suspend fun currentSnapshot(): AppDataSnapshot = container.syncCoordinator.currentSnapshot()
 
     private companion object {
+        /** 오늘·지금 시각을 다시 보는 간격. 하루 마무리 카드가 이만큼 늦게 뜰 수 있습니다. */
+        const val MINUTE_MILLIS = 60_000L
+
         /**
          * 이만큼 넘게 앱을 떠나 있었으면 다시 켠 것으로 봅니다.
          *

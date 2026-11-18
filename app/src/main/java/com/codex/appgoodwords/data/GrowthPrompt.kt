@@ -48,7 +48,12 @@ data class GrowthDigest(
     val previousAdviceLines: List<String> = emptyList(),
     /** 그 조언을 받은 날. 언제 한 말인지 알아야 "그 뒤로 어땠는지"를 셀 수 있습니다. */
     val previousAdviceOn: LocalDate? = null,
-    val previousAdvicePeriod: ReportPeriod? = null
+    val previousAdvicePeriod: ReportPeriod? = null,
+    /**
+     * 어제와 견준 것 — 하루 돌아보기에만 싣습니다(사용자가 정함, 2026-11-19). 어제 하루 전체와 오늘 지금까지의 한 일 수뿐이고,
+     * 이름·글은 싣지 않습니다([DayComparisons.promptLines]).
+     */
+    val comparisonLines: List<String> = emptyList()
 ) {
     /** 아무것도 없으면 물어볼 것이 없습니다. 값만 나가고 빈 글이 돌아옵니다. */
     val isEmpty: Boolean
@@ -131,7 +136,9 @@ object GrowthPrompt {
         walkRecords: WalkRecords = WalkRecords(),
         zoneId: ZoneId = ZoneId.systemDefault(),
         /** 목표에 들인 시간. [includeGoals]일 때 시간 숫자만 실립니다([directionLines]). */
-        goalTimeLogs: List<GoalTimeLogEntity> = emptyList()
+        goalTimeLogs: List<GoalTimeLogEntity> = emptyList(),
+        /** 날짜별 독서. 하루 돌아보기의 [어제와 견준 것]에서 편 책의 수로만 쓰입니다. */
+        readingLogs: List<BookReadingLogEntity> = emptyList()
     ): GrowthDigest {
         val from = today.minusDays((period.days - 1).toLong())
         val inRange = { millis: Long -> toDate(millis, zoneId).let { !it.isBefore(from) && !it.isAfter(today) } }
@@ -215,6 +222,25 @@ object GrowthPrompt {
             ?.let { toDate(it.createdAt, zoneId) }
             ?.takeIf { it.plusDays(PREVIOUS_ADVICE_MAX_DAYS) >= today }
 
+        // 어제와 견준 것(사용자가 정함, 2026-11-19 — 하루 돌아보기에 싣기). 카드와 같은 셈이라 두 날 모두
+        // [DayScoreCalculator.digest]에서 가져옵니다. 한 주·한 달 돌아보기에는 싣지 않습니다 — 기간이 하루가 아니면 "어제"가 없습니다.
+        val comparisonLines = if (period != ReportPeriod.DAILY) emptyList() else {
+            val dayOf = { date: LocalDate ->
+                DayScoreCalculator.digest(
+                    date = date,
+                    events = events,
+                    routineChecks = routineChecks,
+                    todos = todos,
+                    diaries = diaries,
+                    moodLogs = moodLogs,
+                    readingLogs = readingLogs,
+                    walkRecords = walkRecords,
+                    zoneId = zoneId
+                )
+            }
+            DayComparisons.promptLines(DayComparisons.of(today = dayOf(today), yesterday = dayOf(today.minusDays(1))))
+        }
+
         return GrowthDigest(
             period = period,
             from = from,
@@ -230,7 +256,8 @@ object GrowthPrompt {
             directionLines = if (includeGoals) directionLines(items, routines, goalTimeLogs, today, zoneId) else emptyList(),
             previousAdviceLines = if (previousOn == null) emptyList() else previousAdvice(previousReport),
             previousAdviceOn = previousOn,
-            previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) }
+            previousAdvicePeriod = previousOn?.let { ReportPeriod.of(previousReport?.period) },
+            comparisonLines = comparisonLines
         )
     }
 
@@ -334,6 +361,10 @@ object GrowthPrompt {
             "- [내가 가려는 방향]이 있으면 기록을 그 방향과 이어 봅니다. 가까워진 것을 먼저 짚고, 다음 걸음도 " +
                 "그쪽으로 권합니다. 방향을 숙제처럼 들이밀거나 멀다고 나무라지 않습니다."
         )
+        appendLine(
+            "- [어제와 견준 것]이 있으면 어제보다 늘었거나 이어 간 것을 먼저 짚습니다. 오늘 아직 적은 것을 나무라거나 " +
+                "숫자 차이를 성적처럼 말하지 않습니다."
+        )
         appendLine("- 존댓말로, 한 문장은 짧게 씁니다.")
         appendLine("- 반드시 아래 형식의 JSON만 출력합니다. 설명이나 코드펜스를 붙이지 않습니다.")
         appendLine("""{"strengths":["..."],"improvements":["..."],"suggestedQuote":{"text":"...","author":"..."},"suggestedRoutines":["..."],"guide":"..."}""")
@@ -372,6 +403,7 @@ object GrowthPrompt {
         section("읽은 글귀", digest.quoteLines)
         section("독서", digest.bookLines)
         section("걷기 (걸음 수·기록한 걷기, 숫자만)", digest.walkLines)
+        section("어제와 견준 것 (어제 하루 전체 · 오늘 지금까지, 한 일의 수)", digest.comparisonLines)
         // 추천을 받으려는 것이 아니라 빼 달라는 목록입니다. 무엇에 쓰는지 제목에 적어 둡니다.
         section("이미 담아 둔 것 (추천에서 빼 주세요)", digest.ownedQuoteLines)
         if (digest.previousAdviceLines.isNotEmpty()) {

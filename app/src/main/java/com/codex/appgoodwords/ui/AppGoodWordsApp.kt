@@ -273,6 +273,7 @@ fun AppGoodWordsApp(
     val happyDayDigest by viewModel.happyDayDigest.collectAsStateWithLifecycle()
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
+    val dayComparison by viewModel.dayComparison.collectAsStateWithLifecycle()
     val walks by viewModel.walks.collectAsStateWithLifecycle()
     val stepCounts by viewModel.stepCounts.collectAsStateWithLifecycle()
     val walkGoalSteps by viewModel.walkGoalSteps.collectAsStateWithLifecycle()
@@ -1299,6 +1300,7 @@ fun AppGoodWordsApp(
                             // 오늘 점수는 흐름의 마지막 점입니다. 따로 셈하지 않고 같은 흐름에서 꺼냅니다.
                             todayScore = todayScore,
                             scoreTrend = scoreTrend,
+                            dayComparison = dayComparison,
                             onOpenDay = { date -> viewModel.openDay(date) },
                             memories = if (diaryLocked) onThisDay.filter { it.kind != SearchKind.DIARY } else onThisDay,
                             moodPractice = moodPractice,
