@@ -204,7 +204,7 @@ fun LibraryScreen(
 
     LaunchedEffect(comboFeedback?.token) {
         val token = comboFeedback?.token ?: return@LaunchedEffect
-        delay(1600)
+        delay(COMBO_PILL_MILLIS)
         if (comboFeedback?.token == token) {
             comboFeedback = null
         }
