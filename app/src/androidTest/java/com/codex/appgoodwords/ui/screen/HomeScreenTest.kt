@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -239,6 +240,84 @@ class HomeScreenTest {
         compose.runOnUiThread { readAndMoveOn.action() }
 
         assertEquals(listOf(quoteItem), swiped)
+    }
+
+    // 읽으면 보관함처럼 카드 자리에 잔물결이 번집니다(사용자가 고름, 2026-11-18). 아래 콤보 알약은 앱이 띄웁니다(ComboSnackbarTest).
+    @Test
+    fun readingBySwipingRipplesOverTheCard() {
+        compose.setContent { homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true)) }
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeLeft() }
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertExists()
+        // 보관함 알약과 같은 때에 거둡니다.
+        compose.mainClock.advanceTimeBy(3_000)
+        compose.onNodeWithTag(homeQuoteRippleTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun movingOnAQuoteReadAlreadyMakesNoRipple() {
+        // 이미 읽은 글귀는 넘기기만 해서 새로 읽은 것이 없습니다.
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), quoteConfirmedToday = true)
+        }
+
+        compose.onNodeWithTag(homeQuoteCardTag).performTouchInput { swipeLeft() }
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun readingByTheButtonRipplesToo() {
+        val confirmed = mutableListOf<ContentItemEntity>()
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), onConfirmQuote = { confirmed += it })
+        }
+
+        compose.onNodeWithTag(homeQuoteConfirmTag).performClick()
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertExists()
+        assertEquals(listOf(quoteItem), confirmed)
+    }
+
+    @Test
+    fun takingAReadBackMakesNoRipple() {
+        val confirmed = mutableListOf<ContentItemEntity>()
+        compose.setContent {
+            homeScreen(
+                quote = HomeQuote(item = quoteItem, hasCandidates = true),
+                quoteConfirmedToday = true,
+                onConfirmQuote = { confirmed += it }
+            )
+        }
+
+        compose.onNodeWithTag(homeQuoteConfirmTag).performClick()
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertDoesNotExist()
+        assertEquals(listOf(quoteItem), confirmed)
+    }
+
+    @Test
+    fun reachingAMilestoneRipplesWider() {
+        // 넷을 읽은 날 다섯째는 첫 이정표입니다. 보관함처럼 고리가 크게 번집니다(CelebrationPulse 260dp, 여느 때 200dp).
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), quotesReadToday = 4)
+        }
+
+        compose.onNodeWithTag(homeQuoteConfirmTag).performClick()
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertWidthIsEqualTo(260.dp)
+    }
+
+    @Test
+    fun anOrdinaryReadRipplesSmaller() {
+        compose.setContent {
+            homeScreen(quote = HomeQuote(item = quoteItem, hasCandidates = true), quotesReadToday = 1)
+        }
+
+        compose.onNodeWithTag(homeQuoteConfirmTag).performClick()
+
+        compose.onNodeWithTag(homeQuoteRippleTag).assertWidthIsEqualTo(200.dp)
     }
 
     @Test
@@ -483,6 +562,7 @@ class HomeScreenTest {
         notes: List<FeedbackNote> = emptyList(),
         quote: HomeQuote? = HomeQuote(item = null, hasCandidates = false),
         quoteConfirmedToday: Boolean = false,
+        quotesReadToday: Int = 0,
         onConfirmQuote: (ContentItemEntity) -> Unit = {},
         onNextQuote: () -> Unit = {},
         onSwipeQuote: (ContentItemEntity) -> Unit = {},
@@ -502,6 +582,7 @@ class HomeScreenTest {
             checks = emptyList(),
             quote = quote,
             quoteConfirmedToday = quoteConfirmedToday,
+            quotesReadToday = quotesReadToday,
             onConfirmQuote = onConfirmQuote,
             onNextQuote = onNextQuote,
             onSwipeQuote = onSwipeQuote,

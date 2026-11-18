@@ -1,5 +1,6 @@
 package com.codex.appgoodwords.ui.screen
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
@@ -71,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.ContentType
+import com.codex.appgoodwords.data.ReadingCombo
 import com.codex.appgoodwords.ui.theme.Motion
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -85,6 +88,7 @@ internal const val homeQuoteConfirmTag = "home_quote_confirm"
 internal const val homeQuoteNextTag = "home_quote_next"
 internal const val homeQuoteAddTag = "home_quote_add"
 internal const val homeQuoteSwipeHintTag = "home_quote_swipe_hint"
+internal const val homeQuoteRippleTag = "home_quote_ripple"
 
 /**
  * 홈 맨 위의 글귀.
@@ -128,6 +132,15 @@ data class HomeQuoteSwipe(
             moved -> "앞 글귀로 돌아갔습니다."
             else -> "읽음을 거뒀습니다."
         }
+
+    /**
+     * 이 밀기로 읽었을 때 아래에 띄울 콤보 알약 — 보관함에서 읽을 때와 같은 것에 되돌리기를 답니다(사용자가 고름, 2026-11-18).
+     * 넘기기만 했으면 null입니다. 새로 읽은 것이 없어 지금처럼 글로만 알립니다.
+     *
+     * @param readToday 이 밀기까지 센 오늘 읽은 수.
+     */
+    internal fun comboVisuals(readToday: Int): ComboSnackbarVisuals? =
+        if (readNow) ComboSnackbarVisuals(lead = message, count = readToday, confirmed = true, actionLabel = "되돌리기") else null
 }
 
 /**
@@ -146,6 +159,9 @@ data class HomeQuoteSwipe(
  * 들어옵니다. 덜 밀면 제자리로 돌아옵니다. 이미 읽은 글귀는 넘기기만 합니다 — 읽음 단추는 다시 누르면 거두지만, 미는 것은
  * 넘기는 몸짓입니다. 오른쪽으로는 밀리지 않습니다. 단추는 그대로 두고, 화면 읽기 프로그램에는 같은 일을 하는 동작을 답니다.
  *
+ * **읽으면 보관함처럼 콤보가 뜹니다**(사용자가 고름, 2026-11-18). 밀어 읽거나 읽음을 누르면 카드 자리에 잔물결이 번지고, 아래
+ * 콤보 알약은 앱이 스낵바 자리에 띄웁니다([ComboSnackbarVisuals]) — 밀었을 때의 되돌리기와 한 자리를 써야 겹치지 않습니다.
+ *
  * @param quote null이면 아직 읽는 중입니다. 자리만 잡아 두어 글귀가 들어올 때 아래가 밀려 내려가지 않게 합니다.
  * @param onSwipe 왼쪽으로 밀어 놓았습니다. 읽음과 넘기기는 받는 쪽이 합니다. 카드는 다음 글귀가 오기를 기다렸다 들입니다.
  */
@@ -160,7 +176,9 @@ fun TodayQuoteCard(
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
     /** 바뀔 때마다 잠깐 테두리를 둘러 어디인지 알려 줍니다(걸음의 "글귀 읽기"를 눌러 왔을 때). 0이면 두르지 않습니다. */
-    pulseKey: Int = 0
+    pulseKey: Int = 0,
+    /** 오늘 읽은 글귀 수(보관함 콤보와 같은 수). 이번에 읽어 이정표에 닿으면 잔물결이 크게 번집니다. */
+    readToday: Int = 0
 ) {
     var lit by remember(pulseKey) { mutableStateOf(pulseKey > 0) }
     LaunchedEffect(pulseKey) {
@@ -198,6 +216,23 @@ fun TodayQuoteCard(
     // 떠나는 카드는 읽은 모양입니다 — 이 밀기로 읽음이 적히거나 이미 읽은 글귀입니다.
     val shownConfirmed = leaving != null || confirmedToday
 
+    // 읽었을 때 카드 자리에 번지는 잔물결(보관함과 같은 것). 카드가 떠나고 들어와도 그 자리에서 번집니다.
+    var ripple by remember { mutableStateOf<QuoteRipple?>(null) }
+    val latestReadToday by rememberUpdatedState(readToday)
+    LaunchedEffect(ripple?.token) {
+        val token = ripple?.token ?: return@LaunchedEffect
+        delay(COMBO_PILL_MILLIS)
+        if (ripple?.token == token) ripple = null
+    }
+
+    fun rippleForRead() {
+        // 읽음이 DB를 거쳐 돌아오기 전이라 이번 것까지 더해 이정표에 닿는지 봅니다.
+        ripple = QuoteRipple(
+            token = SystemClock.elapsedRealtimeNanos(),
+            milestone = ReadingCombo.of(latestReadToday + 1).isMilestone
+        )
+    }
+
     fun settle(velocity: Float) {
         val swiped = latestItem
         val width = cardWidth.toFloat()
@@ -212,7 +247,12 @@ fun TodayQuoteCard(
         leavingReads = !latestConfirmed
         leaving = swiped
         phase = SwipePhase.LEAVING
-        if (leavingReads) haptics.commit() else haptics.tap()
+        if (leavingReads) {
+            haptics.commit()
+            rippleForRead()
+        } else {
+            haptics.tap()
+        }
         // 다음 글귀를 고르는 동안 카드가 빠집니다. 다 빠질 즈음이면 대개 이미 와 있습니다.
         onSwipe(swiped)
         scope.launch {
@@ -318,7 +358,16 @@ fun TodayQuoteCard(
                             QuoteActions(
                                 item = shown,
                                 confirmedToday = shownConfirmed,
-                                onConfirm = onConfirm,
+                                onConfirm = { tapped ->
+                                    // 밀어 읽을 때와 같이 읽으면 기록이 남는 무게로 울리고 잔물결이 번집니다. 거둘 때는 가볍게만.
+                                    if (shownConfirmed) {
+                                        haptics.tap()
+                                    } else {
+                                        haptics.commit()
+                                        rippleForRead()
+                                    }
+                                    onConfirm(tapped)
+                                },
                                 onNext = onNext
                             )
                         }
@@ -350,11 +399,26 @@ fun TodayQuoteCard(
                 }
             }
         }
+        // 카드 위에 번집니다. 카드 자리에 맞춘 상자 안에 두어 카드 크기를 바꾸지 않고, 상자를 넘치는 고리는 그대로 그립니다.
+        ripple?.let { wave ->
+            Box(modifier = Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                CelebrationPulse(
+                    token = wave.token,
+                    milestone = wave.milestone,
+                    modifier = Modifier
+                        .wrapContentSize(unbounded = true)
+                        .testTag(homeQuoteRippleTag)
+                )
+            }
+        }
     }
 }
 
 /** 밀어 넘기는 카드가 어디쯤인지. 떠나고 들어오는 동안은 다시 밀리지 않습니다. */
 private enum class SwipePhase { REST, LEAVING, ARRIVING }
+
+/** 읽었을 때 카드 자리에 번지는 잔물결 한 번. 이정표에 닿았으면 크게 번집니다. */
+private data class QuoteRipple(val token: Long, val milestone: Boolean)
 
 /**
  * 카드를 밀 때 뒤에서 드러나는 띠. 놓으면 무엇이 되는지 적습니다.

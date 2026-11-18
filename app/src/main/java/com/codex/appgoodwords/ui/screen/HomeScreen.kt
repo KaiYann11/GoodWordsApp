@@ -139,6 +139,8 @@ fun HomeScreen(
     /** 오늘의 글귀(위젯·알림과 같은 것). null이면 아직 읽는 중입니다. */
     quote: HomeQuote? = null,
     quoteConfirmedToday: Boolean = false,
+    /** 오늘 읽은 글귀 수(보관함 콤보와 같은 수). 글귀를 읽어 이정표에 닿으면 카드의 잔물결이 크게 번집니다. */
+    quotesReadToday: Int = 0,
     /** 읽음. 오늘의 걸음 "글귀 읽기"를 채웁니다. 다시 누르면 거둡니다. */
     onConfirmQuote: (ContentItemEntity) -> Unit = {},
     onNextQuote: () -> Unit = {},
@@ -264,6 +266,7 @@ fun HomeScreen(
                 onOpen = onOpenQuote,
                 onAdd = onAddQuote,
                 pulseKey = quotePulse,
+                readToday = quotesReadToday,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
         }

@@ -136,6 +136,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | AI에 일기·목표가 어디까지 나가는지(목표에 들인 시간은 숫자만, 글은 안 감) | `GrowthPrompt.diaryLine` · `GrowthPrompt.directionLines` (돌아보기·한마디 공용) |
 | 오늘 나눈 말·앞서 받은 말을 AI에 다시 싣는 범위 | `DailyCoachPrompt.talkLines`·`givenTipLines`·`givenQuoteLines` (공통 `sharedTalk`·`DailyCoachSharing` — 받을 때 허용했던 범위를 지금 끄면 제외) |
 | 지금의 글귀(홈 맨 위·위젯·알림이 함께 보는 것) | `SettingsStore.widgetContentIdFlow` · 고르기 `QuoteWidget.pickNextItem` · 홈 카드를 밀어 넘기기(안 읽었으면 읽음까지 — 사용자가 정함, 2026-11-18) `MainViewModel.swipeHomeQuote`(되돌리기 `undoHomeQuoteSwipe`) |
+| 읽기 콤보(오늘 읽은 글귀 수 · 이정표 5·10·20·30·50·100)와 그 알약·잔물결 | `ReadingCombo` · `ui/screen/ReadingFeedback.kt`(`ComboBanner`·`CelebrationPulse`·`COMBO_PILL_MILLIS`). 보관함은 목록 위에, 홈은 스낵바로 띄웁니다(`ComboSnackbarVisuals`·`AppSnackbar` — 밀었을 때의 되돌리기와 한 자리, 사용자가 고름 2026-11-18). 수는 어디서나 `confirmedTodayIds` |
 | 오늘의 한마디를 물을 때인지 · 다음에 깨울 때 | `DailyCoachState.needsAsk` · `DailyCoachSchedule` (기준은 `lastActiveAt` — 내가 말한 때도 셈) |
 | 색·글자·모서리·움직임·진동 | `ui/theme`(`Color`·`Type`·`Theme`·`Motion`) · `ui/screen/Feedback.kt` |
 | 걸은 날(정한 걸음 수 이상 **또는** 걷기를 기록한 날 — 사용자가 정함, 2026-11-07) | `Walking`(`walkedDays`·`stepsByDate`·AI에 가는 한 줄 `factLine`). 하루의 걸음·점수·연속·홈 카드·AI가 모두 여기서 셉니다 |

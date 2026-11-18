@@ -109,6 +109,9 @@ import com.codex.appgoodwords.ui.screen.HappyMomentList
 import com.codex.appgoodwords.ui.screen.LikeList
 import com.codex.appgoodwords.ui.screen.AddContentScreen
 import com.codex.appgoodwords.ui.screen.AppLock
+import com.codex.appgoodwords.ui.screen.AppSnackbar
+import com.codex.appgoodwords.ui.screen.COMBO_PILL_MILLIS
+import com.codex.appgoodwords.ui.screen.ComboSnackbarVisuals
 import com.codex.appgoodwords.ui.screen.AppLockScreen
 import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.BookProgressScreen
@@ -155,6 +158,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private enum class AppTab(
     val title: String
@@ -607,17 +611,42 @@ fun AppGoodWordsApp(
                 snackbarHostState.showSnackbar(result.exceptionOrNull()?.message ?: "글귀를 넘기지 못했습니다.")
                 return@launch
             }
-            val action = snackbarHostState.showSnackbar(
-                message = swipe.message,
-                actionLabel = "되돌리기".takeIf { swipe.canUndo },
-                duration = SnackbarDuration.Short
-            )
+            // 이 밀기로 읽었으면 보관함처럼 콤보 알약으로 띄우고 되돌리기를 그 끝에 답니다(사용자가 고름, 2026-11-18).
+            val combo = swipe.comboVisuals(readToday = viewModel.confirmedTodayIds.value.size)
+            val action = if (combo != null) {
+                snackbarHostState.showSnackbar(combo)
+            } else {
+                snackbarHostState.showSnackbar(
+                    message = swipe.message,
+                    actionLabel = "되돌리기".takeIf { swipe.canUndo },
+                    duration = SnackbarDuration.Short
+                )
+            }
             if (action == SnackbarResult.ActionPerformed) {
                 val undone = viewModel.undoHomeQuoteSwipe(swipe)
                 snackbarHostState.showSnackbar(
                     if (undone.isSuccess) swipe.undoneMessage else undone.exceptionOrNull()?.message ?: "되돌리지 못했습니다."
                 )
             }
+        }
+    }
+
+    /**
+     * 홈의 읽음 단추. 밀어 읽을 때와 같은 자리에 콤보 알약을 띄웁니다(사용자가 고름, 2026-11-18). 되돌리기는 달지 않고 — 단추를
+     * 다시 누르면 거둡니다 — 보관함 알약처럼 잠깐만 둡니다. 거두면 "읽음 취소" 알약입니다.
+     */
+    fun confirmHomeQuote(item: ContentItemEntity) {
+        coroutineScope.launch {
+            val result = viewModel.toggleContentConfirmed(item.id)
+            val confirmed = result.getOrNull()
+            if (confirmed == null) {
+                showConfirmFeedback(result)
+                return@launch
+            }
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val combo = ComboSnackbarVisuals.toggled(confirmed, count = viewModel.confirmedTodayIds.value.size)
+            // 스낵바의 가장 짧은 때(4초)는 칭찬으로는 길어서 보관함 알약과 같은 때에 거둡니다.
+            withTimeoutOrNull(COMBO_PILL_MILLIS) { snackbarHostState.showSnackbar(combo) }
         }
     }
 
@@ -1011,7 +1040,8 @@ fun AppGoodWordsApp(
                     }
                 )
             },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            // 콤보를 담은 알림은 보관함과 같은 알약으로 그립니다(홈에서 글귀를 읽었을 때).
+            snackbarHost = { SnackbarHost(snackbarHostState) { data -> AppSnackbar(data) } },
             bottomBar = {
                 // 대화 화면에는 하단 바를 두지 않습니다. 입력 칸이 자판 바로 위에 붙어야 합니다.
                 if (selectedItem == null && currentTab != AppTab.COACH_TALK) {
@@ -1171,7 +1201,8 @@ fun AppGoodWordsApp(
                             // 위젯·알림과 같은 글귀입니다. 읽음은 보관함에서 누르는 것과 같은 기록이라 오늘의 걸음을 채웁니다.
                             quote = homeQuote,
                             quoteConfirmedToday = homeQuote?.item?.id?.let { it in confirmedTodayIds } == true,
-                            onConfirmQuote = { item -> toggleConfirmed(item, showMessage = true) },
+                            quotesReadToday = confirmedTodayIds.size,
+                            onConfirmQuote = { item -> confirmHomeQuote(item) },
                             onNextQuote = { viewModel.nextHomeQuote() },
                             onSwipeQuote = { item -> swipeHomeQuote(item) },
                             onOpenQuote = { item -> openItemDetail(AppTab.HOME, item.id) },
