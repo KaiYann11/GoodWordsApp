@@ -128,6 +128,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴(오늘 요일의 것만) · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
 | 루틴의 요일·시각(비트·ISO 번호·`HH:mm`·매일/평일/주말 이름, 없으면 매일·상시) · 시각 루틴을 알릴 때(30분 전, 지나도 체크가 없으면 1시간마다 세 번 — 사용자가 정함, 2026-11-17) | `RoutineSchedule` · `RoutineAlarms`. 연속은 하는 요일만 셉니다(`DayStreak`의 `isActive`) |
+| 요일 알약이 가리키는 날(그 요일이 마지막으로 있었던 날, 오늘과 앞 엿새) · 지난날에 적는 체크의 시각(그날의 지금 시각) · 그날을 부르는 말("16일(월)") — 사용자가 정함, 2026-11-18 | `RoutineDays` · 체크 한 번은 `AppRepository.checkRoutineOn`(되돌리기 `undoRoutineCheck`) |
 | 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄·들인 시간) | `GoalTracking` |
 | 목표에 들인 시간(분 표시·누적·최근 4주·직접 적은 시간·타이머로 잰 분 — 사용자가 정함, 2026-11-08) | 앱 `GoalTime` · 웹 `formatMinutes`·`recentGoalMinutes` |
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
@@ -158,6 +159,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
 | 루틴의 요일·시각(`weekdays`·`timeOfDay`) | 앱 `AppDataJson`(ISO 번호·`HH:mm`) · `RoutineDraft`와 고치기 창(저장은 루틴을 통째로 새로 적어서, 빠지면 이름만 고쳐도 매일·상시로 돌아갑니다) · 서버 `normalizeRoutine`(빠뜨리면 병합 때마다 사라짐) · 같은 루틴 판정(앱 `SyncDeduplicator`·서버 `routineFingerprint`) · 웹 `routineStatsOf`·`routineScheduleLabel` · 오늘 요일로 거르는 곳(`restOfToday`·`RoutineWidget`·`RoutineDao.getRandomReminderRoutine`·루틴 탭의 오늘 진행) |
 | 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |
+| **지난 시각으로 새로 적는 기록**(합치기로 옮긴 체크, 요일 알약으로 지난날에 적은 체크·메모의 체크) | 체크는 생긴 시각(`checkedAt`)으로 "바뀐 것만" 고르므로(`SyncDelta`) 적은 쪽이 `SettingsStore.requestFullPush`를 불러야 서버에 갑니다(`MainViewModel.checkRoutine`·`saveRoutineMemo`). 동기화 도중에 온 부탁은 `SyncCursor.fullPushRequests`로 알아보고 끝난 동기화가 지우지 않습니다 — `SyncCoordinator`가 시작할 때 읽은 번호를 `updateSyncCursor`에 넘겨야 합니다 |
 | 같은 내용 합치기(기분 `moodLogFingerprint` 포함, 행복한 순간은 `itemFingerprint`에 `createdAt`까지) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 이름 | 앱 `AiProvider` · 서버 `aiProviders`의 기본 모델. 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고, 시험 서버 `/api/growth-feedback`로 하나씩 불러 실제로 도는지 확인합니다(구독에서 막힌 모델은 CLI 목록에 넣지 않습니다) |

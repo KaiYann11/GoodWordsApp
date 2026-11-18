@@ -1,6 +1,7 @@
 package com.codex.appgoodwords.data
 
 import androidx.room.withTransaction
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
@@ -786,26 +787,71 @@ class AppRepository(
         return routineDao.getRandomReminderRoutine(RoutineSchedule.bit(today.dayOfWeek))
     }
 
+    /** 오늘 한 번 했다고 적고, 오늘 몇 번째인지 돌려줍니다. 알림·위젯의 수행이 씁니다. */
     suspend fun markRoutineDone(routineId: Long): Int {
-        val routine = routineDao.getById(routineId) ?: return 0
-        insertRoutineCheck(routine)
-        val (start, end) = todayRange()
-        return routineCheckDao.countForRange(routine.id, start, end)
+        val now = System.currentTimeMillis()
+        val today = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
+        return checkRoutineOn(routineId, today, now)?.count ?: 0
     }
 
-    private suspend fun insertRoutineCheck(routine: RoutineEntity) {
-        routineCheckDao.insert(
-            RoutineCheckEntity(
-                routineId = routine.id,
-                routineSyncId = routine.syncId,
-                routineTitle = routine.title,
-                checkedAt = System.currentTimeMillis()
-            )
+    /**
+     * [date]에 한 번 했다고 적습니다(사용자가 정함, 2026-11-18). 지난날이면 그날의 지금 시각으로 적습니다([RoutineDays.checkTime]).
+     *
+     * 지난날 체크는 "바뀐 것만" 보내는 동기화에 잡히지 않으므로, 부른 쪽이 다음 동기화를 통째로 보내게 해야 합니다
+     * ([SettingsStore.requestFullPush]). 앞날에는 적지 않습니다.
+     */
+    suspend fun checkRoutineOn(
+        routineId: Long,
+        date: LocalDate,
+        now: Long = System.currentTimeMillis(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): RoutineCheckResult? {
+        require(!date.isAfter(Instant.ofEpochMilli(now).atZone(zoneId).toLocalDate())) { "아직 오지 않은 날에는 적을 수 없습니다." }
+        val routine = routineDao.getById(routineId) ?: return null
+        val check = insertRoutineCheck(routine, RoutineDays.checkTime(date, now, zoneId))
+        val start = date.atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli() - 1
+        return RoutineCheckResult(
+            syncId = check.syncId,
+            date = date,
+            count = routineCheckDao.countForRange(routine.id, start, end)
         )
     }
 
-    suspend fun saveRoutineMemo(routineId: Long, body: String): Long {
+    /**
+     * 방금 적은 체크 하나를 지웁니다 — 스낵바의 되돌리기(사용자가 정함, 2026-11-18). 다른 기기와 서버에서도 지워지게 삭제
+     * 표식을 남깁니다. 이미 없으면 false.
+     */
+    suspend fun undoRoutineCheck(syncId: String): Boolean = database.withTransaction {
+        val removed = routineCheckDao.deleteBySyncId(syncId) > 0
+        if (removed) recordDeletion(syncId, SyncEntityType.ROUTINE_CHECK)
+        removed
+    }
+
+    private suspend fun insertRoutineCheck(
+        routine: RoutineEntity,
+        checkedAt: Long = System.currentTimeMillis()
+    ): RoutineCheckEntity {
+        val check = RoutineCheckEntity(
+            routineId = routine.id,
+            routineSyncId = routine.syncId,
+            routineTitle = routine.title,
+            checkedAt = checkedAt
+        )
+        routineCheckDao.insert(check)
+        return check
+    }
+
+    /**
+     * 메모를 남기고 그날 한 번 한 것으로 셉니다. 요일 알약으로 지난날을 보며 쓴 메모는 그날로 셉니다 — 그 카드의 회수가
+     * 올라야 합니다(2026-11-18). 메모가 생긴 때([RoutineMemoEntity.createdAt])는 쓴 지금입니다.
+     */
+    suspend fun saveRoutineMemo(routineId: Long, body: String, date: LocalDate? = null): Long {
         val normalized = body.trim()
+        val now = System.currentTimeMillis()
+        val zoneId = ZoneId.systemDefault()
+        val checkDay = date ?: Instant.ofEpochMilli(now).atZone(zoneId).toLocalDate()
+        require(!checkDay.isAfter(Instant.ofEpochMilli(now).atZone(zoneId).toLocalDate())) { "아직 오지 않은 날에는 적을 수 없습니다." }
         return database.withTransaction {
             val routine = routineDao.getById(routineId) ?: error("루틴을 찾을 수 없습니다.")
             require(normalized.isNotBlank()) { "메모 내용을 입력해 주세요." }
@@ -817,7 +863,7 @@ class AppRepository(
                     body = normalized
                 )
             )
-            insertRoutineCheck(routine)
+            insertRoutineCheck(routine, RoutineDays.checkTime(checkDay, now, zoneId))
             memoId
         }
     }

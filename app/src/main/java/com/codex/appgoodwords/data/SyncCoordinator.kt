@@ -85,7 +85,9 @@ class SyncCoordinator(
                     serverRev = merged.serverRev,
                     serverEpoch = merged.serverEpoch,
                     // 보내기 시작한 시각을 기준으로 둡니다. 동기화 도중에 생긴 변경을 놓치지 않으려는 것입니다.
-                    lastPushAt = SyncDelta.nextPushMark(startedAt)
+                    lastPushAt = SyncDelta.nextPushMark(startedAt),
+                    // 도중에 통째로 보내 달라는 부탁(지난날 체크)이 왔으면 updateSyncCursor가 그 부탁을 남깁니다.
+                    fullPushRequests = cursor.fullPushRequests
                 )
             )
             settingsStore.recordSyncResult(System.currentTimeMillis(), error = "")

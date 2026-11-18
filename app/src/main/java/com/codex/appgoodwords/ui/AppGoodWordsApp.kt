@@ -95,6 +95,7 @@ import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
+import com.codex.appgoodwords.data.RoutineDays
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.data.AppSearch
@@ -1501,6 +1502,8 @@ fun AppGoodWordsApp(
                                     focusId = destination.focusId.takeIf { destination.focusKind == SearchKind.ROUTINE },
                                     routines = routines,
                                     todayCounts = routineTodayCounts,
+                                    // 요일 알약으로 고른 지난날의 회수를 셉니다(2026-11-18).
+                                    checks = routineChecks,
                                     stats = routineStats,
                                     onOpenStats = { routine -> pushRoute(routineStatsRoute(routine.id)) },
                                     memos = routineMemos,
@@ -1538,11 +1541,15 @@ fun AppGoodWordsApp(
                                             snackbarHostState.showSnackbar(message)
                                         }
                                     },
-                                    onSaveMemo = { routine, body ->
+                                    onSaveMemo = { routine, body, date ->
                                         coroutineScope.launch {
-                                            val result = viewModel.saveRoutineMemo(routine.id, body)
+                                            val result = viewModel.saveRoutineMemo(routine.id, body, date)
                                             val message = if (result.isSuccess) {
-                                                "메모를 저장하고 수행 처리했습니다."
+                                                if (date == LocalDate.now()) {
+                                                    "메모를 저장하고 수행 처리했습니다."
+                                                } else {
+                                                    "메모를 저장하고 ${RoutineDays.label(date)} 수행으로 셌습니다."
+                                                }
                                             } else {
                                                 result.exceptionOrNull()?.message ?: "메모를 저장하지 못했습니다."
                                             }
@@ -1560,15 +1567,28 @@ fun AppGoodWordsApp(
                                             snackbarHostState.showSnackbar(message)
                                         }
                                     },
-                                    onCheckRoutine = { routine ->
+                                    onCheckRoutine = { routine, date ->
                                         coroutineScope.launch {
-                                            val result = viewModel.checkRoutine(routine.id)
-                                            val message = if (result.isSuccess) {
-                                                "${routine.title}: 오늘 ${result.getOrDefault(0)}회"
-                                            } else {
-                                                result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
+                                            val result = viewModel.checkRoutine(routine.id, date)
+                                            val check = result.getOrNull()
+                                            if (check == null) {
+                                                snackbarHostState.showSnackbar(
+                                                    result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
+                                                )
+                                                return@launch
                                             }
-                                            snackbarHostState.showSnackbar(message)
+                                            // 되돌리기(사용자가 정함, 2026-11-18): 날을 잘못 고르고 눌렀을 때 방금 그 한 번만 지웁니다.
+                                            val action = snackbarHostState.showSnackbar(
+                                                message = "${routine.title}: ${RoutineDays.spoken(check.date, LocalDate.now())} ${check.count}회",
+                                                actionLabel = "되돌리기",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (action == SnackbarResult.ActionPerformed) {
+                                                val undone = viewModel.undoRoutineCheck(check.syncId).getOrDefault(false)
+                                                snackbarHostState.showSnackbar(
+                                                    if (undone) "${routine.title}: 방금 한 번을 지웠습니다." else "이미 지워진 기록입니다."
+                                                )
+                                            }
                                         }
                                     },
                                     onMoveRoutine = { routine, up ->

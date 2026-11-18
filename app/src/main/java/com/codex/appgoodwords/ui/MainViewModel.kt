@@ -31,6 +31,7 @@ import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineCheckResult
 import com.codex.appgoodwords.data.FeedbackWriter
 import com.codex.appgoodwords.data.GoalTracking
 import com.codex.appgoodwords.data.GrowthReportEntity
@@ -1581,12 +1582,27 @@ class MainViewModel(
         container.repository.moveRoutineTo(routineId, targetIndex)
     }
 
-    suspend fun checkRoutine(routineId: Long): Result<Int> = runCatching {
-        container.repository.markRoutineDone(routineId)
+    /**
+     * [date]에 한 번 했다고 적습니다. 요일 알약으로 고른 지난날이면 그날입니다(사용자가 정함, 2026-11-18).
+     *
+     * 지난날 체크는 시각이 지난 때라 "바뀐 것만" 보내는 동기화에 잡히지 않습니다. 다음 동기화는 한 번 통째로 보냅니다.
+     */
+    suspend fun checkRoutine(routineId: Long, date: LocalDate = LocalDate.now()): Result<RoutineCheckResult> = runCatching {
+        val check = container.repository.checkRoutineOn(routineId, date) ?: error("루틴을 찾을 수 없습니다.")
+        if (date.isBefore(LocalDate.now())) container.settingsStore.requestFullPush()
+        check
     }
 
-    suspend fun saveRoutineMemo(routineId: Long, body: String): Result<Long> = runCatching {
-        container.repository.saveRoutineMemo(routineId, body)
+    /** 스낵바의 되돌리기. 방금 적은 그 한 번만 지웁니다. 이미 없으면 false. */
+    suspend fun undoRoutineCheck(syncId: String): Result<Boolean> = runCatching {
+        container.repository.undoRoutineCheck(syncId)
+    }
+
+    /** 메모를 남기고 [date]에 한 번 한 것으로 셉니다. 지난날이면 [checkRoutine]처럼 다음 동기화를 통째로 보냅니다. */
+    suspend fun saveRoutineMemo(routineId: Long, body: String, date: LocalDate = LocalDate.now()): Result<Long> = runCatching {
+        container.repository.saveRoutineMemo(routineId, body, date).also {
+            if (date.isBefore(LocalDate.now())) container.settingsStore.requestFullPush()
+        }
     }
 
     suspend fun deleteRoutineMemo(memoId: Long): Result<Int> = runCatching {
