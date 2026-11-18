@@ -17,7 +17,6 @@ import com.codex.appgoodwords.R
 import com.codex.appgoodwords.data.ContentItemEntity
 import com.codex.appgoodwords.data.DailyCoachLine
 import com.codex.appgoodwords.data.DailyCoachTip
-import com.codex.appgoodwords.data.DailySummary
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
@@ -40,8 +39,8 @@ object AppNotifications {
     /** 걷기를 기록하는 동안 떠 있는 알림. 소리 없이 자리만 지킵니다. */
     const val walkChannelId = "good_words_walk"
     const val walkNotificationId = 9_010
-    /** 일일 집계 알림. 날마다 같은 자리에 덮어써서 어제 것이 쌓이지 않습니다. */
-    const val dailySummaryNotificationId = 9_002
+    /** 하루 마무리 알림(사용자가 정함, 2026-11-19 — 예전 "일일 집계" 자리). 날마다 같은 자리에 덮어써서 어제 것이 쌓이지 않습니다. */
+    const val dayCloseNotificationId = 9_002
     const val actionMarkRead = "com.codex.appgoodwords.action.MARK_READ"
     const val actionCheckRoutine = "com.codex.appgoodwords.action.CHECK_ROUTINE"
     const val extraContentId = "extra_content_id"
@@ -62,6 +61,8 @@ object AppNotifications {
     const val extraOpenWalk = "extra_open_walk"
     /** 내 말에 코치가 답한 알림. 그 대화 화면까지 데려갑니다. */
     const val extraOpenDailyCoachTalk = "extra_open_daily_coach_talk"
+    /** 하루 마무리 화면을 엽니다(마무리 알림을 눌렀을 때). */
+    const val extraOpenDayClose = "extra_open_day_close"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -90,18 +91,18 @@ object AppNotifications {
 
         val summaryChannel = NotificationChannel(
             summaryChannelId,
-            "${context.getString(R.string.app_name)} 일일 집계",
+            "${context.getString(R.string.app_name)} 하루 마무리",
             NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "하루 동안 조회한 항목과 읽은 항목 집계"
+            description = "저녁에 오늘 한 것을 보고 하루를 마무리하는 알림"
         }
 
         val summarySilentChannel = NotificationChannel(
             summarySilentChannelId,
-            "${context.getString(R.string.app_name)} 조용한 일일 집계",
+            "${context.getString(R.string.app_name)} 조용한 하루 마무리",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "소리 없이 표시만 하는 일일 집계 알림"
+            description = "소리 없이 표시만 하는 하루 마무리 알림"
             setSound(null, null)
             enableVibration(false)
         }
@@ -591,55 +592,41 @@ object AppNotifications {
         NotificationManagerCompat.from(context).notify(notificationId, notification)
     }
 
-    fun showDailySummaryNotification(
+    /**
+     * 하루 마무리 알림(사용자가 정함, 2026-11-19 — 일일 집계 알림을 바꿈). 오늘 한 것 한 줄을 보이고, 누르면 하루 마무리 화면이
+     * 열립니다. 예전처럼 글귀 조회·읽음 수를 늘어놓지 않습니다 — 그 수는 오늘의 걸음과 이력에 있습니다.
+     *
+     * 그날 이미 마무리했으면 부르는 쪽([DailyAlarmReceiver])이 띄우지 않습니다.
+     */
+    fun showDayCloseNotification(
         context: Context,
-        summary: DailySummary,
+        text: String,
         soundEnabled: Boolean
     ) {
         if (!hasNotificationPermission(context)) return
 
-        val openAppIntent = Intent(context, MainActivity::class.java)
+        val openIntent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(extraOpenDayClose, true)
         val pendingIntent = PendingIntent.getActivity(
             context,
             9_001,
-            openAppIntent,
+            openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val style = NotificationCompat.InboxStyle()
-            .setSummaryText("조회 ${summary.totalShown}건 / 읽음 ${summary.totalConfirmed}건")
-
-        if (summary.shownItems.isEmpty()) {
-            style.addLine("조회: 없음")
-        } else {
-            style.addLine("조회 목록")
-            summary.shownItems.take(4).forEach { line ->
-                style.addLine("- ${line.title}${formatCount(line.count)}")
-            }
-        }
-
-        if (summary.confirmedItems.isEmpty()) {
-            style.addLine("읽음: 없음")
-        } else {
-            style.addLine("읽음 목록")
-            summary.confirmedItems.take(4).forEach { line ->
-                style.addLine("- ${line.title}${formatCount(line.count)}")
-            }
-        }
-
-        val summaryText = "조회 ${summary.totalShown}건 / 읽음 ${summary.totalConfirmed}건"
         val notification = NotificationCompat.Builder(context, summaryChannelFor(soundEnabled))
             .setSmallIcon(android.R.drawable.ic_menu_agenda)
-            .setContentTitle("오늘의 조회/읽음 집계")
-            .setContentText(summaryText)
-            .setStyle(style)
+            .setContentTitle("하루 마무리")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$text\n눌러서 오늘을 마무리해요"))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setSilent(!soundEnabled)
             .build()
 
-        NotificationManagerCompat.from(context).notify(dailySummaryNotificationId, notification)
+        NotificationManagerCompat.from(context).notify(dayCloseNotificationId, notification)
     }
 
     /**
@@ -739,5 +726,4 @@ object AppNotifications {
 
     private fun hasNotificationPermission(context: Context): Boolean = canPostNotifications(context)
 
-    private fun formatCount(count: Int): String = if (count > 1) " (${count}회)" else ""
 }

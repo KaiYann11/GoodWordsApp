@@ -101,6 +101,11 @@ class MainActivity : FragmentActivity() {
             intent?.removeExtra(AppNotifications.extraOpenWalk)
             viewModel.handleOpenWalkRequest()
         }
+        // 하루 마무리 알림(사용자가 정함, 2026-11-19)을 눌렀으면 마무리 화면으로.
+        if (intent?.getBooleanExtra(AppNotifications.extraOpenDayClose, false) == true) {
+            intent?.removeExtra(AppNotifications.extraOpenDayClose)
+            viewModel.handleOpenDayCloseRequest()
+        }
         val routineId = intent?.getLongExtra(AppNotifications.extraOpenRoutineId, 0L) ?: 0L
         if (routineId > 0L) {
             intent?.removeExtra(AppNotifications.extraOpenRoutineId)

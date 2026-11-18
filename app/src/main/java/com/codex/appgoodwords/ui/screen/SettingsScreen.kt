@@ -537,13 +537,15 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("일일 집계", style = MaterialTheme.typography.titleMedium)
+                                // 예전 "일일 집계"(글귀 조회·읽음 수)를 하루 마무리로 바꿨습니다(사용자가 정함, 2026-11-19). 시각은 같은 칸입니다.
+                                Text("하루 마무리 알림", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    text = "하루 동안 노출된 항목과 확인한 항목을 매일 한 번 리스트 형태로 집계해 알립니다.",
+                                    text = "정한 시각에 오늘 한 것을 알리고, 누르면 기분·못 적은 루틴·감사 한 줄·내일 할 일 하나로 하루를 " +
+                                        "마무리하는 화면이 열립니다. 그 시각 뒤에는 홈 오늘 칸에도 마무리 카드가 뜹니다(알림을 꺼도 카드는 뜹니다).",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 SettingSwitchRow(
-                                    title = "일일 집계 알림 사용",
+                                    title = "하루 마무리 알림 사용",
                                     checked = settings.dailySummaryEnabled,
                                     onCheckedChange = {
                                         onSettingsChanged(settings.copy(dailySummaryEnabled = it))
@@ -567,7 +569,7 @@ fun SettingsScreen(
                                         ).show()
                                     }
                                 ) {
-                                    Text("집계 발송 시간 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
+                                    Text("마무리 시각 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
                                 }
                             }
                         }
@@ -992,7 +994,7 @@ private fun SettingsSectionRow(
 
 private fun notificationsSummary(settings: ReminderSettings): String = buildList {
     add(if (settings.remindersEnabled) "주기 알림 ${formatInterval(settings.intervalMinutes)}마다" else "주기 알림 꺼짐")
-    if (settings.dailySummaryEnabled) add("일일 집계 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
+    if (settings.dailySummaryEnabled) add("하루 마무리 ${formatTime(settings.summaryHour, settings.summaryMinute)}")
 }.joinToString(" · ")
 
 private fun aiSummary(settings: AiFeedbackSettings): String = buildList {

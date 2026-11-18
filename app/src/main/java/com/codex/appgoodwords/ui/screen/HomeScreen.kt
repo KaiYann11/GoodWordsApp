@@ -173,6 +173,14 @@ fun HomeScreen(
     onPickMood: (DiaryMood) -> Unit = {},
     /** 찍어 둔 것이 있을 때만 지울 수 있습니다. */
     onClearMood: ((String) -> Unit)? = null,
+    /**
+     * 하루 마무리 카드를 둘지(사용자가 정함, 2026-11-19) — 마무리 시각이 지났고 그날 아직 마무리하지 않았을 때입니다.
+     * 마무리하면 그날은 사라집니다.
+     */
+    dayCloseDue: Boolean = false,
+    /** 카드의 "오늘 한 것" 한 줄. 아직 한 것이 없으면 null입니다. */
+    dayCloseLine: String? = null,
+    onOpenDayClose: () -> Unit = {},
     /** 번뜩인 것을 담는 칸을 띄웁니다. 여기가 앱에서 가장 빨리 닿는 자리입니다. */
     onOpenCapture: () -> Unit = {},
     /**
@@ -323,6 +331,10 @@ fun HomeScreen(
                             walkCard?.invoke()
                             // 3초짜리라 걸음 바로 아래에 둡니다. 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
                             TodayMoodCard(mood = todayMood, logs = todayMoodLogs, onPick = onPickMood, onClear = onClearMood)
+                            // 저녁의 마지막 차례라 오늘 칸 맨 아래입니다(사용자가 고름, 2026-11-19).
+                            if (dayCloseDue) {
+                                DayCloseCard(doneLine = dayCloseLine, onOpen = onOpenDayClose)
+                            }
                         }
 
                         // 코치가 보는 것은 오늘 칸의 걸음과 기분입니다. 그래서 바로 옆 칸입니다.

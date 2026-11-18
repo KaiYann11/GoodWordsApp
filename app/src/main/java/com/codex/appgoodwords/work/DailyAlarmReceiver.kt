@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.codex.appgoodwords.AppGoodWordsApplication
+import com.codex.appgoodwords.data.DayClose
+import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -12,7 +14,8 @@ import kotlinx.coroutines.launch
 /**
  * 하루 한 번 울리는 알람([DailyAlarm])이 울릴 때와, 알람을 다시 걸어야 할 때 불립니다.
  *
- * - **일일 집계가 울리면**: 오늘 집계를 알리고 내일 그 시각으로 다시 겁니다. 집계는 DB만 읽어 금방 끝납니다.
+ * - **하루 마무리 시각이 울리면**(예전 일일 집계): 오늘 한 것 한 줄로 하루 마무리를 알리고 내일 그 시각으로 다시 겁니다.
+ *   DB만 읽어 금방 끝납니다. 그날 이미 마무리했으면 알리지 않습니다.
  * - **돌아보기가 울리면**: 만들기와 뜸할 때 알리기를 곧바로 도는 일꾼에게 넘기고([ReminderScheduler.runGrowthNow])
  *   내일로 다시 겁니다. 만드는 데 1~2분이 걸리고 인터넷도 기다려야 하는데, 알람을 받는 자리는 몇 초 만에 닫힙니다.
  * - **기기를 다시 켜거나 앱이 새로 깔리면**: AlarmManager 예약은 그때 사라지므로 다시 겁니다.
@@ -32,10 +35,14 @@ class DailyAlarmReceiver : BroadcastReceiver() {
                 when (action) {
                     ACTION_DAILY_SUMMARY -> {
                         val settings = container.settingsStore.getSettings()
-                        if (settings.dailySummaryEnabled) {
-                            AppNotifications.showDailySummaryNotification(
+                        val today = LocalDate.now()
+                        // 하루 마무리 알림(사용자가 정함, 2026-11-19 — 예전 일일 집계). 그날 이미 마무리했으면 띄우지 않습니다.
+                        if (settings.dailySummaryEnabled && container.settingsStore.getDayClosedDate() != today.toString()) {
+                            AppNotifications.showDayCloseNotification(
                                 context = application,
-                                summary = container.repository.buildTodaySummary(),
+                                text = DayClose.notificationText(
+                                    DayClose.digestOf(container.database, container.settingsStore, today)
+                                ),
                                 soundEnabled = settings.notificationSoundEnabled
                             )
                         }

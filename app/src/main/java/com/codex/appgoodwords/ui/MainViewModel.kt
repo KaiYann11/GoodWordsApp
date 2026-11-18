@@ -32,6 +32,7 @@ import com.codex.appgoodwords.data.MoodLogEntity
 import com.codex.appgoodwords.data.ExposureEventEntity
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.RoutineCheckEntity
+import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineCheckResult
 import com.codex.appgoodwords.data.FeedbackWriter
 import com.codex.appgoodwords.data.GoalTracking
@@ -44,6 +45,7 @@ import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDraft
 import com.codex.appgoodwords.data.RoutineNudgeCalculator
+import com.codex.appgoodwords.data.RoutineSchedule
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.ServerConnectionInfo
 import com.codex.appgoodwords.data.ServerSyncResult
@@ -51,6 +53,7 @@ import com.codex.appgoodwords.data.ServerSyncSettings
 import com.codex.appgoodwords.data.DailyCoachPrompt
 import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyLoopCalculator
+import com.codex.appgoodwords.data.DayClose
 import com.codex.appgoodwords.data.DayComparison
 import com.codex.appgoodwords.data.DayComparisons
 import com.codex.appgoodwords.data.DayDigest
@@ -434,6 +437,58 @@ class MainViewModel(
         if (yesterday.score.date != today.score.date.minusDays(1)) return@combine null
         DayComparisons.of(today, yesterday).takeIf { it.shown }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * 홈에 하루 마무리 카드를 둘 때(사용자가 정함, 2026-11-19 — 알림을 마무리로 + 홈). 마무리 시각(설정의 하루 마무리 알림,
+     * 예전 일일 집계 시각)이 지났고 그날 아직 마무리하지 않았으면 true입니다. 1분마다 다시 봅니다.
+     */
+    val dayCloseDue: StateFlow<Boolean> = combine(
+        minuteTicks,
+        container.settingsStore.settingsFlow,
+        container.settingsStore.dayClosedDateFlow
+    ) { _, reminder, closedDate ->
+        DayClose.isDue(java.time.LocalDateTime.now(), reminder.summaryHour, reminder.summaryMinute, closedDate)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /**
+     * 하루 마무리의 루틴 칸 — 오늘 요일의 루틴 가운데 아직 안 적은 것([RoutineNudgeCalculator.restOfToday])과, 오늘 할 루틴이
+     * 하나라도 있는지(없으면 칸을 두지 않습니다).
+     */
+    val dayCloseRoutines: StateFlow<DayCloseRoutines> = combine(routines, routineChecks, currentDate) { list, checks, date ->
+        val zone = ZoneId.systemDefault()
+        val todayChecks = checks.filter { Instant.ofEpochMilli(it.checkedAt).atZone(zone).toLocalDate() == date }
+        DayCloseRoutines(
+            rest = RoutineNudgeCalculator.restOfToday(list, todayChecks, date),
+            hasToday = list.any { RoutineSchedule.isOn(it, date) }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DayCloseRoutines())
+
+    private val _openDayCloseRequest = MutableStateFlow(false)
+
+    /** 하루 마무리 알림을 눌러 왔습니다. 앱이 마무리 화면을 엽니다. */
+    val openDayCloseRequest: StateFlow<Boolean> = _openDayCloseRequest.asStateFlow()
+
+    fun handleOpenDayCloseRequest() {
+        _openDayCloseRequest.value = true
+    }
+
+    fun consumeOpenDayCloseRequest() {
+        _openDayCloseRequest.value = false
+    }
+
+    /**
+     * 하루를 마무리합니다(사용자가 정함, 2026-11-19). 감사 한 줄은 오늘의 감사 일기로, 내일 할 일 하나는 내일 날짜의 할 일로
+     * 남기고(둘 다 비어 있으면 남기지 않음), 그날을 마무리한 날로 적어 홈 카드와 알림을 거둡니다. 스낵바에 띄울 말을 돌려줍니다.
+     */
+    suspend fun finishDayClose(gratitude: String, tomorrowTodo: String): Result<String> = runCatching {
+        val today = LocalDate.now()
+        val diary = DayClose.gratitudeDiary(gratitude, today)?.also { container.repository.saveDiary(it) }
+        val todo = DayClose.tomorrowTodo(tomorrowTodo, today)?.let { draft ->
+            container.repository.saveTodo(draft).also(container.todoAlarmScheduler::sync)
+        }
+        container.settingsStore.setDayClosed(today)
+        DayClose.finishedMessage(wroteGratitude = diary != null, wroteTodo = todo != null)
+    }
 
     /** 오늘 받아 둔 한마디. 날이 바뀌면 빈 상태입니다. */
     val dailyCoach = container.settingsStore.dailyCoachStateFlow
@@ -1895,6 +1950,12 @@ class MainViewModel(
         const val WALK_REFRESH_GAP_MS = 60 * 1000L
     }
 }
+
+/** 하루 마무리의 루틴 칸에 쓰는 것. */
+data class DayCloseRoutines(
+    val rest: List<RoutineEntity> = emptyList(),
+    val hasToday: Boolean = false
+)
 
 /** 하루 요약에 넣을 기록들. combine이 한 번에 넷까지만 받아서 묶습니다. */
 private data class DayInputs(

@@ -126,6 +126,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 |---|---|
 | 이어 온 날수 · 하루 점수·오늘 한 것 · 하루의 걸음 | `DayStreak` · `DayScoreCalculator.digest` · `DailyLoopCalculator` |
 | 그날의 기분·하루 안의 흐름·기록 시각 | `DayMood` (`byDate`·`settledByDate`·`logsOn`·`recordedAt`) |
+| 하루 마무리(마무리 시각 — 설정의 하루 마무리 알림 시·분, 예전 일일 집계 — 이 지났고 그날 안 마쳤으면 홈 카드 · 오늘 한 것 한 줄 · 감사 한 줄은 그날 감사 일기 · 내일 할 일 하나 — 사용자가 정함, 2026-11-19) | `DayClose`(배경에서 셀 때 `digestOf`) · 마친 날은 이 기기에만 `SettingsStore.dayClosedDateFlow` · 알림 `AppNotifications.showDayCloseNotification`(마친 날은 `DailyAlarmReceiver`가 띄우지 않음) |
 | 어제의 나와 비교(오늘 지금까지와 어제 하루 전체 · 카드는 오늘이 많거나 같은 것만, 앞선 것이 없으면 "어제처럼 오늘도" · 기분·점수는 견주지 않음 — 사용자가 정함, 2026-11-19) · AI 하루 돌아보기의 [어제와 견준 것](두 날 숫자만) | `DayComparisons`(셈은 두 날 모두 `DayScoreCalculator.digest`) · `GrowthPrompt.digest`의 `comparisonLines`(하루 돌아보기만) |
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴(오늘 요일의 것만) · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
 | 루틴의 요일·시각(비트·ISO 번호·`HH:mm`·매일/평일/주말 이름, 없으면 매일·상시) · 시각 루틴을 알릴 때(30분 전, 지나도 체크가 없으면 1시간마다 세 번 — 사용자가 정함, 2026-11-17) | `RoutineSchedule` · `RoutineAlarms`. 연속은 하는 요일만 셉니다(`DayStreak`의 `isActive`) |
@@ -203,7 +204,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - **좋아하는 것의 갈래는 글귀의 카테고리가 아닙니다.** 알림에 보낼 카테고리 목록(`MainViewModel.categories`)과 카테고리 지우기
   (`ContentItemDao.clearCategory`의 `kept`)가 행복 칸을 뺍니다 — 섞이면 "음식"이 알림 카테고리에 끼고, 글귀 카테고리를 지울 때
   같은 이름의 갈래가 함께 지워집니다.
-- **정한 때에 오는 것은 알람이 깨웁니다** — 오늘의 한마디(`DailyCoachAlarm`), 일일 집계·AI 돌아보기 자동 실행·뜸할 때 알림
+- **정한 때에 오는 것은 알람이 깨웁니다** — 오늘의 한마디(`DailyCoachAlarm`), 하루 마무리(예전 일일 집계)·AI 돌아보기 자동 실행·뜸할 때 알림
   (`DailyAlarm`), 할 일(`TodoAlarmScheduler`), 시각을 정한 루틴(`RoutineAlarm` — 모든 루틴을 통틀어 알람 하나, 울리면 그때까지
   지난 것을 알리고 다음 것을 겁니다). 루틴 알람은 앱이 떠 있는 동안 루틴·체크가 바뀔 때마다 다시 겁니다(`RoutineAlarm.watch`,
   `AppGoodWordsApplication`) — 고치는 자리마다 부르면 하나를 빠뜨려 이미 한 루틴이 한 시간 뒤에 또 울립니다. 루틴 알람은 태그

@@ -95,7 +95,9 @@ import com.codex.appgoodwords.data.ExposureEventType
 import com.codex.appgoodwords.data.ExposureTrigger
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
+import com.codex.appgoodwords.data.DayClose
 import com.codex.appgoodwords.data.RoutineDays
+import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineStatsCalculator
 import com.codex.appgoodwords.data.TodoRepeats
 import com.codex.appgoodwords.data.SearchKind
@@ -122,6 +124,7 @@ import com.codex.appgoodwords.ui.screen.RoutineTab
 import com.codex.appgoodwords.ui.screen.AttachmentGalleryScreen
 import com.codex.appgoodwords.ui.screen.BookScreen
 import com.codex.appgoodwords.ui.screen.DailyCoachTalkScreen
+import com.codex.appgoodwords.ui.screen.DayCloseScreen
 import com.codex.appgoodwords.ui.screen.DaySummaryDialog
 import com.codex.appgoodwords.ui.screen.DetailScreen
 import com.codex.appgoodwords.ui.screen.ClassifyInboxDialog
@@ -205,6 +208,11 @@ private enum class AppTab(
      * 매일 손이 가는 것은 홈의 카드입니다.
      */
     WALK("걷기"),
+    /**
+     * 하루 마무리(사용자가 정함, 2026-11-19). 마무리 알림이나, 마무리 시각 뒤 홈 "오늘" 칸의 카드에서 엽니다. 하단 바에는 없고,
+     * 아래쪽 글 칸이 자판 위로 올라와야 해서 대화 화면처럼 하단 바를 두지 않습니다.
+     */
+    DAY_CLOSE("하루 마무리"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
     SETTINGS("설정"),
@@ -274,6 +282,12 @@ fun AppGoodWordsApp(
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
     val dayComparison by viewModel.dayComparison.collectAsStateWithLifecycle()
+    val todayDigest by viewModel.todayDigest.collectAsStateWithLifecycle()
+    val dayCloseDue by viewModel.dayCloseDue.collectAsStateWithLifecycle()
+    val dayCloseRoutines by viewModel.dayCloseRoutines.collectAsStateWithLifecycle()
+    val openDayCloseRequest by viewModel.openDayCloseRequest.collectAsStateWithLifecycle()
+    // 마무리를 저장하는 동안 [마무리]를 잠급니다(두 번 눌려 감사 일기·할 일이 둘씩 생기지 않게).
+    var dayCloseSaving by remember { mutableStateOf(false) }
     val walks by viewModel.walks.collectAsStateWithLifecycle()
     val stepCounts by viewModel.stepCounts.collectAsStateWithLifecycle()
     val walkGoalSteps by viewModel.walkGoalSteps.collectAsStateWithLifecycle()
@@ -601,6 +615,34 @@ fun AppGoodWordsApp(
     }
 
     /**
+     * 수행 +1 한 번과 되돌리기(사용자가 정함, 2026-11-18): 날을 잘못 고르고 눌렀을 때 방금 그 한 번만 지웁니다. 루틴 탭과 하루
+     * 마무리의 "했는데 못 적은 루틴"이 같은 길입니다.
+     */
+    fun checkRoutineOffersUndo(routine: RoutineEntity, date: LocalDate) {
+        coroutineScope.launch {
+            val result = viewModel.checkRoutine(routine.id, date)
+            val check = result.getOrNull()
+            if (check == null) {
+                snackbarHostState.showSnackbar(
+                    result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
+                )
+                return@launch
+            }
+            val action = snackbarHostState.showSnackbar(
+                message = "${routine.title}: ${RoutineDays.spoken(check.date, LocalDate.now())} ${check.count}회",
+                actionLabel = "되돌리기",
+                duration = SnackbarDuration.Short
+            )
+            if (action == SnackbarResult.ActionPerformed) {
+                val undone = viewModel.undoRoutineCheck(check.syncId).getOrDefault(false)
+                snackbarHostState.showSnackbar(
+                    if (undone) "${routine.title}: 방금 한 번을 지웠습니다." else "이미 지워진 기록입니다."
+                )
+            }
+        }
+    }
+
+    /**
      * 홈 글귀를 왼쪽으로 민 것(사용자가 정함, 2026-11-18). 아래에 되돌리기를 4초쯤 띄웁니다 — 밀고 나면 앞 글귀가 홈에서
      * 사라져 거기서는 읽음을 거둘 수 없습니다. 연달아 밀면 앞의 알림은 거두고 마지막 한 번만 되돌립니다.
      */
@@ -789,6 +831,14 @@ fun AppGoodWordsApp(
         if (openWalkRequest) {
             if (currentTab != AppTab.WALK) navStack = listOf(tabRoute(AppTab.HOME), tabRoute(AppTab.WALK))
             viewModel.consumeOpenWalkRequest()
+        }
+    }
+
+    // 하루 마무리 알림을 눌러 왔으면 마무리 화면으로. 뒤로 가면 홈입니다.
+    LaunchedEffect(openDayCloseRequest) {
+        if (openDayCloseRequest) {
+            if (currentTab != AppTab.DAY_CLOSE) navStack = listOf(tabRoute(AppTab.HOME), tabRoute(AppTab.DAY_CLOSE))
+            viewModel.consumeOpenDayCloseRequest()
         }
     }
 
@@ -1045,8 +1095,8 @@ fun AppGoodWordsApp(
             // 콤보를 담은 알림은 보관함과 같은 알약으로 그립니다(홈에서 글귀를 읽었을 때).
             snackbarHost = { SnackbarHost(snackbarHostState) { data -> AppSnackbar(data) } },
             bottomBar = {
-                // 대화 화면에는 하단 바를 두지 않습니다. 입력 칸이 자판 바로 위에 붙어야 합니다.
-                if (selectedItem == null && currentTab != AppTab.COACH_TALK) {
+                // 대화 화면과 하루 마무리에는 하단 바를 두지 않습니다. 글 칸이 자판 바로 위에 올라와야 합니다.
+                if (selectedItem == null && currentTab != AppTab.COACH_TALK && currentTab != AppTab.DAY_CLOSE) {
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp
@@ -1084,6 +1134,7 @@ fun AppGoodWordsApp(
                                                 AppTab.GROWTH, AppTab.COACH_TALK -> Icons.Outlined.AutoAwesome
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.WALK -> Icons.AutoMirrored.Outlined.DirectionsWalk
+                                                AppTab.DAY_CLOSE -> Icons.Outlined.EditNote
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS, AppTab.SYNC_BACKUPS -> Icons.Outlined.Settings
                                             },
@@ -1306,6 +1357,10 @@ fun AppGoodWordsApp(
                             moodPractice = moodPractice,
                             todayMood = todayMood,
                             todayMoodLogs = todayMoodLogs,
+                            // 마무리 시각 뒤, 그날 아직 마무리하지 않았으면 오늘 칸 맨 아래에 마무리 카드(사용자가 고름, 2026-11-19).
+                            dayCloseDue = dayCloseDue,
+                            dayCloseLine = DayClose.doneLine(todayDigest),
+                            onOpenDayClose = { pushRoute(tabRoute(AppTab.DAY_CLOSE)) },
                             onOpenCapture = { capturingIdea = true },
                             onPickMood = { mood -> viewModel.saveTodayMood(mood) },
                             // 일기에서 온 기분은 일기에서 고칩니다. 여기서 지울 수 있는 것은 찍어 둔 것뿐입니다.
@@ -1629,30 +1684,7 @@ fun AppGoodWordsApp(
                                             snackbarHostState.showSnackbar(message)
                                         }
                                     },
-                                    onCheckRoutine = { routine, date ->
-                                        coroutineScope.launch {
-                                            val result = viewModel.checkRoutine(routine.id, date)
-                                            val check = result.getOrNull()
-                                            if (check == null) {
-                                                snackbarHostState.showSnackbar(
-                                                    result.exceptionOrNull()?.message ?: "루틴을 체크하지 못했습니다."
-                                                )
-                                                return@launch
-                                            }
-                                            // 되돌리기(사용자가 정함, 2026-11-18): 날을 잘못 고르고 눌렀을 때 방금 그 한 번만 지웁니다.
-                                            val action = snackbarHostState.showSnackbar(
-                                                message = "${routine.title}: ${RoutineDays.spoken(check.date, LocalDate.now())} ${check.count}회",
-                                                actionLabel = "되돌리기",
-                                                duration = SnackbarDuration.Short
-                                            )
-                                            if (action == SnackbarResult.ActionPerformed) {
-                                                val undone = viewModel.undoRoutineCheck(check.syncId).getOrDefault(false)
-                                                snackbarHostState.showSnackbar(
-                                                    if (undone) "${routine.title}: 방금 한 번을 지웠습니다." else "이미 지워진 기록입니다."
-                                                )
-                                            }
-                                        }
-                                    },
+                                    onCheckRoutine = { routine, date -> checkRoutineOffersUndo(routine, date) },
                                     onMoveRoutine = { routine, up ->
                                         coroutineScope.launch {
                                             val result = viewModel.moveRoutine(routine.id, up)
@@ -2073,6 +2105,37 @@ fun AppGoodWordsApp(
                             onOpenSettings = {
                                 settingsSection = SettingsSection.AI
                                 pushRoute(tabRoute(AppTab.SETTINGS))
+                            }
+                        )
+
+                        // 하루 마무리(사용자가 정함, 2026-11-19 — 한 장에 네 칸). 기분·루틴은 누르는 즉시, 감사 한 줄과 내일 할 일은
+                        // [마무리]에서 남깁니다. 자판만큼 비키는 것은 화면이 하고, 아래 시스템 막대 몫은 겹쳐 세지 않습니다(대화 화면과 같게).
+                        AppTab.DAY_CLOSE -> DayCloseScreen(
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .consumeWindowInsets(innerPadding),
+                            today = todayDigest.score.date,
+                            digest = todayDigest,
+                            mood = todayMood,
+                            restRoutines = dayCloseRoutines.rest,
+                            hasRoutinesToday = dayCloseRoutines.hasToday,
+                            saving = dayCloseSaving,
+                            onPickMood = { mood -> viewModel.saveTodayMood(mood) },
+                            onCheckRoutine = { routine -> checkRoutineOffersUndo(routine, LocalDate.now()) },
+                            onFinish = { gratitude, tomorrowTodo ->
+                                coroutineScope.launch {
+                                    dayCloseSaving = true
+                                    val result = viewModel.finishDayClose(gratitude, tomorrowTodo)
+                                    dayCloseSaving = false
+                                    val message = result.getOrNull()
+                                    if (message == null) {
+                                        snackbarHostState.showSnackbar(result.exceptionOrNull()?.message ?: "마무리하지 못했습니다.")
+                                        return@launch
+                                    }
+                                    // 홈으로 돌아가면 마무리 카드는 사라져 있습니다.
+                                    navStack = listOf(tabRoute(AppTab.HOME))
+                                    snackbarHostState.showSnackbar(message)
+                                }
                             }
                         )
 

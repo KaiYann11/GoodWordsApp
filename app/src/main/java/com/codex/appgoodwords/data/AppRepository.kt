@@ -1253,17 +1253,6 @@ class AppRepository(
 
     fun todayRangeMillis(): Pair<Long, Long> = todayRange()
 
-    suspend fun buildTodaySummary(): DailySummary {
-        val (start, end) = todayRange()
-        val events = exposureEventDao.getEventsBetween(start, end)
-        val shown = summarize(events, ExposureEventType.SHOWN)
-        val confirmed = summarize(events, ExposureEventType.CONFIRMED)
-        return DailySummary(
-            shownItems = shown,
-            confirmedItems = confirmed
-        )
-    }
-
     suspend fun setFavorite(id: Long, isFavorite: Boolean) {
         contentItemDao.updateFavorite(id, isFavorite, System.currentTimeMillis())
     }
@@ -1326,24 +1315,6 @@ class AppRepository(
                 )
             )
         )
-    }
-
-    private fun summarize(
-        events: List<ExposureEventEntity>,
-        eventType: ExposureEventType
-    ): List<DailySummaryLine> {
-        return events
-            .filter { it.eventType == eventType }
-            .groupingBy { it.contentTitle }
-            .eachCount()
-            .entries
-            .sortedByDescending { it.value }
-            .map { (title, count) ->
-                DailySummaryLine(
-                    title = title,
-                    count = count
-                )
-            }
     }
 
     private fun todayRange(): Pair<Long, Long> {

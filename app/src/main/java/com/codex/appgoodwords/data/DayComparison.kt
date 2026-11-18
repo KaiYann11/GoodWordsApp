@@ -85,6 +85,10 @@ object DayComparisons {
         return DayComparison(today = today.score.date, rows = rows)
     }
 
+    /** 그날 한 것의 수([ComparedKind] 차례, 0은 뺌). 하루 마무리의 "오늘 한 것"도 이것을 씁니다([DayClose.doneLine]). */
+    fun countsOf(digest: DayDigest): List<Pair<ComparedKind, Int>> =
+        ComparedKind.entries.map { it to countOf(it, digest) }.filter { it.second > 0 }
+
     private fun countOf(kind: ComparedKind, digest: DayDigest): Int = when (kind) {
         ComparedKind.ROUTINE -> digest.score.routineChecks
         ComparedKind.QUOTE -> digest.score.quotesRead

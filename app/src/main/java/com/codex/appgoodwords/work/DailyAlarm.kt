@@ -7,7 +7,7 @@ import android.content.Intent
 import android.os.Build
 
 /**
- * 하루 한 번, 사용자가 정한 시각에 울리는 알람. 일일 집계와 AI 돌아보기가 씁니다.
+ * 하루 한 번, 사용자가 정한 시각에 울리는 알람. 하루 마무리(예전 일일 집계)와 AI 돌아보기가 씁니다.
  *
  * 1.18.0까지는 WorkManager의 24시간 반복 예약이었는데, 정한 시각을 지키지 못했습니다.
  * - 앱이 켜질 때마다 예약을 다시 걸었습니다(`UPDATE`). WorkManager는 이때 처음 건 시각을 그대로 두고 "남은 시간"만
@@ -54,7 +54,7 @@ class DailyAlarm private constructor(
     )
 
     companion object {
-        /** 일일 집계. [com.codex.appgoodwords.data.ReminderSettings.summaryHour]에 울립니다. */
+        /** 하루 마무리 알림(예전 일일 집계). [com.codex.appgoodwords.data.ReminderSettings.summaryHour]에 울립니다. */
         fun summary(context: Context): DailyAlarm =
             DailyAlarm(context, DailyAlarmReceiver.ACTION_DAILY_SUMMARY, 7_020)
 

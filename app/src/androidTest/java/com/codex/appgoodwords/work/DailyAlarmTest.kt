@@ -15,9 +15,12 @@ import com.codex.appgoodwords.data.AiFeedbackSettings
 import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReminderSettings
 import com.codex.appgoodwords.data.ReportPeriod
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -53,18 +56,31 @@ class DailyAlarmTest {
     }
 
     private fun reset() = runBlocking {
-        notificationManager.cancel(AppNotifications.dailySummaryNotificationId)
+        notificationManager.cancel(AppNotifications.dayCloseNotificationId)
         container.settingsStore.updateSettings(ReminderSettings())
+        // 마무리를 마친 날이 남아 있으면 마무리 알림이 뜨지 않습니다.
+        container.settingsStore.setDayClosed(LocalDate.now().minusDays(1))
         container.database.growthReportDao().clearAll()
         container.settingsStore.updateAiFeedbackSettings(AiFeedbackSettings())
         container.settingsStore.recordGrowthNudge(0L)
     }
 
     @Test
-    fun theSummaryAlarmPostsTheSummary() {
+    fun theSummaryAlarmPostsTheDayClose() {
         DailyAlarm.summary(context).set(System.currentTimeMillis() + 2_000)
 
-        assertTrue("일일 집계 알림이 뜨지 않았습니다.", waitFor { summaryShown() })
+        assertTrue("하루 마무리 알림이 뜨지 않았습니다.", waitFor { summaryShown() })
+        val shown = notificationManager.activeNotifications.first { it.id == AppNotifications.dayCloseNotificationId }
+        assertEquals("하루 마무리", shown.notification.extras.getString(android.app.Notification.EXTRA_TITLE))
+    }
+
+    @Test
+    fun aClosedDayGetsNoDayCloseNotification() {
+        // 그날 이미 마무리했으면(사용자가 정함, 2026-11-19) 알림이 다시 부르지 않습니다. 알람은 내일로 다시 걸립니다.
+        runBlocking { container.settingsStore.setDayClosed(LocalDate.now()) }
+        DailyAlarm.summary(context).set(System.currentTimeMillis() + 2_000)
+
+        assertFalse("마무리한 날에 마무리 알림이 떴습니다.", waitFor(timeoutMillis = 6_000L) { summaryShown() })
     }
 
     @Test
@@ -117,7 +133,7 @@ class DailyAlarmTest {
     }
 
     private fun summaryShown(): Boolean =
-        notificationManager.activeNotifications.any { it.id == AppNotifications.dailySummaryNotificationId }
+        notificationManager.activeNotifications.any { it.id == AppNotifications.dayCloseNotificationId }
 
     private fun waitFor(timeoutMillis: Long = 20_000L, check: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMillis

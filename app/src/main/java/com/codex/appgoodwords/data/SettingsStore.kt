@@ -88,6 +88,8 @@ class SettingsStore(
         val dailySteps = stringPreferencesKey("daily_steps")
         /** 이 걸음 수를 넘은 날을 걸은 날로 셉니다([Walking]). 하루의 축처럼 이 기기에만 둡니다. */
         val walkGoalSteps = intPreferencesKey("walk_goal_steps")
+        /** 하루 마무리를 마친 날(사용자가 정함, 2026-11-19). 이 기기에만 둡니다 — 홈 카드와 알림을 그날은 거둡니다. */
+        val dayClosedDate = stringPreferencesKey("day_closed_date")
         /** 걷기를 하루의 걸음에 한 번 넣었는지([addWalkStepOnce]). 사용자가 뺀 뒤에 다시 넣지 않으려고 둡니다. */
         val walkStepAdded = booleanPreferencesKey("walk_step_added")
         /**
@@ -280,6 +282,22 @@ class SettingsStore(
     suspend fun setWalkGoalSteps(steps: Int) {
         context.dataStore.edit { preferences ->
             preferences[Keys.walkGoalSteps] = steps.coerceAtLeast(1)
+        }
+    }
+
+    /**
+     * 하루 마무리를 마친 날(`yyyy-MM-dd`, 없으면 빈 글). 동기화하지 않습니다 — 마무리는 이 휴대폰의 저녁 차례이고, 다른 기기에서
+     * 마무리했다고 이 휴대폰의 알림을 거두면 모르고 지나갑니다.
+     */
+    val dayClosedDateFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.dayClosedDate].orEmpty()
+    }
+
+    suspend fun getDayClosedDate(): String = dayClosedDateFlow.first()
+
+    suspend fun setDayClosed(date: java.time.LocalDate) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.dayClosedDate] = date.toString()
         }
     }
 
