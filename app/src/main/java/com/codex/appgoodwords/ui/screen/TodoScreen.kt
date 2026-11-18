@@ -5,6 +5,8 @@ import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +25,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +51,8 @@ import com.codex.appgoodwords.data.TodoBucket
 import com.codex.appgoodwords.data.TodoBuckets
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
+import com.codex.appgoodwords.data.TodoRepeatKind
+import com.codex.appgoodwords.data.TodoRepeats
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -63,6 +69,13 @@ internal const val todoEditPhotoTag = "todo_edit_photo"
 
 /** 새 할 일을 언제로 둘지 고르는 칩. */
 internal fun todoWhenTag(name: String): String = "todo_when_$name"
+
+/** 적는 줄의 반복 칩(누르면 고르는 목록이 뜹니다)과 그 목록의 줄. */
+internal const val todoRepeatChipTag = "todo_repeat_chip"
+internal fun todoRepeatOptionTag(kind: TodoRepeatKind): String = "todo_repeat_option_${kind.name}"
+
+/** 고치기 창의 반복 칩. */
+internal fun todoEditRepeatTag(kind: TodoRepeatKind): String = "todo_edit_repeat_${kind.name}"
 
 /**
  * 새 할 일을 담을 날.
@@ -91,6 +104,9 @@ private enum class NewTodoWhen(val label: String) {
  *
  * 사진을 붙일 수 있습니다(사용자가 정함, 2026-11-15) — 적는 줄의 사진 단추로 만들 때, 고치기 창에서 나중에.
  * 할 일에는 따로 여는 상세 화면이 없어서, 사진은 목록 줄에 작게 두고 누르면 크게 봅니다.
+ *
+ * 반복도 같은 두 자리에서 겁니다(사용자가 정함, 2026-11-19) — 적는 줄의 날짜 칩 뒤 "↻ 반복" 칩(누르면 매주·2주마다·매달·매년),
+ * 나중에는 고치기 창의 반복 칸. 날짜가 있어야 반복하므로 "언젠가"에는 걸 수 없습니다.
  */
 @Composable
 fun TodoScreen(
@@ -117,8 +133,12 @@ fun TodoScreen(
     // 크게 보는 사진들과 처음 펼칠 자리.
     var viewing by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
     var newWhen by rememberSaveable { mutableStateOf(NewTodoWhen.TODAY.name) }
+    // 적는 줄에서 고른 반복. 추가하면 "반복 안 함"으로 돌아갑니다 — 남겨 두면 다음 할 일까지 모르게 반복됩니다.
+    var newRepeat by rememberSaveable { mutableStateOf(TodoRepeatKind.NONE.name) }
+    var repeatMenuOpen by remember { mutableStateOf(false) }
 
     val selectedWhen = NewTodoWhen.valueOf(newWhen)
+    val selectedRepeat = TodoRepeatKind.valueOf(newRepeat)
     val buckets = remember(todos, today) { TodoBuckets.group(todos, today) }
     val remainingToday = TodoBuckets.remainingCount(buckets[TodoBucket.TODAY].orEmpty())
     val remainingOverdue = TodoBuckets.remainingCount(buckets[TodoBucket.OVERDUE].orEmpty())
@@ -184,11 +204,13 @@ fun TodoScreen(
                                     TodoDraft(
                                         title = newTitle,
                                         dueDate = selectedWhen.dateFrom(today),
-                                        imageUris = newImages
+                                        imageUris = newImages,
+                                        repeat = selectedRepeat
                                     )
                                 )
                                 newTitle = ""
                                 newImages = emptyList()
+                                newRepeat = TodoRepeatKind.NONE.name
                             },
                             modifier = Modifier.testTag(todoAddButtonTag)
                         ) {
@@ -208,10 +230,38 @@ fun TodoScreen(
                         items(NewTodoWhen.entries) { choice ->
                             FilterChip(
                                 selected = selectedWhen == choice,
-                                onClick = { newWhen = choice.name },
+                                onClick = {
+                                    newWhen = choice.name
+                                    // 날짜가 없는 할 일은 반복할 수 없습니다.
+                                    if (choice.dateFrom(today) == null) newRepeat = TodoRepeatKind.NONE.name
+                                },
                                 label = { Text(choice.label) },
                                 modifier = Modifier.testTag(todoWhenTag(choice.name))
                             )
+                        }
+                        // 날짜 칩 뒤의 반복(사용자가 고름, 2026-11-19). 누르면 고르는 목록이 뜹니다.
+                        item {
+                            Box {
+                                FilterChip(
+                                    selected = selectedRepeat != TodoRepeatKind.NONE,
+                                    enabled = selectedWhen.dateFrom(today) != null,
+                                    onClick = { repeatMenuOpen = true },
+                                    label = { Text("↻ ${selectedRepeat.label} ▾") },
+                                    modifier = Modifier.testTag(todoRepeatChipTag)
+                                )
+                                DropdownMenu(expanded = repeatMenuOpen, onDismissRequest = { repeatMenuOpen = false }) {
+                                    TodoRepeatKind.choices.forEach { kind ->
+                                        DropdownMenuItem(
+                                            text = { Text(kind.label) },
+                                            onClick = {
+                                                newRepeat = kind.name
+                                                repeatMenuOpen = false
+                                            },
+                                            modifier = Modifier.testTag(todoRepeatOptionTag(kind))
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -274,6 +324,8 @@ fun TodoScreen(
     editing?.let { draft ->
         TodoEditDialog(
             draft = draft,
+            // 매달 31일처럼 들고 있는 날을 미리 보기에 보이려면 고치기 전의 규칙이 있어야 합니다.
+            original = todos.firstOrNull { it.id == draft.id },
             today = today,
             serverUrl = serverUrl,
             apiKey = apiKey,
@@ -364,6 +416,7 @@ private fun TodoRow(
                     )
                     val subtitle = listOfNotNull(
                         todo.dueDate.takeIf { it.isNotBlank() },
+                        TodoRepeats.label(todo.repeatRule, todo.dueDate)?.let { "↻ $it" },
                         todo.remindAt?.let { "알람 ${formatTime(it)}" },
                         todo.note.takeIf { it.isNotBlank() }
                     ).joinToString(" · ")
@@ -398,9 +451,11 @@ private fun TodoRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TodoEditDialog(
     draft: TodoDraft,
+    original: TodoEntity?,
     today: LocalDate,
     serverUrl: String,
     apiKey: String,
@@ -452,7 +507,8 @@ private fun TodoEditDialog(
                 if (current.dueDate != null) {
                     // 날짜를 지우면 알람도 함께 지웁니다. 붙을 날이 없는 알람은 언제 울릴지 정할 수 없습니다.
                     TextButton(
-                        onClick = { current = current.copy(dueDate = null, remindAt = null) },
+                        // 날짜가 없으면 반복할 날도 없습니다.
+                        onClick = { current = current.copy(dueDate = null, remindAt = null, repeat = TodoRepeatKind.NONE) },
                         modifier = Modifier.testTag(todoClearDateTag)
                     ) {
                         Text("날짜 지우기")
@@ -488,6 +544,32 @@ private fun TodoEditDialog(
                         Text("알람 지우기")
                     }
                 }
+                // 반복(사용자가 정함, 2026-11-19). 끝내면 다음 회차가 새 할 일로 생깁니다.
+                Text(text = "반복", style = MaterialTheme.typography.titleSmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TodoRepeatKind.choices.forEach { kind ->
+                        FilterChip(
+                            selected = current.repeat == kind,
+                            enabled = current.dueDate != null || kind == TodoRepeatKind.NONE,
+                            onClick = { current = current.copy(repeat = kind) },
+                            label = { Text(kind.label) },
+                            modifier = Modifier.testTag(todoEditRepeatTag(kind))
+                        )
+                    }
+                }
+                val repeatLabel = TodoRepeats.label(
+                    TodoRepeats.ruleFor(current.repeat, current.dueDate, original),
+                    current.dueDate?.toString()
+                )
+                Text(
+                    text = when {
+                        current.dueDate == null -> "날짜를 정해야 반복할 수 있습니다"
+                        repeatLabel != null -> "↻ $repeatLabel · 끝내면 다음 회차가 생깁니다"
+                        else -> "한 번만 합니다"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text(text = "사진", style = MaterialTheme.typography.titleSmall)
                 PhotoPicker(
                     images = current.imageUris,

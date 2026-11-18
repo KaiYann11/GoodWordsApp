@@ -129,6 +129,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 루틴 하나의 횟수·연속·요일 · 오늘 안 밟은 루틴(오늘 요일의 것만) · 루틴 차례 | `RoutineStatsCalculator` · `RoutineNudgeCalculator.restOfToday` · `RoutineOrder` |
 | 루틴의 요일·시각(비트·ISO 번호·`HH:mm`·매일/평일/주말 이름, 없으면 매일·상시) · 시각 루틴을 알릴 때(30분 전, 지나도 체크가 없으면 1시간마다 세 번 — 사용자가 정함, 2026-11-17) | `RoutineSchedule` · `RoutineAlarms`. 연속은 하는 요일만 셉니다(`DayStreak`의 `isActive`) |
 | 요일 알약이 가리키는 날(그 요일이 마지막으로 있었던 날, 오늘과 앞 엿새) · 지난날에 적는 체크의 시각(그날의 지금 시각) · 그날을 부르는 말("16일(월)") — 사용자가 정함, 2026-11-18 | `RoutineDays` · 체크 한 번은 `AppRepository.checkRoutineOn`(되돌리기 `undoRoutineCheck`) |
+| 할 일의 반복(꼴 `WEEKLY`·`BIWEEKLY`·`MONTHLY:31`·`YEARLY:02-29` · 다음 회차의 날 — 날짜 다음 회차 가운데 오늘이나 그 뒤의 첫 날, 매달·매년은 처음 고른 날 · 알람은 같은 날 차이·같은 시각 · 고칠 때 날짜가 그대로면 규칙을 지킴 · 끝낸 날이 지난 회차는 목록에서 접음 — 사용자가 정함, 2026-11-19) | 앱 `TodoRepeats` · 서버 `todoRepeatRule`·`nextRepeatDate`·`shiftTodoReminder`·`reanchorTodoRepeat` · 웹 `todoRepeatLabel`. 끝내는 것은 `AppRepository.toggleTodoDone`(되돌리기 `undoTodoRepeat`) |
 | 목표가 어떻게 따라가지는지(되새김·이어 둔 루틴·롤모델 글귀·홈 한 줄·들인 시간) | `GoalTracking` |
 | 목표에 들인 시간(분 표시·누적·최근 4주·직접 적은 시간·타이머로 잰 분 — 사용자가 정함, 2026-11-08) | 앱 `GoalTime` · 웹 `formatMinutes`·`recentGoalMinutes` |
 | 날짜별 독서 진행 · 언제 돌아봤는지(날짜 차) | `BookProgressCalculator` · `GrowthCadence` |
@@ -159,6 +160,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 날씨·기분·일기 종류와 **물음 문구·순서** | 앱 `DiaryTags.kt` · 웹 `weatherOptions`·`moodOptions`·`diaryKinds` |
 | 루틴 차례 옮기기 · 루틴 통계 · 날짜별 독서 | 앱 `RoutineOrder`·`RoutineStatsCalculator`·`BookProgressCalculator` · 서버·웹의 같은 이름 함수 |
 | 루틴의 요일·시각(`weekdays`·`timeOfDay`) | 앱 `AppDataJson`(ISO 번호·`HH:mm`) · `RoutineDraft`와 고치기 창(저장은 루틴을 통째로 새로 적어서, 빠지면 이름만 고쳐도 매일·상시로 돌아갑니다) · 서버 `normalizeRoutine`(빠뜨리면 병합 때마다 사라짐) · 같은 루틴 판정(앱 `SyncDeduplicator`·서버 `routineFingerprint`) · 웹 `routineStatsOf`·`routineScheduleLabel` · 오늘 요일로 거르는 곳(`restOfToday`·`RoutineWidget`·`RoutineDao.getRandomReminderRoutine`·루틴 탭의 오늘 진행) |
+| 할 일의 반복(`repeatRule`·`repeatedAt`) | 앱 `AppDataJson` · `TodoDraft`와 적는 줄·고치기 창(저장은 할 일을 통째로 새로 적어서, 빠지면 이름만 고쳐도 반복이 풀립니다 — `repeatedAt`도 지켜야 끝냄을 거뒀다 다시 끝낼 때 회차가 또 생기지 않습니다) · 서버 `normalizeTodo`(빠뜨리면 병합 때마다 사라짐)·`toggle-done`(웹에서 끝내면 서버가 다음 회차를 만듦)·`saveTodo`(웹 고치기는 반복 칸 없이 와서 있던 것을 지킴) · 같은 할 일 판정(앱 `SyncDeduplicator`·서버 `todoFingerprint`) · 웹 `todoCard` · 다음 회차의 날은 앱 `TodoRepeats.nextDate`와 서버 `nextRepeatDate`가 같아야 합니다 |
 | 루틴 합치기(사용자가 고른 두 루틴) | `AppRepository.mergeRoutines` — 체크는 바뀌지 않는 기록이라 남는 루틴 앞에 **같은 시각으로 새로 적고 옛 것은 삭제 표식**, 메모·목표 잇기는 고쳐 씁니다. 옮겨 적은 체크는 지난 시각이라 `SyncDelta`에 안 잡히므로 `SettingsStore.requestFullPush`로 다음 동기화를 통째로 보냅니다 |
 | **지난 시각으로 새로 적는 기록**(합치기로 옮긴 체크, 요일 알약으로 지난날에 적은 체크·메모의 체크) | 체크는 생긴 시각(`checkedAt`)으로 "바뀐 것만" 고르므로(`SyncDelta`) 적은 쪽이 `SettingsStore.requestFullPush`를 불러야 서버에 갑니다(`MainViewModel.checkRoutine`·`saveRoutineMemo`). 동기화 도중에 온 부탁은 `SyncCursor.fullPushRequests`로 알아보고 끝난 동기화가 지우지 않습니다 — `SyncCoordinator`가 시작할 때 읽은 번호를 `updateSyncCursor`에 넘겨야 합니다 |
 | 같은 내용 합치기(기분 `moodLogFingerprint` 포함, 행복한 순간은 `itemFingerprint`에 `createdAt`까지) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
@@ -182,6 +184,8 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 - **앱에서 덧붙기만 하는 기록(읽음·체크)을 지울 때도 한 편마다 표식을 남깁니다**(`recordDeletion` — 읽음 거두기
   `withdrawTodayConfirmed`, 체크 되돌리기 `undoRoutineCheck`). 합집합으로 합치므로 표식 없이 지우면 이미 올라간 것이 서버와 웹에
   남습니다(1.24.1까지 읽음 단추로 거둔 읽음이 그랬습니다).
+- **할 일을 끝내는 길은 `AppRepository.toggleTodoDone` 하나입니다**(웹은 서버 `toggle-done`). 반복하는 할 일의 다음 회차가 거기서
+  생깁니다(사용자가 정함, 2026-11-19). 알림 단추처럼 끝내는 길을 새로 내면서 `doneAt`만 고쳐 쓰면 반복이 조용히 끊깁니다.
 - 서버는 바뀐 레코드에만 새 리비전을 붙이고, 앱은 부분 응답을 `applyDelta`로 얹기만 합니다(없는 것은 지운 것이 아니라 안 바뀐 것).
 - **일기 답(`answers`)은 물음 자리에 맞춘 목록이라 가운데 빈칸을 버리지 않습니다**(`DiaryAnswers.normalize`·`normalizeAnswers`·
   `DiaryAnswerConverters`).

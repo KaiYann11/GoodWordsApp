@@ -292,7 +292,9 @@ app.addEventListener("click", async (event) => {
       showToast("할 일을 삭제했습니다.");
       await loadSnapshot(false);
     } else if (action === "toggle-todo") {
-      await api(`/api/todos/${id}/toggle-done`, { method: "POST" });
+      const toggled = await api(`/api/todos/${id}/toggle-done`, { method: "POST" });
+      // 반복하는 할 일을 끝내면 서버가 다음 회차를 만듭니다(사용자가 정함, 2026-11-19). 그 날을 알립니다.
+      if (toggled.nextTodo) showToast(`다음은 ${toggled.nextTodo.dueDate}`);
       await loadSnapshot(false);
     } else if (action === "edit-book") {
       state.editingBookId = id;
@@ -1083,6 +1085,8 @@ function todoCard(todo, today) {
   const overdue = !done && Boolean(todo.dueDate) && todo.dueDate < today;
   // 붙여 둔 사진. 웹은 보기만 합니다 — 할 일에 사진을 붙이는 것은 앱에서(사용자가 정함, 2026-11-15).
   const photos = todo.imageUris || [];
+  // 반복도 보기만 합니다 — 거는 것은 앱에서(사용자가 정함, 2026-11-19). 끝내면 서버가 다음 회차를 만듭니다.
+  const repeat = todoRepeatLabel(todo.repeatRule, todo.dueDate);
   return `
     <article class="item">
       <div class="itemHeader">
@@ -1090,6 +1094,7 @@ function todoCard(todo, today) {
           <h3>${escapeHtml(todo.title)}</h3>
           <div class="meta">
             <span class="chip">${escapeHtml(todo.dueDate || "언젠가")}</span>
+            ${repeat ? `<span class="chip">↻ ${escapeHtml(repeat)}</span>` : ""}
             ${overdue ? `<span class="chip danger">지남</span>` : ""}
             ${todo.remindAt ? `<span class="chip">알람 ${formatDate(todo.remindAt)}</span>` : ""}
             ${done ? `<span class="chip">완료 ${formatDate(todo.doneAt)}</span>` : ""}
@@ -1105,6 +1110,32 @@ function todoCard(todo, today) {
       </div>
     </article>
   `;
+}
+
+/**
+ * 할 일 반복의 이름 — "매주 수요일" · "2주마다 목요일" · "매달 25일" · "매년 12월 25일". 앱 `TodoRepeats.label`과 같습니다.
+ * 매주·2주마다의 요일은 그 할 일의 날짜에서 따옵니다. 읽을 수 없는 꼴이면 빈 글입니다.
+ */
+function todoRepeatLabel(rule, dueDate) {
+  const raw = String(rule || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dueDate || ""));
+  const weekday = match
+    ? ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"][
+      new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay()
+    ]
+    : "";
+  if (raw === "WEEKLY") return ["매주", weekday].filter(Boolean).join(" ");
+  if (raw === "BIWEEKLY") return ["2주마다", weekday].filter(Boolean).join(" ");
+  const monthly = /^MONTHLY:(\d{1,2})$/.exec(raw);
+  if (monthly && Number(monthly[1]) >= 1 && Number(monthly[1]) <= 31) return `매달 ${Number(monthly[1])}일`;
+  const yearly = /^YEARLY:(\d{2})-(\d{2})$/.exec(raw);
+  if (yearly) {
+    const [month, day] = [Number(yearly[1]), Number(yearly[2])];
+    // 2월 29일은 받습니다(윤년 2024의 달 길이로 봅니다). 어느 해에도 없는 날은 읽지 않습니다.
+    const longest = new Date(Date.UTC(2024, month, 0)).getUTCDate();
+    if (month >= 1 && month <= 12 && day >= 1 && day <= longest) return `매년 ${month}월 ${day}일`;
+  }
+  return "";
 }
 
 function renderDiaries() {

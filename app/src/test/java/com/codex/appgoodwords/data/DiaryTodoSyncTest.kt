@@ -44,7 +44,9 @@ class DiaryTodoSyncTest {
                     remindAt = 9_000L,
                     doneAt = 9_500L,
                     createdAt = 4_000L,
-                    imageUris = listOf("content://photo/receipt", "appgoodwords://attachment/${"a".repeat(64)}.jpg")
+                    imageUris = listOf("content://photo/receipt", "appgoodwords://attachment/${"a".repeat(64)}.jpg"),
+                    repeatRule = "MONTHLY:31",
+                    repeatedAt = 9_500L
                 )
             )
         )
@@ -53,6 +55,23 @@ class DiaryTodoSyncTest {
 
         assertEquals(snapshot.diaries, restored.diaries)
         assertEquals(snapshot.todos, restored.todos)
+    }
+
+    @Test
+    fun aTodoFromAnOlderServerOrFileDoesNotRepeat() {
+        // 형식 29까지의 서버와 내보낸 파일에는 반복 칸이 없습니다. 읽을 수 없는 꼴도 반복하지 않는 것으로 봅니다.
+        val json = AppDataJson.toJson(snapshotOf()).toString()
+            .replace(
+                "\"todos\":[]",
+                """"todos":[{"syncId":"old","title":"우체국","dueDate":"2026-08-12"},""" +
+                    """{"syncId":"odd","title":"약","dueDate":"2026-08-12","repeatRule":"DAILY"}]"""
+            )
+
+        val restored = AppDataJson.fromJsonText(json).todos.associateBy { it.syncId }
+
+        assertEquals("", restored.getValue("old").repeatRule)
+        assertNull(restored.getValue("old").repeatedAt)
+        assertEquals("", restored.getValue("odd").repeatRule)
     }
 
     @Test

@@ -33,6 +33,10 @@ interface TodoDao {
     @Query("DELETE FROM todos WHERE syncId IN (:syncIds)")
     suspend fun deleteBySyncIds(syncIds: List<String>)
 
+    /** 지운 수를 돌려줍니다. 없던 것에 삭제 표식을 남기지 않게 부르는 쪽이 봅니다. */
+    @Query("DELETE FROM todos WHERE syncId = :syncId")
+    suspend fun deleteBySyncId(syncId: String): Int
+
     @Query("DELETE FROM todos")
     suspend fun clearAll()
 }

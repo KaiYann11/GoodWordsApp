@@ -35,7 +35,17 @@ data class TodoEntity(
      * 붙여 둔 사진(사용자가 정함, 2026-11-15) — 반품할 영수증, 살 물건처럼 할 일을 할 때 볼 것.
      * 일기·보관함 사진과 같은 주소이고, 동기화 직전에 서버 주소로 바뀝니다([AttachmentUploader]).
      */
-    val imageUris: List<String> = emptyList()
+    val imageUris: List<String> = emptyList(),
+    /**
+     * 반복(사용자가 정함, 2026-11-19) — 매주·2주마다·매달·매년. 빈 글이면 한 번뿐인 할 일입니다.
+     * 꼴과 셈은 [TodoRepeats]에 있고, 끝내면 다음 회차가 새 할 일로 생깁니다.
+     */
+    val repeatRule: String = "",
+    /**
+     * 이 할 일을 끝내며 다음 회차를 만든 때. 만들었으면 끝냄을 거뒀다가 다시 끝내도 또 만들지 않습니다 — 다음 회차를
+     * 지워 반복을 멈춘 사람에게 되살아나지 않습니다. 끝냄을 바로 "되돌리기"하면 다음 회차와 함께 지워집니다.
+     */
+    val repeatedAt: Long? = null
 ) {
     val isDone: Boolean
         get() = doneAt != null

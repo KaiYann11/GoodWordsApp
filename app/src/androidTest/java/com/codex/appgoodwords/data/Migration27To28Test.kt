@@ -40,16 +40,18 @@ class Migration27To28Test {
             // ALTER가 실제로 걸리는 길을 시험하게 됩니다(그러지 않으면 "칸이 이미 있다"로 끝납니다).
             before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN weekdays")
             before.openHelper.writableDatabase.execSQL("ALTER TABLE routines DROP COLUMN timeOfDay")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN repeatRule")
+            before.openHelper.writableDatabase.execSQL("ALTER TABLE todos DROP COLUMN repeatedAt")
             before.openHelper.writableDatabase.version = 27
         } finally {
             before.close()
         }
 
         val after = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_27_28)
+            .addMigrations(AppDatabase.MIGRATION_27_28, AppDatabase.MIGRATION_28_29)
             .build()
         try {
-            assertEquals(28, after.openHelper.writableDatabase.version)
+            assertEquals(29, after.openHelper.writableDatabase.version)
             // 쓰던 루틴이 그대로 있어야 합니다. 비었으면 통째로 지워진 것입니다. 이미 있던 루틴은 매일·상시입니다.
             val routines = after.routineDao().getAll().sortedBy { it.id }
             assertEquals(listOf(stretching, water), routines)

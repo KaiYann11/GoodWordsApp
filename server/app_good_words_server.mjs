@@ -9,11 +9,12 @@ import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 const appName = "오늘의 글귀";
-// 루틴에 요일(weekdays)과 시각(time)이 생겼습니다(사용자가 정함, 2026-11-17). 옛 서버는 루틴의 모르는 칸을 버리고, 옛 앱은
-// 받은 요일·시각을 버린 채 루틴을 고쳐 올려 여기 것까지 매일·상시로 되돌리므로 형식을 올립니다. 같은 루틴 판정에도 요일·시각이
-// 들어갑니다. 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인
-// 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
-const schemaVersion = 29;
+// 할 일에 반복(repeatRule)과 다음 회차를 만든 때(repeatedAt)가 생겼습니다(사용자가 정함, 2026-11-19). 옛 서버는 할 일의 모르는
+// 칸을 버리고, 옛 앱은 받은 반복을 버린 채 할 일을 고쳐 올려 여기 것까지 한 번뿐인 할 일로 되돌리므로 형식을 올립니다. 같은 할 일
+// 판정에도 반복이 들어갑니다. 29는 루틴의 요일·시각(2026-11-17), 28은 할 일의 사진(2026-11-15), 27은 행복한 순간·좋아하는 것과
+// 기록끼리 이은 줄(2026-11-12), 26은 목표에 들인 시간(2026-11-08), 25는 걸음 수·걷기(2026-11-07), 24는 같은 날 기분을 합쳐
+// 지우는 옛 앱과 가르려고 올렸습니다(2026-10-29).
+const schemaVersion = 30;
 /** 한 번에 남길 수 있는 들인 시간(분). 앱 `GoalTime.MAX_MINUTES`와 같다 — 타이머를 잊어도 하루를 넘겨 쌓이지 않게. */
 const maxGoalTimeMinutes = 24 * 60;
 /** 시간 기록에 적은 글(과정)의 길이 한도. 하루치 일기보다 길 까닭이 없다. */
@@ -1167,7 +1168,13 @@ async function routeTodoMember(method, parts, request, response) {
       const existing = db.todos.find((candidate) => candidate.id === todoId);
       if (!existing) throw new HttpError(404, "할 일을 찾을 수 없습니다.");
       // 완료 시각으로 켜고 끕니다. 앱도 같은 방식이라 병합할 때 최근에 누른 쪽이 남습니다.
-      return saveTodo(db, { doneAt: existing.doneAt ? null : nowMs() }, todoId);
+      if (existing.doneAt) return saveTodo(db, { doneAt: null }, todoId);
+      // 반복하는 할 일을 끝내면 다음 회차를 같은 규칙으로 만듭니다(사용자가 정함, 2026-11-19). 앱에서 끝낸 것은 앱이 만듭니다.
+      const now = nowMs();
+      const next = nextRepeatTodo(db, existing, now);
+      if (next) upsert(db.todos, next);
+      const done = saveTodo(db, { doneAt: now, ...(next ? { repeatedAt: now } : {}) }, todoId);
+      return next ? { ...done, nextTodo: next } : done;
     });
     sendJson(response, 200, todo);
     return;
@@ -1815,9 +1822,10 @@ function diaryFingerprint(diary) {
 }
 
 // 사진도 본다(보관함·일기와 같게). 같은 날 "반품하기" 둘에 영수증이 하나씩 붙어 있으면 서로 다른 할 일이다.
-// 앱 SyncDeduplicator.todoFingerprint와 같아야 한다.
+// 반복도 본다(2026-11-19) — 같은 날 한 번뿐인 "월세"와 매달 "월세"는 다른 할 일이다. 휴대폰과 웹이 같은 회차를 끝내
+// 다음 회차를 둘 다 만들면 반복까지 같아 하나로 합쳐진다. 앱 SyncDeduplicator.todoFingerprint와 같아야 한다.
 function todoFingerprint(todo) {
-  return [text(todo.dueDate), norm(todo.title), norm(todo.note), todo.imageUris.join(",")].join("|");
+  return [text(todo.dueDate), norm(todo.title), norm(todo.note), todo.imageUris.join(","), text(todo.repeatRule)].join("|");
 }
 
 /**
@@ -2286,6 +2294,10 @@ function saveTodo(db, payload, todoId = null) {
   // normalizeTodo는 둘 중 하나만 없어도 null을 돌려주므로, 무엇이 빠졌는지 먼저 알려 줍니다.
   if (!text(merged.title)) throw new HttpError(400, "할 일 이름을 입력해 주세요.");
   if (!text(merged.dueDate)) throw new HttpError(400, "마감 날짜를 입력해 주세요.");
+  // 웹은 반복 칸 없이 고칩니다. 있던 반복은 지키되, 날짜를 옮겼으면 매달·매년의 날을 새 날짜로 다시 잡습니다(앱과 같게).
+  if (existing?.repeatRule && !("repeatRule" in payload)) {
+    merged.repeatRule = reanchorTodoRepeat(existing.repeatRule, existing.dueDate, text(merged.dueDate));
+  }
   const normalized = normalizeTodo(merged);
   upsert(db.todos, normalized);
   return normalized;
@@ -2747,7 +2759,133 @@ function normalizeTodo(todo) {
     createdAt: integer(todo.createdAt, nowMs()),
     // 붙여 둔 사진(사용자가 정함, 2026-11-15). 빠뜨리면 병합 때마다 사라진다.
     imageUris: stringList(todo.imageUris),
+    // 반복(사용자가 정함, 2026-11-19)과 다음 회차를 만든 때. 빠뜨리면 병합 때마다 한 번뿐인 할 일로 돌아간다.
+    // 날짜가 없으면 반복할 날이 없다(앱 TodoRepeats.ruleFor와 같게).
+    repeatRule: dueDate ? todoRepeatRule(todo.repeatRule) : "",
+    repeatedAt: nullableInteger(todo.repeatedAt),
   };
+}
+
+/**
+ * 할 일의 반복 규칙을 다듬는다. 읽을 수 없는 꼴은 빈 글(반복 안 함)이다. 앱 `TodoRepeats.parse`·`normalize`와 같은 꼴:
+ * `WEEKLY` · `BIWEEKLY` · `MONTHLY:31` · `YEARLY:02-29`.
+ */
+function todoRepeatRule(value) {
+  const rule = parseTodoRepeat(value);
+  if (!rule) return "";
+  if (rule.kind === "WEEKLY" || rule.kind === "BIWEEKLY") return rule.kind;
+  if (rule.kind === "MONTHLY") return `MONTHLY:${rule.day}`;
+  return `YEARLY:${String(rule.month).padStart(2, "0")}-${String(rule.day).padStart(2, "0")}`;
+}
+
+function parseTodoRepeat(value) {
+  const raw = text(value);
+  if (raw === "WEEKLY" || raw === "BIWEEKLY") return { kind: raw };
+  const monthly = /^MONTHLY:(\d{1,2})$/.exec(raw);
+  if (monthly) {
+    const day = Number(monthly[1]);
+    return day >= 1 && day <= 31 ? { kind: "MONTHLY", day } : null;
+  }
+  const yearly = /^YEARLY:(\d{2})-(\d{2})$/.exec(raw);
+  if (yearly) {
+    const month = Number(yearly[1]);
+    const day = Number(yearly[2]);
+    // 2월 29일은 받는다(윤년이 아니면 28일에 온다). 어느 해에도 없는 날은 받지 않는다.
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(2024, month)) return null;
+    return { kind: "YEARLY", month, day };
+  }
+  return null;
+}
+
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function isoDateOf(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * 다음 회차의 날 — `due` 다음의 회차 가운데 `today`이거나 그 뒤인 첫 날. 앱 `TodoRepeats.nextDate`와 같은 규칙이다
+ * (매달·매년은 처음 고른 날을 들고 있어 1월 31일의 매달은 2월 28일, 3월 31일로 간다).
+ */
+function nextRepeatDate(ruleText, due, today) {
+  const rule = parseTodoRepeat(ruleText);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text(due));
+  if (!rule || !match) return "";
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const occurrence = (step) => {
+    if (rule.kind === "WEEKLY" || rule.kind === "BIWEEKLY") {
+      const days = (rule.kind === "WEEKLY" ? 7 : 14) * step;
+      const date = new Date(Date.UTC(year, month - 1, day + days));
+      return isoDateOf(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+    }
+    if (rule.kind === "MONTHLY") {
+      const index = (month - 1) + step;
+      const targetYear = year + Math.floor(index / 12);
+      const targetMonth = (index % 12) + 1;
+      return isoDateOf(targetYear, targetMonth, Math.min(rule.day, daysInMonth(targetYear, targetMonth)));
+    }
+    const targetYear = year + step;
+    return isoDateOf(targetYear, rule.month, Math.min(rule.day, daysInMonth(targetYear, rule.month)));
+  };
+  let step = 1;
+  let candidate = occurrence(step);
+  // 날짜 글은 yyyy-MM-dd라 글자로 견주어도 날짜 차례와 같다.
+  while (candidate < today && step < 5200) {
+    step += 1;
+    candidate = occurrence(step);
+  }
+  return candidate;
+}
+
+/** 다음 회차의 알람 — 그 회차의 날에서 같은 날 차이·같은 시각(이 서버의 자리 시각). 앱 `TodoRepeats.shiftReminder`와 같다. */
+function shiftTodoReminder(remindAt, fromDate, toDate) {
+  if (remindAt == null) return null;
+  const at = new Date(remindAt);
+  const [fy, fm, fd] = fromDate.split("-").map(Number);
+  const [ty, tm, td] = toDate.split("-").map(Number);
+  const remindDay = Date.UTC(at.getFullYear(), at.getMonth(), at.getDate());
+  const offsetDays = Math.round((remindDay - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+  return new Date(ty, tm - 1, td + offsetDays, at.getHours(), at.getMinutes(), at.getSeconds(), at.getMilliseconds()).getTime();
+}
+
+/**
+ * 끝낸 할 일의 다음 회차(사용자가 정함, 2026-11-19). 반복하지 않거나, 이미 만들었거나, 날짜가 없으면 null.
+ * 이름·메모·사진·반복을 옮긴다 — 앱 `TodoRepeats.nextOf`와 같다.
+ */
+function nextRepeatTodo(db, todo, now) {
+  if (todo.repeatedAt || !todo.repeatRule || !todo.dueDate) return null;
+  const dueDate = nextRepeatDate(todo.repeatRule, todo.dueDate, todayDate());
+  if (!dueDate) return null;
+  return normalizeTodo({
+    id: nextId(db.todos),
+    syncId: randomUUID(),
+    updatedAt: now,
+    title: todo.title,
+    note: todo.note,
+    dueDate,
+    remindAt: shiftTodoReminder(todo.remindAt, todo.dueDate, dueDate),
+    doneAt: null,
+    createdAt: now,
+    imageUris: todo.imageUris,
+    repeatRule: todo.repeatRule,
+    repeatedAt: null,
+  });
+}
+
+/**
+ * 웹에서 날짜를 옮긴 반복 할 일은 새 날짜로 다시 건다(매달·매년의 날). 날짜가 그대로면 있던 규칙을 지킨다 —
+ * 앱 `TodoRepeats.ruleFor`와 같다.
+ */
+function reanchorTodoRepeat(ruleText, previousDue, dueDate) {
+  const rule = parseTodoRepeat(ruleText);
+  if (!rule || !dueDate) return "";
+  if (dueDate === previousDue || rule.kind === "WEEKLY" || rule.kind === "BIWEEKLY") return todoRepeatRule(ruleText);
+  const [, month, day] = dueDate.split("-").map(Number);
+  return rule.kind === "MONTHLY"
+    ? `MONTHLY:${day}`
+    : `YEARLY:${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function normalizeBook(book) {

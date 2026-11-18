@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
+import com.codex.appgoodwords.data.TodoRepeatKind
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -181,6 +182,63 @@ class TodoScreenTest {
 
         assertEquals("언젠가 배우기", saved?.title)
         assertNull("날짜가 붙었습니다.", saved?.dueDate)
+    }
+
+    @Test
+    fun theRepeatChipAfterTheDateChipsSavesARepeatingTodoAndResets() {
+        // 적는 줄의 날짜 칩 뒤 "↻ 반복"(사용자가 고름, 2026-11-19). 고르고 추가하면 다음 할 일은 다시 "반복 안 함"입니다.
+        val saved = mutableListOf<TodoDraft>()
+        compose.setContent { todoScreen(todos = emptyList(), onSaveTodo = { saved += it }) }
+
+        compose.onNodeWithTag(todoInputTag).performTextInput("월세 내기")
+        compose.onNodeWithTag(todoRepeatChipTag).performScrollTo().performClick()
+        compose.onNodeWithTag(todoRepeatOptionTag(TodoRepeatKind.MONTHLY)).performClick()
+        compose.onNodeWithTag(todoRepeatChipTag).assertTextEquals("↻ 매달 ▾")
+        compose.onNodeWithTag(todoAddButtonTag).performClick()
+        compose.onNodeWithTag(todoInputTag).performTextInput("물 사기")
+        compose.onNodeWithTag(todoAddButtonTag).performClick()
+
+        assertEquals(listOf(TodoRepeatKind.MONTHLY, TodoRepeatKind.NONE), saved.map { it.repeat })
+        assertEquals(today, saved.first().dueDate)
+        compose.onNodeWithTag(todoRepeatChipTag).assertTextEquals("↻ 반복 안 함 ▾")
+    }
+
+    @Test
+    fun aTodoWithoutADateCannotRepeat() {
+        var saved: TodoDraft? = null
+        compose.setContent { todoScreen(todos = emptyList(), onSaveTodo = { saved = it }) }
+
+        compose.onNodeWithTag(todoInputTag).performTextInput("여행 가기")
+        compose.onNodeWithTag(todoRepeatChipTag).performScrollTo().performClick()
+        compose.onNodeWithTag(todoRepeatOptionTag(TodoRepeatKind.YEARLY)).performClick()
+        // 언젠가로 바꾸면 반복이 풀리고 칩이 잠깁니다.
+        compose.onNodeWithTag(todoWhenTag("SOMEDAY")).performClick()
+        compose.onNodeWithTag(todoRepeatChipTag).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag(todoAddButtonTag).performClick()
+
+        assertNull(saved?.dueDate)
+        assertEquals(TodoRepeatKind.NONE, saved?.repeat)
+    }
+
+    @Test
+    fun aRepeatingTodoShowsItsRuleAndTheEditDialogCanChangeIt() {
+        var saved: TodoDraft? = null
+        compose.setContent {
+            todoScreen(
+                todos = listOf(TodoEntity(id = 1, syncId = "todo-1", title = "월세 내기", dueDate = "2026-08-31", repeatRule = "MONTHLY:31")),
+                onSaveTodo = { saved = it }
+            )
+        }
+
+        compose.onNodeWithText("2026-08-31 · ↻ 매달 31일").assertIsDisplayed()
+        compose.onNodeWithText("고치기").performClick()
+        compose.onNodeWithText("↻ 매달 31일 · 끝내면 다음 회차가 생깁니다").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(todoEditRepeatTag(TodoRepeatKind.WEEKLY)).performScrollTo().performClick()
+        // 2026-08-31은 월요일입니다.
+        compose.onNodeWithText("↻ 매주 월요일 · 끝내면 다음 회차가 생깁니다").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("저장").performClick()
+
+        assertEquals(TodoRepeatKind.WEEKLY, saved?.repeat)
     }
 
     @Test

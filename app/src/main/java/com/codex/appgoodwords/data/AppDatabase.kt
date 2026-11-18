@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GoalTimeLogEntity::class,
         RecordLinkEntity::class
     ],
-    version = 28,
+    version = 29,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -50,6 +50,19 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recordLinkDao(): RecordLinkDao
 
     companion object {
+        /**
+         * 할 일에 반복을 더합니다(사용자가 정함, 2026-11-19). 다른 표는 건드리지 않습니다.
+         *
+         * 규칙은 빈 글이 기본값입니다 — 이미 있는 할 일은 모두 한 번뿐입니다. 다음 회차를 만든 때는 NULL이 "아직"입니다.
+         * 칸 이름은 [TodoEntity.repeatRule]·[TodoEntity.repeatedAt]과 정확히 같아야 합니다.
+         */
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE todos ADD COLUMN repeatRule TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE todos ADD COLUMN repeatedAt INTEGER")
+            }
+        }
+
         /**
          * 루틴에 요일과 시각을 더합니다(사용자가 정함, 2026-11-17). 다른 표는 건드리지 않습니다.
          *

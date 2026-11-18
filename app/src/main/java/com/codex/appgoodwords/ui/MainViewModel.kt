@@ -66,6 +66,7 @@ import com.codex.appgoodwords.data.SyncBackupKind
 import com.codex.appgoodwords.data.SyncStatus
 import com.codex.appgoodwords.data.TodoDraft
 import com.codex.appgoodwords.data.TodoEntity
+import com.codex.appgoodwords.data.TodoToggle
 import com.codex.appgoodwords.ui.screen.AppLockState
 import com.codex.appgoodwords.ui.screen.HomeQuote
 import com.codex.appgoodwords.ui.screen.HomeQuoteSwipe
@@ -1286,10 +1287,26 @@ class MainViewModel(
         container.todoAlarmScheduler.sync(saved)
     }
 
-    suspend fun toggleTodoDone(id: Long): Result<Unit> = runCatching {
+    /**
+     * 끝냄을 뒤집습니다. 반복하는 할 일을 끝내 다음 회차가 생겼으면 결과의 `next`에 담겨 화면이 "다음은 …"과 되돌리기를
+     * 띄웁니다(사용자가 정함, 2026-11-19).
+     */
+    suspend fun toggleTodoDone(id: Long): Result<TodoToggle?> = runCatching {
+        val toggle = container.repository.toggleTodoDone(id) ?: return@runCatching null
         // 끝낸 일의 알람이 그대로 울리면 이미 한 일을 다시 하라고 하는 셈이다.
-        container.repository.toggleTodoDone(id)?.let(container.todoAlarmScheduler::sync)
-        Unit
+        container.todoAlarmScheduler.sync(toggle.todo)
+        // 다음 회차의 알람은 지금 겁니다. 다음에 앱을 열 때까지 기다리면 그 사이 울릴 것을 놓칩니다.
+        toggle.next?.let(container.todoAlarmScheduler::sync)
+        toggle
+    }
+
+    /** 반복하는 할 일을 끝낸 것을 바로 되돌립니다 — 끝냄을 거두고 그때 만든 다음 회차를 지웁니다(알람까지). */
+    suspend fun undoTodoRepeat(toggle: TodoToggle): Result<Boolean> = runCatching {
+        val next = toggle.next ?: return@runCatching false
+        container.todoAlarmScheduler.cancel(next)
+        val restored = container.repository.undoTodoRepeat(toggle.todo.id, next.syncId) ?: return@runCatching false
+        container.todoAlarmScheduler.sync(restored)
+        true
     }
 
     suspend fun deleteTodo(id: Long): Result<Unit> = runCatching {

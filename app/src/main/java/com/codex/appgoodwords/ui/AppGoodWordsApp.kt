@@ -97,6 +97,7 @@ import com.codex.appgoodwords.data.GrowthReportEntity
 import com.codex.appgoodwords.data.ReportPeriod
 import com.codex.appgoodwords.data.RoutineDays
 import com.codex.appgoodwords.data.RoutineStatsCalculator
+import com.codex.appgoodwords.data.TodoRepeats
 import com.codex.appgoodwords.data.SearchKind
 import com.codex.appgoodwords.data.AppSearch
 import com.codex.appgoodwords.data.Happy
@@ -1696,7 +1697,24 @@ fun AppGoodWordsApp(
                                         }
                                     },
                                     onToggleDone = { id ->
-                                        coroutineScope.launch { viewModel.toggleTodoDone(id) }
+                                        coroutineScope.launch {
+                                            // 반복하는 할 일을 끝내 다음 회차가 생겼으면 그 날과 되돌리기를 4초쯤 띄웁니다(사용자가 정함,
+                                            // 2026-11-19). 되돌리면 끝냄과 다음 회차를 함께 거둡니다.
+                                            val toggle = viewModel.toggleTodoDone(id).getOrNull() ?: return@launch
+                                            val next = toggle.next ?: return@launch
+                                            snackbarHostState.currentSnackbarData?.dismiss()
+                                            val action = snackbarHostState.showSnackbar(
+                                                message = TodoRepeats.nextMessage(next),
+                                                actionLabel = "되돌리기",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (action == SnackbarResult.ActionPerformed) {
+                                                val undone = viewModel.undoTodoRepeat(toggle).getOrDefault(false)
+                                                snackbarHostState.showSnackbar(
+                                                    if (undone) "끝냄과 다음 회차를 거뒀습니다." else "되돌리지 못했습니다."
+                                                )
+                                            }
+                                        }
                                     },
                                     onDeleteTodo = { id ->
                                         coroutineScope.launch {
