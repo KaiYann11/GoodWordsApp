@@ -1908,7 +1908,8 @@ function contentMemoCard(memo) {
   `;
 }
 
-/** 요일 이름. 일요일이 맨 앞입니다 — 앱 `RoutineStatsCalculator.WEEK_ORDER`와 차례가 같습니다. */
+/** 요일 이름. JS `getDay()` 번호(일=0 … 토=6)로 찾는 표라 늘어놓는 차례가 아닙니다 — 루틴의 요일은 월요일부터
+ * 늘어놓습니다(사용자가 정함, 2026-11-19; 앱 `RoutineStatsCalculator.WEEK_ORDER`). web.test.mjs가 이 첫 줄로 토막을 찾습니다. */
 const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
 /** 지역 시각 기준 `yyyy-MM-dd`. toISOString은 UTC라 저녁에 하루 밀립니다. */
@@ -1944,7 +1945,7 @@ function isoWeekdayOf(iso) {
 
 /**
  * 카드에 적을 요일·시각(사용자가 정함, 2026-11-17). 매일·상시면 빈 글자입니다 — 앱 카드처럼 고른 것만 적습니다.
- * 요일은 일요일부터 늘어놓고 매일·평일·주말은 이름으로 씁니다(앱 `RoutineSchedule.daysLabel`).
+ * 요일은 월요일부터 늘어놓고(2026-11-19) 매일·평일·주말은 이름으로 씁니다(앱 `RoutineSchedule.daysLabel`).
  */
 function routineScheduleLabel(routine) {
   const days = routineDays(routine.weekdays);
@@ -1953,7 +1954,7 @@ function routineScheduleLabel(routine) {
     key === "1,2,3,4,5,6,7" ? "" :
     key === "1,2,3,4,5" ? "평일" :
     key === "6,7" ? "주말" :
-    [7, 1, 2, 3, 4, 5, 6].filter((day) => days.includes(day)).map((day) => weekdayLabels[day % 7]).join("·");
+    days.map((day) => weekdayLabels[day % 7]).join("·");
   return [dayText, routine.time || ""].filter(Boolean).join(" · ");
 }
 

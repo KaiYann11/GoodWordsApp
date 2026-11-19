@@ -59,8 +59,9 @@ class RoutineScheduleTest {
         assertEquals("평일", RoutineSchedule.daysLabel(RoutineSchedule.WEEKDAYS))
         assertEquals("주말", RoutineSchedule.daysLabel(RoutineSchedule.WEEKEND))
         assertEquals("월·수·금", RoutineSchedule.daysLabel(RoutineSchedule.maskOf(listOf(1, 3, 5))))
-        // 루틴 탭의 요일 알약처럼 일요일부터입니다(웹 routineScheduleLabel과 같게).
-        assertEquals("일·월", RoutineSchedule.daysLabel(RoutineSchedule.maskOf(listOf(1, 7))))
+        // 루틴 탭의 요일 알약처럼 월요일부터입니다(사용자가 정함, 2026-11-19 — 웹 routineScheduleLabel과 같게).
+        assertEquals("월·일", RoutineSchedule.daysLabel(RoutineSchedule.maskOf(listOf(1, 7))))
+        assertEquals("화·일", RoutineSchedule.daysLabel(RoutineSchedule.maskOf(listOf(7, 2))))
     }
 
     @Test

@@ -499,7 +499,7 @@ class RoutineScreenTest {
         dayPill(DayOfWeek.SATURDAY).performClick()
         compose.onNodeWithText("주말 대청소").assertIsDisplayed()
         compose.onNodeWithText("헬스장").assertDoesNotExist()
-        // 토요일 알약은 지난 토요일(10일)입니다. 안 한 것·한 것은 그날 체크로 거릅니다(2026-11-18).
+        // 토요일 알약은 이번 주의 아직 오지 않은 토요일(17일)입니다. 그 요일에 하는 루틴은 보입니다(2026-11-19).
         compose.onNodeWithTag(routineFilterTag("UNDONE")).assertIsDisplayed()
 
         scrollToDay(null)
@@ -621,8 +621,9 @@ class RoutineScreenTest {
         dayPill(null).assertIsSelected()
     }
 
-    // ---- 지난날의 체크(사용자가 정함, 2026-11-18) ----
-    // 오늘(10월 16일)은 금요일입니다. 목요일 알약은 어제(15일), 토요일 알약은 엿새 전(10일)입니다.
+    // ---- 지난날의 체크(사용자가 정함, 2026-11-18)와 한 주(2026-11-19) ----
+    // 오늘(10월 16일)은 금요일이고, 이번 주는 12일(월)~18일(일)입니다. 목요일 알약은 어제(15일)이고, 토·일 알약은 아직 오지
+    // 않은 17·18일입니다 — 지난주 10·11일이 아닙니다.
 
     /** [date]의 [hour]시에 한 체크. */
     private fun checkOn(routineId: Long, date: LocalDate, hour: Int = 9) = RoutineCheckEntity(
@@ -638,13 +639,16 @@ class RoutineScreenTest {
         showRoutines(on = today)
 
         dayPill(DayOfWeek.FRIDAY).assertTextContains("오늘")
-        scrollToDay(DayOfWeek.SUNDAY)
-        dayPill(DayOfWeek.SUNDAY).assertTextContains("11일")
+        compose.onNodeWithTag(routineWeekLabelTag).assertTextContains("이번 주 · 10월 12일 ~ 18일")
+        scrollToDay(DayOfWeek.MONDAY)
+        dayPill(DayOfWeek.MONDAY).assertTextContains("12일")
         scrollToDay(DayOfWeek.THURSDAY)
         dayPill(DayOfWeek.THURSDAY).assertTextContains("15일")
-        // 오늘보다 뒤 요일은 지난주 날입니다 — 앞날을 가리키는 알약은 없습니다.
+        // 오늘 뒤 요일은 이번 주의 남은 날입니다 — 지난주 날로 미끄러지지 않습니다.
         scrollToDay(DayOfWeek.SATURDAY)
-        dayPill(DayOfWeek.SATURDAY).assertTextContains("10일")
+        dayPill(DayOfWeek.SATURDAY).assertTextContains("17일")
+        scrollToDay(DayOfWeek.SUNDAY)
+        dayPill(DayOfWeek.SUNDAY).assertTextContains("18일")
         scrollToDay(null)
         dayPill(null).assertTextContains("모든 요일")
     }
@@ -678,15 +682,94 @@ class RoutineScreenTest {
     }
 
     @Test
-    fun theOldestPillStillReadsItsOwnDay() {
-        // 토요일 알약은 엿새 전(10일)입니다. 셈하는 범위의 끝이고, 이레 전 것은 들어오지 않습니다.
-        showRoutines(on = today, checks = listOf(checkOn(1, today.minusDays(6)), checkOn(1, today.minusDays(7))))
+    fun anUpcomingDayShowsNoneOfLastWeeksChecksAndCannotBeWritten() {
+        // 토요일 알약은 아직 오지 않은 17일입니다. 지난 토요일(10일)의 체크가 거기 비치면 안 됩니다(사용자가 정함, 2026-11-19).
+        val written = mutableListOf<LocalDate>()
+        val lastSaturday = today.minusDays(6)
+        showRoutines(
+            routines = weekRoutines,
+            on = today,
+            checks = listOf(checkOn(1, lastSaturday), checkOn(2, lastSaturday)),
+            onCheckRoutine = { _, date -> written += date }
+        )
 
         scrollToDay(DayOfWeek.SATURDAY)
         dayPill(DayOfWeek.SATURDAY).performClick()
 
-        compose.onNodeWithText("10일(토) 진행").assertIsDisplayed()
-        compose.onNodeWithText("10일 1 회").assertExists()
+        compose.onNodeWithText("17일(토)").assertIsDisplayed()
+        compose.onNodeWithText("할 루틴 2개").assertIsDisplayed()
+        compose.onNodeWithText("아직 오지 않은 날 · 그날 와서 적습니다.").assertIsDisplayed()
+        // 그 요일에 하는 루틴은 보이고 회수는 모두 0입니다. 다음 차례도 없습니다.
+        compose.onNodeWithText("주말 대청소").assertIsDisplayed()
+        compose.onNodeWithText("헬스장").assertDoesNotExist()
+        assertEquals(2, compose.onAllNodesWithText("17일 0 회").fetchSemanticsNodes().size)
+        assertTrue(compose.onAllNodesWithText("다음 차례").fetchSemanticsNodes().isEmpty())
+        // 적을 수 없습니다.
+        compose.onAllNodesWithText("수행 +1")[0].assertIsNotEnabled().performClick()
+        assertTrue(written.isEmpty())
+    }
+
+    @Test
+    fun anUpcomingDaysMemoDialogOnlyShowsTheMemos() {
+        // 메모는 그날 한 번 한 것으로 세는데, 그날이 아직 오지 않았습니다.
+        val saved = mutableListOf<LocalDate>()
+        showRoutines(on = today, onSaveMemo = { _, _, date -> saved += date })
+
+        scrollToDay(DayOfWeek.SUNDAY)
+        dayPill(DayOfWeek.SUNDAY).performClick()
+        compose.onAllNodesWithText("메모 0")[0].performClick()
+
+        compose.onNodeWithText("아직 오지 않은 날입니다. 메모는 그날 와서 남깁니다.").assertIsDisplayed()
+        compose.onNodeWithText("메모 기록").assertDoesNotExist()
+        compose.onNodeWithText("메모 저장").assertDoesNotExist()
+        assertTrue(saved.isEmpty())
+    }
+
+    @Test
+    fun theLeftArrowOpensLastWeekOnTheSameWeekdayAndWritesThere() {
+        // 월요일 아침에 어제(일요일) 것을 적는 길입니다(사용자가 정함, 2026-11-19). 지난주는 모두 지난날입니다.
+        val written = mutableListOf<LocalDate>()
+        val lastFriday = today.minusDays(7)
+        showRoutines(
+            on = today,
+            checks = listOf(checkOn(1, lastFriday, 7), checkOn(1, lastFriday, 20)),
+            onCheckRoutine = { _, date -> written += date }
+        )
+        // 이번 주보다 앞으로는 가지 않습니다.
+        compose.onNodeWithTag(routineWeekNextTag).assertIsNotEnabled()
+
+        compose.onNodeWithTag(routineWeekPrevTag).performClick()
+
+        compose.onNodeWithTag(routineWeekLabelTag).assertTextContains("지난주 · 10월 5일 ~ 11일")
+        dayPill(DayOfWeek.FRIDAY).assertIsSelected().assertTextContains("9일")
+        compose.onNodeWithText("9일(금) 진행").assertIsDisplayed()
+        compose.onNodeWithText("9일 2 회").assertExists()
+
+        scrollToDay(DayOfWeek.SUNDAY)
+        dayPill(DayOfWeek.SUNDAY).assertTextContains("11일").performClick()
+        compose.onNodeWithText("11일(일) 진행").assertIsDisplayed()
+        compose.onAllNodesWithText("수행 +1")[0].performClick()
+        assertEquals(listOf(LocalDate.of(2026, 10, 11)), written)
+
+        // ›로 이번 주에 돌아오면 같은 요일(일요일)은 아직 오지 않은 18일입니다.
+        compose.onNodeWithTag(routineWeekNextTag).assertIsEnabled().performClick()
+        compose.onNodeWithTag(routineWeekLabelTag).assertTextContains("이번 주 · 10월 12일 ~ 18일")
+        dayPill(DayOfWeek.SUNDAY).assertIsSelected().assertTextContains("18일")
+        compose.onNodeWithTag(routineWeekNextTag).assertIsNotEnabled()
+    }
+
+    @Test
+    fun allDaysCountsTodaySoItBringsTheWeekBack() {
+        showRoutines(on = today)
+        compose.onNodeWithTag(routineWeekPrevTag).performClick()
+        compose.onNodeWithTag(routineWeekPrevTag).performClick()
+        compose.onNodeWithTag(routineWeekLabelTag).assertTextContains("2주 전 · 9월 28일 ~ 10월 4일")
+
+        scrollToDay(null)
+        dayPill(null).performClick()
+
+        compose.onNodeWithTag(routineWeekLabelTag).assertTextContains("이번 주 · 10월 12일 ~ 18일")
+        compose.onNodeWithText("오늘 진행").assertIsDisplayed()
     }
 
     @Test

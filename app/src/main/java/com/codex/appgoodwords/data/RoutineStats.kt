@@ -39,7 +39,7 @@ data class RoutineStatsReport(
     val firstDoneDate: LocalDate?,
     /** 마지막으로 밟은 날. 한 번도 없으면 null입니다. */
     val lastDoneDate: LocalDate?,
-    /** 일요일부터 토요일까지 일곱 칸. 달력(`RoutineCalendarCard`)과 차례가 같습니다. */
+    /** 월요일부터 일요일까지 일곱 칸([RoutineStatsCalculator.WEEK_ORDER]). 달력(`RoutineCalendarCard`)과 차례가 같습니다. */
     val weekdays: List<RoutineWeekdayCount>,
     /**
      * 가장 많이 밟은 요일. 없으면 null입니다.
@@ -73,15 +73,21 @@ object RoutineStatsCalculator {
      */
     const val TOP_WEEKDAY_MIN_DAYS = 2
 
-    /** 일요일이 맨 앞입니다. 달력 격자(`RoutineCalendarCard`)와 차례를 맞춥니다. */
+    /**
+     * 루틴의 한 주. 월요일이 맨 앞입니다(사용자가 정함, 2026-11-19 — "루틴의 요일은 월요일부터 일요일까지").
+     *
+     * 루틴 탭의 요일 줄과 그 주([RoutineDays.weekStart]), 고치기 창의 요일 칸, 카드의 요일 글자([RoutineSchedule.daysLabel]),
+     * 기록 화면의 요일 막대와 최근 4주, 홈 돌아보기의 루틴 달력이 모두 이 차례 하나를 씁니다. 웹 카드 글자
+     * (`routineScheduleLabel`)도 같은 차례입니다. AI 돌아보기 달력(`GrowthCalendarCard`)은 루틴 것이 아니라 일요일부터입니다.
+     */
     val WEEK_ORDER: List<DayOfWeek> = listOf(
-        DayOfWeek.SUNDAY,
         DayOfWeek.MONDAY,
         DayOfWeek.TUESDAY,
         DayOfWeek.WEDNESDAY,
         DayOfWeek.THURSDAY,
         DayOfWeek.FRIDAY,
-        DayOfWeek.SATURDAY
+        DayOfWeek.SATURDAY,
+        DayOfWeek.SUNDAY
     )
 
     fun build(

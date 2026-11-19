@@ -48,7 +48,8 @@ object RoutineSchedule {
     fun maskOf(isoDays: Iterable<Int>): Int = isoDays.filter { it in 1..7 }.fold(0) { mask, day -> mask or (1 shl (day - 1)) }
 
     /**
-     * 카드·통계에 적을 요일. 매일·평일·주말은 이름으로, 나머지는 일요일부터 늘어놓습니다(루틴 탭의 요일 알약과 같은 차례).
+     * 카드·통계에 적을 요일. 매일·평일·주말은 이름으로, 나머지는 월요일부터 늘어놓습니다(루틴 탭의 요일 알약과 같은 차례,
+     * 2026-11-19부터). 월·일 루틴은 "월·일"입니다.
      */
     fun daysLabel(mask: Int): String = when (normalized(mask)) {
         EVERY_DAY -> "매일"
