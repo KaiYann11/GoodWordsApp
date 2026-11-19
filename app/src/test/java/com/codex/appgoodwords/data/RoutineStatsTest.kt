@@ -95,10 +95,11 @@ class RoutineStatsTest {
         assertEquals(DayOfWeek.MONDAY, report.topWeekday)
     }
 
-    @Test fun theWeekRunsFromSunday() {
-        // 달력 격자와 차례가 같아야 같은 요일을 두 화면에서 다른 자리로 보지 않습니다.
-        assertEquals(DayOfWeek.SUNDAY, build(emptyList()).weekdays.first().dayOfWeek)
-        assertEquals(DayOfWeek.SATURDAY, build(emptyList()).weekdays.last().dayOfWeek)
+    @Test fun theWeekRunsFromMonday() {
+        // 루틴의 요일은 월요일부터입니다(사용자가 정함, 2026-11-19). 달력 격자·요일 줄과 차례가 같아야 같은 요일을 두 화면에서
+        // 다른 자리로 보지 않습니다.
+        assertEquals(DayOfWeek.MONDAY, build(emptyList()).weekdays.first().dayOfWeek)
+        assertEquals(DayOfWeek.SUNDAY, build(emptyList()).weekdays.last().dayOfWeek)
         assertEquals(7, build(emptyList()).weekdays.size)
     }
 

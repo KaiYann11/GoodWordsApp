@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -53,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -110,6 +113,11 @@ internal fun routineDayTag(day: DayOfWeek?): String = "routine_day_${day?.name ?
 
 /** 요일 알약 줄. 옆으로 밀리는 줄이라 화면 밖 알약은 굴려서 짚습니다. */
 internal const val routineDayRowTag = "routine_day_row"
+
+/** 요일 줄 위의 주 넘기기(‹ ›)와 보이는 주의 이름(사용자가 정함, 2026-11-19). */
+internal const val routineWeekPrevTag = "routine_week_prev"
+internal const val routineWeekNextTag = "routine_week_next"
+internal const val routineWeekLabelTag = "routine_week_label"
 
 /** 카드에 적힌 정해 둔 시각. */
 internal fun routineTimeTag(routineId: Long): String = "routine_time_$routineId"
@@ -249,27 +257,46 @@ fun RoutineScreen(
 
     // 요일 알약. null이면 오늘을 따릅니다 — 자정을 넘겨 열어 둬도 새 오늘로 넘어갑니다. [ALL_DAYS]면 전체입니다.
     var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    // 요일 줄이 보이는 주(사용자가 정함, 2026-11-19). 0이 이번 주, -1이 지난주입니다. 이번 주보다 앞으로는 가지 않습니다.
+    var weekOffset by rememberSaveable { mutableIntStateOf(0) }
     val selectedDay: DayOfWeek? = when (pickedDay) {
         null -> today.dayOfWeek
         ALL_DAYS -> null
         else -> DayOfWeek.valueOf(pickedDay!!)
     }
-    // 알약이 가리키는 날(사용자가 정함, 2026-11-18): 그 요일이 마지막으로 있었던 날입니다 — 오늘이거나 앞 엿새 안.
-    // 전체는 오늘입니다. 고른 날의 카드·거르개·진행이 그날 체크를 따르고, 수행 +1은 그날로 적힙니다.
-    fun dateOf(day: DayOfWeek?): LocalDate = day?.let { RoutineDays.latest(it, today) } ?: today
+    // 알약이 가리키는 날(사용자가 정함, 2026-11-19): 보이는 주(월~일)의 그 요일입니다. 오늘 앞 날은 그날 체크를 따르고
+    // 수행 +1이 그날로 적힙니다(2026-11-18). 오늘 뒤 날은 아직 오지 않은 날이라 회수가 모두 0이고 적을 수 없습니다 — 지난주
+    // 같은 요일의 기록이 거기 비치지 않습니다. 전체는 오늘입니다.
+    val weekStart = RoutineDays.weekOf(today, weekOffset)
+    fun dateOf(day: DayOfWeek?): LocalDate = day?.let { RoutineDays.dateIn(weekStart, it) } ?: today
     val viewDate = dateOf(selectedDay)
-    val viewingPast = viewDate != today
-    val pastCounts = remember(checks, today, zoneId) {
-        RoutineDays.countsByDate(checks, today.minusDays(RoutineDays.PAST_DAYS), today.minusDays(1), zoneId)
+    val viewingPast = viewDate.isBefore(today)
+    val viewingUpcoming = viewDate.isAfter(today)
+    // 보이는 주에서 오늘 앞의 날들. 오늘은 [todayCounts]를 쓰고, 앞날은 셀 것이 없습니다.
+    val pastCounts = remember(checks, weekStart, today, zoneId) {
+        val weekEnd = weekStart.plusDays(6)
+        val lastPast = today.minusDays(1)
+        RoutineDays.countsByDate(checks, weekStart, if (weekEnd.isBefore(lastPast)) weekEnd else lastPast, zoneId)
     }
-    fun countsOn(date: LocalDate): Map<Long, Int> = if (date == today) todayCounts else pastCounts[date].orEmpty()
+    fun countsOn(date: LocalDate): Map<Long, Int> = when {
+        date == today -> todayCounts
+        date.isAfter(today) -> emptyMap()
+        else -> pastCounts[date].orEmpty()
+    }
     val viewCounts = countsOn(viewDate)
+    // 주를 넘겨도 고른 요일은 그대로 둡니다 — 목요일을 보다 ‹를 누르면 지난주 목요일입니다. 전체였으면 오늘 요일로 옮깁니다.
+    fun moveWeek(delta: Int) {
+        val keep = selectedDay ?: today.dayOfWeek
+        val target = (weekOffset + delta).coerceAtMost(0)
+        weekOffset = target
+        pickedDay = if (target == 0 && keep == today.dayOfWeek) null else keep.name
+    }
     fun onDay(routine: RoutineEntity, day: DayOfWeek?): Boolean = day == null || RoutineSchedule.isOn(routine.weekdays, day)
 
     // 그날 요일에 하는 루틴(사용자가 정함, 2026-11-17). 진행은 이 줄만 셉니다 — 오늘이면 홈·위젯과 같습니다.
     val dayRoutines = sortedRoutines.filter { RoutineSchedule.isOn(it, viewDate) }
-    // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다. 지난날에는 차례가 없습니다.
-    val nextRoutine = if (viewingPast) null else dayRoutines.firstOrNull { (viewCounts[it.id] ?: 0) == 0 }
+    // 위에서부터 아직 오늘 하지 않은 첫 루틴이 지금 할 차례입니다. 지난날과 앞날에는 차례가 없습니다.
+    val nextRoutine = if (viewDate != today) null else dayRoutines.firstOrNull { (viewCounts[it.id] ?: 0) == 0 }
     val nextRoutineId = nextRoutine?.id
     val doneCount = dayRoutines.count { (viewCounts[it.id] ?: 0) > 0 }
 
@@ -303,6 +330,7 @@ fun RoutineScreen(
         if (focused != null && rows.none { it.routine.id == focusId }) {
             selectedFilter = RoutineFilter.ALL.name
             selectedCategory = null
+            weekOffset = 0
             pickedDay = if (RoutineSchedule.isOn(focused, today)) null else ALL_DAYS
         }
     }
@@ -402,7 +430,8 @@ fun RoutineScreen(
             onDismiss = { memoRoutineId = null },
             onSaveMemo = { body -> onSaveMemo(memoRoutine, body, viewDate) },
             onDeleteMemo = onDeleteMemo,
-            pastDay = viewDate.takeIf { viewingPast }
+            pastDay = viewDate.takeIf { viewingPast },
+            upcomingDay = viewDate.takeIf { viewingUpcoming }
         )
     }
 
@@ -459,7 +488,8 @@ fun RoutineScreen(
                     totalCount = dayRoutines.size,
                     nextRoutine = nextRoutine,
                     restDay = dayRoutines.isEmpty(),
-                    pastDay = viewDate.takeIf { viewingPast }
+                    pastDay = viewDate.takeIf { viewingPast },
+                    upcomingDay = viewDate.takeIf { viewingUpcoming }
                 )
             }
 
@@ -467,8 +497,43 @@ fun RoutineScreen(
             // 그러지 않으면 "공부 11"을 눌렀는데 셋만 보여, 나머지가 어디 갔는지 찾게 됩니다.
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있고, 일요일부터 늘어놓습니다(달력과 같은 차례).
-                    // 알약 아랫줄은 그 알약이 가리키는 날입니다(2026-11-18) — 오늘보다 뒤 요일은 지난주 날짜가 적힙니다.
+                    // 주 넘기기(사용자가 정함, 2026-11-19). 이번 주가 아니면 ›로 돌아옵니다. 이번 주보다 앞으로는 가지 않습니다 —
+                    // 앞날은 이번 주의 남은 날만 미리 봅니다.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { moveWeek(-1) },
+                            modifier = Modifier.testTag(routineWeekPrevTag)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+                                contentDescription = "이전 주"
+                            )
+                        }
+                        Text(
+                            text = RoutineDays.weekLabel(weekStart, today),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag(routineWeekLabelTag),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                        IconButton(
+                            onClick = { moveWeek(1) },
+                            enabled = weekOffset < 0,
+                            modifier = Modifier.testTag(routineWeekNextTag)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                contentDescription = "다음 주"
+                            )
+                        }
+                    }
+                    // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있고, 월요일부터 늘어놓습니다(2026-11-19).
+                    // 알약 아랫줄은 보이는 주의 그날입니다 — 오늘 뒤 날은 아직 오지 않은 날이라 지난주 기록이 비치지 않습니다.
                     val dayOptions: List<DayOfWeek?> = listOf<DayOfWeek?>(null) + RoutineStatsCalculator.WEEK_ORDER
                     val dayRowState = rememberLazyListState(
                         initialFirstVisibleItemIndex = (dayOptions.indexOf(today.dayOfWeek) - 2).coerceAtLeast(0)
@@ -495,12 +560,12 @@ fun RoutineScreen(
                                 },
                                 selected = selectedDay == day,
                                 onClick = {
-                                    pickedDay = if (day == null) {
-                                        ALL_DAYS
-                                    } else if (day == today.dayOfWeek) {
-                                        null
+                                    if (day == null) {
+                                        // 전체는 오늘로 셉니다. 다른 주를 보고 있었으면 이번 주로 돌아옵니다.
+                                        weekOffset = 0
+                                        pickedDay = ALL_DAYS
                                     } else {
-                                        day.name
+                                        pickedDay = if (weekOffset == 0 && day == today.dayOfWeek) null else day.name
                                     }
                                 },
                                 modifier = Modifier.testTag(routineDayTag(day))
@@ -563,16 +628,25 @@ fun RoutineScreen(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // 그 요일에 하는 루틴이 아예 없으면 거르개 이야기보다 먼저 그렇게 말합니다. 쉬는 날에 "안 한 것"을 골라
+                            // 두었다고 "모두 밟았습니다"라고 하면 사실이 아닙니다.
+                            val noneThatDay = sortedRoutines.none {
+                                onDay(it, selectedDay) && RoutineCategories.matches(it, currentCategory)
+                            }
                             Text(
                                 text = when {
+                                    noneThatDay && selectedDay != null && viewDate == today ->
+                                        "오늘 하는 ${scope}루틴이 없습니다."
+                                    noneThatDay && selectedDay != null ->
+                                        "${RoutineSchedule.shortLabel(selectedDay)}요일에 하는 ${scope}루틴이 없습니다."
+                                    noneThatDay -> "${scope}루틴이 없습니다."
                                     currentFilter == RoutineFilter.UNDONE ->
                                         "${RoutineDays.spoken(viewDate, today)} ${scope}루틴을 모두 밟았습니다."
+                                    currentFilter == RoutineFilter.DONE && viewingUpcoming ->
+                                        "아직 오지 않은 날이라 밟은 ${scope}루틴이 없습니다."
                                     currentFilter == RoutineFilter.DONE && viewingPast ->
                                         "${RoutineDays.label(viewDate)}에 밟은 ${scope}루틴이 없습니다."
                                     currentFilter == RoutineFilter.DONE -> "아직 밟은 ${scope}루틴이 없습니다."
-                                    selectedDay == today.dayOfWeek -> "오늘 하는 ${scope}루틴이 없습니다."
-                                    selectedDay != null ->
-                                        "${RoutineSchedule.shortLabel(selectedDay)}요일에 하는 ${scope}루틴이 없습니다."
                                     else -> "${scope}루틴이 없습니다."
                                 },
                                 style = MaterialTheme.typography.titleMedium
@@ -596,7 +670,8 @@ fun RoutineScreen(
                         focused = row.routine.id == focusId,
                         focusKey = focusId,
                         dayCount = viewCounts[row.routine.id] ?: 0,
-                        dayLabel = if (viewingPast) "${viewDate.dayOfMonth}일" else "오늘",
+                        dayLabel = if (viewDate == today) "오늘" else "${viewDate.dayOfMonth}일",
+                        canCheck = !viewingUpcoming,
                         stats = stats[row.routine.id],
                         onOpenStats = { onOpenStats(row.routine) },
                         memoCount = memosByRoutine[row.routine.id]?.size ?: 0,
@@ -615,12 +690,14 @@ fun RoutineScreen(
 }
 
 /**
- * 오늘(또는 요일 알약으로 고른 지난날) 어디까지 왔는지.
+ * 오늘(또는 요일 알약으로 고른 날) 어디까지 왔는지.
  *
  * 개수만 적으면 "여덟 개 중 셋"이 얼마만큼인지 머리로 셈해야 합니다. 막대를 함께 둡니다.
  * 다 끝낸 날에는 남은 것을 세지 않고 끝났다고만 말합니다. 다그치지 않는 것이 이 앱의 규칙입니다.
  *
  * 지난날을 볼 때는 카드 빛깔과 제목("16일(월) 진행")을 바꿔, 수행 +1이 그날로 적힌다는 것을 눈에 띄게 합니다.
+ * 이번 주의 남은 날(사용자가 정함, 2026-11-19)은 "20일(금) · 할 루틴 5개"만 적고 막대를 두지 않습니다 — 아직 오지 않은
+ * 날의 0%는 못 한 날처럼 보입니다.
  */
 @Composable
 private fun RoutineProgressCard(
@@ -630,7 +707,9 @@ private fun RoutineProgressCard(
     /** 루틴은 있지만 그날 요일에 하는 것이 없는 날. */
     restDay: Boolean = false,
     /** 요일 알약으로 고른 지난날. 오늘이면 null입니다. */
-    pastDay: LocalDate? = null
+    pastDay: LocalDate? = null,
+    /** 요일 알약으로 고른 이번 주의 남은 날. 오늘이나 지난날이면 null입니다. */
+    upcomingDay: LocalDate? = null
 ) {
     val ratio = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
     val animatedRatio by animateFloatAsState(targetValue = ratio, label = "routineProgress")
@@ -638,10 +717,10 @@ private fun RoutineProgressCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = if (pastDay != null) {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-        } else {
-            CardDefaults.cardColors()
+        colors = when {
+            upcomingDay != null -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            pastDay != null -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+            else -> CardDefaults.cardColors()
         }
     ) {
         Column(
@@ -654,30 +733,39 @@ private fun RoutineProgressCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = if (pastDay != null) "${RoutineDays.label(pastDay)} 진행" else "오늘 진행",
+                    text = when {
+                        upcomingDay != null -> RoutineDays.label(upcomingDay)
+                        pastDay != null -> "${RoutineDays.label(pastDay)} 진행"
+                        else -> "오늘 진행"
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-                Text(
-                    text = "$doneCount / $totalCount · $percent%",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                if (upcomingDay == null || !restDay) {
+                    Text(
+                        text = if (upcomingDay != null) "할 루틴 ${totalCount}개" else "$doneCount / $totalCount · $percent%",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            if (upcomingDay == null) {
+                LinearProgressIndicator(
+                    progress = { animatedRatio },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(6.dp))
                 )
             }
 
-            LinearProgressIndicator(
-                progress = { animatedRatio },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(6.dp))
-            )
-
             Text(
                 text = when {
-                    restDay && pastDay != null -> "그날 요일에 하는 루틴이 없습니다."
+                    restDay && (pastDay != null || upcomingDay != null) -> "그날 요일에 하는 루틴이 없습니다."
                     restDay -> "오늘 요일에 하는 루틴이 없습니다."
+                    upcomingDay != null -> "아직 오지 않은 날 · 그날 와서 적습니다."
                     totalCount == 0 -> "루틴을 추가하면 여기에 오늘 진행이 보입니다."
                     pastDay != null -> "지난날 기록 중 · +1은 ${pastDay.dayOfMonth}일로 적힙니다."
                     nextRoutine == null -> "오늘 몫을 다 밟았습니다."
@@ -786,7 +874,8 @@ private fun RoutineCalendarGrid(
     selectedDate: LocalDate,
     onDateSelected: (LocalDate) -> Unit
 ) {
-    val firstOffset = days.firstOrNull()?.date?.dayOfWeek?.value?.rem(7) ?: 0
+    // 첫날 앞의 빈칸도 머리글과 같은 차례(월요일부터, 2026-11-19)로 셉니다. 따로 셈하면 머리글과 날짜가 한 칸씩 어긋납니다.
+    val firstOffset = days.firstOrNull()?.date?.dayOfWeek?.let { RoutineStatsCalculator.WEEK_ORDER.indexOf(it) } ?: 0
     val cells = List(firstOffset) { null } + days
     val paddedCells = cells + List((7 - cells.size % 7) % 7) { null }
     // 요일 이름과 차례는 한 곳에서 정합니다. 통계 화면의 막대와 달력 머리글이 어긋나면
@@ -957,7 +1046,9 @@ private fun RoutineCard(
     onEditRoutine: () -> Unit,
     onDeleteRoutine: () -> Unit,
     focused: Boolean = false,
-    focusKey: Any? = null
+    focusKey: Any? = null,
+    /** 수행 +1을 누를 수 있는지. 요일 알약으로 고른 날이 아직 오지 않은 날이면 막습니다(사용자가 정함, 2026-11-19). */
+    canCheck: Boolean = true
 ) {
     val checkedToday = dayCount > 0
     val haptics = rememberHaptics()
@@ -1131,6 +1222,7 @@ private fun RoutineCard(
                         haptics.commit()
                         onCheckRoutine(routine)
                     },
+                    enabled = canCheck,
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
@@ -1384,7 +1476,12 @@ private fun RoutineMemoDialog(
     onSaveMemo: (String) -> Unit,
     onDeleteMemo: (RoutineMemoEntity) -> Unit,
     /** 요일 알약으로 고른 지난날. 메모를 남기면 그날 한 번 한 것으로 셉니다. */
-    pastDay: LocalDate? = null
+    pastDay: LocalDate? = null,
+    /**
+     * 요일 알약으로 고른 이번 주의 남은 날(사용자가 정함, 2026-11-19). 메모를 남기면 그날 한 번 한 것으로 세는데 그날이 아직
+     * 오지 않았으므로, 쓰는 칸 없이 지난 메모만 보여 줍니다.
+     */
+    upcomingDay: LocalDate? = null
 ) {
     var memoText by rememberSaveable(routine.id) { mutableStateOf("") }
     val sortedMemos = memos.sortedByDescending { it.createdAt }
@@ -1394,29 +1491,37 @@ private fun RoutineMemoDialog(
         title = { Text("${routine.title} 메모") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (pastDay != null) {
+                if (upcomingDay != null) {
                     Text(
-                        text = "저장하면 ${RoutineDays.label(pastDay)}에 한 번 한 것으로 셉니다.",
+                        text = "아직 오지 않은 날입니다. 메모는 그날 와서 남깁니다.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                OutlinedTextField(
-                    value = memoText,
-                    onValueChange = { memoText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("메모 기록") },
-                    minLines = 3
-                )
-                Button(
-                    onClick = {
-                        onSaveMemo(memoText)
-                        memoText = ""
-                    },
-                    enabled = memoText.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("메모 저장")
+                } else {
+                    if (pastDay != null) {
+                        Text(
+                            text = "저장하면 ${RoutineDays.label(pastDay)}에 한 번 한 것으로 셉니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    OutlinedTextField(
+                        value = memoText,
+                        onValueChange = { memoText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("메모 기록") },
+                        minLines = 3
+                    )
+                    Button(
+                        onClick = {
+                            onSaveMemo(memoText)
+                            memoText = ""
+                        },
+                        enabled = memoText.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("메모 저장")
+                    }
                 }
 
                 if (sortedMemos.isEmpty()) {

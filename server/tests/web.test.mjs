@@ -137,8 +137,9 @@ test("카드에는 고른 요일과 시각만 적는다", async () => {
   assert.equal(routineScheduleLabel({ weekdays: [1, 3, 5], time: "19:00" }), "월·수·금 · 19:00");
   assert.equal(routineScheduleLabel({ weekdays: [1, 2, 3, 4, 5], time: "" }), "평일");
   assert.equal(routineScheduleLabel({ weekdays: [6, 7] }), "주말");
-  // 일요일부터 늘어놓습니다(앱 요일 알약과 같은 차례).
-  assert.equal(routineScheduleLabel({ weekdays: [1, 7] }), "일·월");
+  // 월요일부터 늘어놓습니다(사용자가 정함, 2026-11-19 — 앱 요일 알약과 같은 차례). 받은 차례가 섞여 있어도 같습니다.
+  assert.equal(routineScheduleLabel({ weekdays: [1, 7] }), "월·일");
+  assert.equal(routineScheduleLabel({ weekdays: [7, 2] }), "화·일");
   assert.equal(routineScheduleLabel({ weekdays: [1, 2, 3, 4, 5, 6, 7], time: "07:00" }), "07:00");
   // 매일·상시(요일이 생기기 전의 루틴 포함)는 아무것도 적지 않습니다.
   assert.equal(routineScheduleLabel({ title: "옛 루틴" }), "");

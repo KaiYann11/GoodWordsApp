@@ -10,10 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 요일 알약이 가리키는 날과 지난날에 적는 체크(사용자가 정함, 2026-11-18).
+ * 요일 알약이 가리키는 날과 지난날에 적는 체크.
  *
- * 알약은 일~토 차례 그대로이고 저마다 그 요일이 마지막으로 있었던 날을 가리킵니다. **앞날을 가리키는 알약이 없어야**
- * 합니다 — 앞날에 체크가 적히면 연속 날수와 오늘 진행이 거짓말을 합니다.
+ * 요일 줄은 월~일 한 주입니다(사용자가 정함, 2026-11-19). 알약마다 보이는 주의 그날을 가리키고, 오늘 뒤 날은 아직 오지 않은
+ * 날입니다. **지난주 같은 요일로 미끄러지지 않아야** 합니다 — 1.24.1은 오늘 뒤 요일이 지난주 날을 가리켜, 이번 주 금요일
+ * 알약에 지난주 금요일 기록이 보였습니다.
  */
 class RoutineDaysTest {
     private val seoul = ZoneId.of("Asia/Seoul")
@@ -22,25 +23,72 @@ class RoutineDaysTest {
     private val wednesday = LocalDate.of(2026, 11, 18)
 
     @Test
-    fun eachPillPointsAtTheLatestDayWithThatWeekday() {
-        assertEquals(LocalDate.of(2026, 11, 15), RoutineDays.latest(DayOfWeek.SUNDAY, wednesday))
-        assertEquals(LocalDate.of(2026, 11, 16), RoutineDays.latest(DayOfWeek.MONDAY, wednesday))
-        assertEquals(LocalDate.of(2026, 11, 17), RoutineDays.latest(DayOfWeek.TUESDAY, wednesday))
-        assertEquals(wednesday, RoutineDays.latest(DayOfWeek.WEDNESDAY, wednesday))
-        // 오늘보다 뒤 요일은 지난주 날입니다.
-        assertEquals(LocalDate.of(2026, 11, 12), RoutineDays.latest(DayOfWeek.THURSDAY, wednesday))
-        assertEquals(LocalDate.of(2026, 11, 13), RoutineDays.latest(DayOfWeek.FRIDAY, wednesday))
-        assertEquals(LocalDate.of(2026, 11, 14), RoutineDays.latest(DayOfWeek.SATURDAY, wednesday))
+    fun theWeekRunsFromMondayToSunday() {
+        assertEquals(DayOfWeek.MONDAY, RoutineStatsCalculator.WEEK_ORDER.first())
+        assertEquals(DayOfWeek.SUNDAY, RoutineStatsCalculator.WEEK_ORDER.last())
+        assertEquals(LocalDate.of(2026, 11, 16), RoutineDays.weekStart(wednesday))
+        // 월요일은 제 주의 첫날이고, 일요일은 앞 월요일에서 시작한 주의 끝날입니다.
+        assertEquals(LocalDate.of(2026, 11, 16), RoutineDays.weekStart(LocalDate.of(2026, 11, 16)))
+        assertEquals(LocalDate.of(2026, 11, 16), RoutineDays.weekStart(LocalDate.of(2026, 11, 22)))
+        assertEquals(LocalDate.of(2026, 11, 23), RoutineDays.weekStart(LocalDate.of(2026, 11, 23)))
     }
 
     @Test
-    fun theSevenPillsAreTodayAndTheSixDaysBeforeOnEveryDayOfTheWeek() {
-        (0L..6L).map { wednesday.plusDays(it) }.forEach { today ->
-            val pointed = RoutineStatsCalculator.WEEK_ORDER.map { RoutineDays.latest(it, today) }.toSet()
-            val lastWeek = (0L..RoutineDays.PAST_DAYS).map { today.minusDays(it) }.toSet()
-            assertEquals("$today", lastWeek, pointed)
-            assertTrue("$today: 앞날을 가리키는 알약이 있습니다.", pointed.none { it.isAfter(today) })
+    fun eachPillPointsAtThatDayOfThisWeekEvenAfterToday() {
+        val week = RoutineDays.weekOf(wednesday, 0)
+
+        assertEquals(LocalDate.of(2026, 11, 16), RoutineDays.dateIn(week, DayOfWeek.MONDAY))
+        assertEquals(wednesday, RoutineDays.dateIn(week, DayOfWeek.WEDNESDAY))
+        // 오늘 뒤 요일은 이번 주의 남은 날입니다 — 지난주 13일(금)이 아니라 20일(금)입니다.
+        assertEquals(LocalDate.of(2026, 11, 20), RoutineDays.dateIn(week, DayOfWeek.FRIDAY))
+        assertEquals(LocalDate.of(2026, 11, 22), RoutineDays.dateIn(week, DayOfWeek.SUNDAY))
+    }
+
+    @Test
+    fun theSevenPillsAreTheWeekThatHoldsTodayOnEveryDayOfTheWeek() {
+        (0L..6L).map { LocalDate.of(2026, 11, 16).plusDays(it) }.forEach { today ->
+            val week = RoutineDays.weekOf(today, 0)
+            val pointed = RoutineStatsCalculator.WEEK_ORDER.map { RoutineDays.dateIn(week, it) }
+            assertEquals("$today", (16..22).map { LocalDate.of(2026, 11, it) }, pointed)
+            assertTrue("$today: 오늘이 이번 주에 없습니다.", today in pointed)
         }
+    }
+
+    @Test
+    fun earlierWeeksAreWholeWeeksBack() {
+        assertEquals(LocalDate.of(2026, 11, 9), RoutineDays.weekOf(wednesday, -1))
+        assertEquals(LocalDate.of(2026, 10, 26), RoutineDays.weekOf(wednesday, -3))
+        // 지난주 일요일은 이번 주 월요일의 어제입니다 — 월요일 아침에 어제 것을 적는 길입니다.
+        val monday = LocalDate.of(2026, 11, 16)
+        assertEquals(monday.minusDays(1), RoutineDays.dateIn(RoutineDays.weekOf(monday, -1), DayOfWeek.SUNDAY))
+    }
+
+    @Test
+    fun theWeekIsNamedByHowFarBackItIsAndItsDates() {
+        assertEquals("이번 주 · 11월 16일 ~ 22일", RoutineDays.weekLabel(RoutineDays.weekOf(wednesday, 0), wednesday))
+        assertEquals("지난주 · 11월 9일 ~ 15일", RoutineDays.weekLabel(RoutineDays.weekOf(wednesday, -1), wednesday))
+        // 달을 넘기면 끝날에도 달을 적습니다.
+        assertEquals("3주 전 · 10월 26일 ~ 11월 1일", RoutineDays.weekLabel(RoutineDays.weekOf(wednesday, -3), wednesday))
+    }
+
+    @Test
+    fun theYearIsWrittenOnlyWhenItIsNotThisYears() {
+        // 2026-12-31은 목요일이고, 그 주는 2027년 1월 3일에 끝납니다.
+        val newYearsEve = LocalDate.of(2026, 12, 31)
+        assertEquals(
+            "이번 주 · 12월 28일 ~ 2027년 1월 3일",
+            RoutineDays.weekLabel(RoutineDays.weekOf(newYearsEve, 0), newYearsEve)
+        )
+        // 해가 바뀐 뒤 지난해에 시작한 주를 보면 앞날에도 해를 적습니다.
+        val newYearsDay = LocalDate.of(2027, 1, 1)
+        assertEquals(
+            "이번 주 · 2026년 12월 28일 ~ 2027년 1월 3일",
+            RoutineDays.weekLabel(RoutineDays.weekOf(newYearsDay, 0), newYearsDay)
+        )
+        assertEquals(
+            "지난주 · 2026년 12월 21일 ~ 27일",
+            RoutineDays.weekLabel(RoutineDays.weekOf(newYearsDay, -1), newYearsDay)
+        )
     }
 
     @Test
