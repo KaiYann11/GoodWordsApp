@@ -114,7 +114,7 @@ internal fun routineDayTag(day: DayOfWeek?): String = "routine_day_${day?.name ?
 /** 요일 알약 줄. 옆으로 밀리는 줄이라 화면 밖 알약은 굴려서 짚습니다. */
 internal const val routineDayRowTag = "routine_day_row"
 
-/** 요일 줄 위의 주 넘기기(‹ ›)와 보이는 주의 이름(사용자가 정함, 2026-11-19). */
+/** 요일 줄 위의 주 넘기기(‹ ›)와 보이는 줄의 이름(사용자가 정함, 2026-11-19 — 2026-11-23부터 오늘 가운데 줄). */
 internal const val routineWeekPrevTag = "routine_week_prev"
 internal const val routineWeekNextTag = "routine_week_next"
 internal const val routineWeekLabelTag = "routine_week_label"
@@ -257,26 +257,27 @@ fun RoutineScreen(
 
     // 요일 알약. null이면 오늘을 따릅니다 — 자정을 넘겨 열어 둬도 새 오늘로 넘어갑니다. [ALL_DAYS]면 전체입니다.
     var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
-    // 요일 줄이 보이는 주(사용자가 정함, 2026-11-19). 0이 이번 주, -1이 지난주입니다. 이번 주보다 앞으로는 가지 않습니다.
+    // 요일 줄이 보이는 자리(사용자가 정함, 2026-11-19·23). 0이 오늘을 가운데 둔 줄, -1이 그보다 이레 앞 줄입니다. 0보다
+    // 앞으로는 가지 않습니다.
     var weekOffset by rememberSaveable { mutableIntStateOf(0) }
     val selectedDay: DayOfWeek? = when (pickedDay) {
         null -> today.dayOfWeek
         ALL_DAYS -> null
         else -> DayOfWeek.valueOf(pickedDay!!)
     }
-    // 알약이 가리키는 날(사용자가 정함, 2026-11-19): 보이는 주(월~일)의 그 요일입니다. 오늘 앞 날은 그날 체크를 따르고
-    // 수행 +1이 그날로 적힙니다(2026-11-18). 오늘 뒤 날은 아직 오지 않은 날이라 회수가 모두 0이고 적을 수 없습니다 — 지난주
-    // 같은 요일의 기록이 거기 비치지 않습니다. 전체는 오늘입니다.
-    val weekStart = RoutineDays.weekOf(today, weekOffset)
-    fun dateOf(day: DayOfWeek?): LocalDate = day?.let { RoutineDays.dateIn(weekStart, it) } ?: today
+    // 알약이 가리키는 날(사용자가 정함, 2026-11-23 — "오늘 기준으로 앞뒤 요일"): 보이는 줄(오늘 앞 사흘·오늘·뒤 사흘)의 그
+    // 요일입니다. 오늘 앞 날은 그날 체크를 따르고 수행 +1이 그날로 적힙니다(2026-11-18). 오늘 뒤 날은 아직 오지 않은 날이라
+    // 회수가 모두 0이고 적을 수 없습니다 — 지난주 같은 요일의 기록이 거기 비치지 않습니다(2026-11-19). 전체는 오늘입니다.
+    val rowStart = RoutineDays.rowStart(today, weekOffset)
+    fun dateOf(day: DayOfWeek?): LocalDate = day?.let { RoutineDays.dateIn(rowStart, it) } ?: today
     val viewDate = dateOf(selectedDay)
     val viewingPast = viewDate.isBefore(today)
     val viewingUpcoming = viewDate.isAfter(today)
-    // 보이는 주에서 오늘 앞의 날들. 오늘은 [todayCounts]를 쓰고, 앞날은 셀 것이 없습니다.
-    val pastCounts = remember(checks, weekStart, today, zoneId) {
-        val weekEnd = weekStart.plusDays(6)
+    // 보이는 줄에서 오늘 앞의 날들. 오늘은 [todayCounts]를 쓰고, 앞날은 셀 것이 없습니다.
+    val pastCounts = remember(checks, rowStart, today, zoneId) {
+        val rowEnd = rowStart.plusDays(6)
         val lastPast = today.minusDays(1)
-        RoutineDays.countsByDate(checks, weekStart, if (weekEnd.isBefore(lastPast)) weekEnd else lastPast, zoneId)
+        RoutineDays.countsByDate(checks, rowStart, if (rowEnd.isBefore(lastPast)) rowEnd else lastPast, zoneId)
     }
     fun countsOn(date: LocalDate): Map<Long, Int> = when {
         date == today -> todayCounts
@@ -284,7 +285,7 @@ fun RoutineScreen(
         else -> pastCounts[date].orEmpty()
     }
     val viewCounts = countsOn(viewDate)
-    // 주를 넘겨도 고른 요일은 그대로 둡니다 — 목요일을 보다 ‹를 누르면 지난주 목요일입니다. 전체였으면 오늘 요일로 옮깁니다.
+    // 줄을 넘겨도 고른 요일은 그대로 둡니다 — 목요일을 보다 ‹를 누르면 이레 앞 목요일입니다. 전체였으면 오늘 요일로 옮깁니다.
     fun moveWeek(delta: Int) {
         val keep = selectedDay ?: today.dayOfWeek
         val target = (weekOffset + delta).coerceAtMost(0)
@@ -497,8 +498,8 @@ fun RoutineScreen(
             // 그러지 않으면 "공부 11"을 눌렀는데 셋만 보여, 나머지가 어디 갔는지 찾게 됩니다.
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // 주 넘기기(사용자가 정함, 2026-11-19). 이번 주가 아니면 ›로 돌아옵니다. 이번 주보다 앞으로는 가지 않습니다 —
-                    // 앞날은 이번 주의 남은 날만 미리 봅니다.
+                    // 주 넘기기(사용자가 정함, 2026-11-19). ‹는 줄을 이레 앞으로 옮기고, ›는 오늘 가운데 줄까지만 돌아옵니다 —
+                    // 앞날은 오늘 뒤 사흘만 미리 봅니다(2026-11-23).
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -513,7 +514,7 @@ fun RoutineScreen(
                             )
                         }
                         Text(
-                            text = RoutineDays.weekLabel(weekStart, today),
+                            text = RoutineDays.rowLabel(rowStart, today),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag(routineWeekLabelTag),
@@ -532,9 +533,11 @@ fun RoutineScreen(
                             )
                         }
                     }
-                    // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있고, 월요일부터 늘어놓습니다(2026-11-19).
-                    // 알약 아랫줄은 보이는 주의 그날입니다 — 오늘 뒤 날은 아직 오지 않은 날이라 지난주 기록이 비치지 않습니다.
-                    val dayOptions: List<DayOfWeek?> = listOf<DayOfWeek?>(null) + RoutineStatsCalculator.WEEK_ORDER
+                    // 요일 줄(사용자가 정함, 2026-11-17). 처음에는 오늘이 골라져 있습니다. 오늘을 가운데 두고 날짜 차례로
+                    // 늘어놓습니다(2026-11-23) — 왼쪽 사흘은 지난날, 오른쪽 사흘은 아직 오지 않은 날이라 요일 차례가 날마다 한
+                    // 칸씩 돕니다. 알약 아랫줄은 그 알약이 맡은 날입니다. 이레씩 넘긴 줄도 요일 차례는 같습니다.
+                    val dayOptions: List<DayOfWeek?> =
+                        listOf<DayOfWeek?>(null) + RoutineDays.rowDays(rowStart).map { it.dayOfWeek }
                     val dayRowState = rememberLazyListState(
                         initialFirstVisibleItemIndex = (dayOptions.indexOf(today.dayOfWeek) - 2).coerceAtLeast(0)
                     )
@@ -561,7 +564,7 @@ fun RoutineScreen(
                                 selected = selectedDay == day,
                                 onClick = {
                                     if (day == null) {
-                                        // 전체는 오늘로 셉니다. 다른 주를 보고 있었으면 이번 주로 돌아옵니다.
+                                        // 전체는 오늘로 셉니다. 다른 줄을 보고 있었으면 오늘 가운데 줄로 돌아옵니다.
                                         weekOffset = 0
                                         pickedDay = ALL_DAYS
                                     } else {
@@ -696,8 +699,8 @@ fun RoutineScreen(
  * 다 끝낸 날에는 남은 것을 세지 않고 끝났다고만 말합니다. 다그치지 않는 것이 이 앱의 규칙입니다.
  *
  * 지난날을 볼 때는 카드 빛깔과 제목("16일(월) 진행")을 바꿔, 수행 +1이 그날로 적힌다는 것을 눈에 띄게 합니다.
- * 이번 주의 남은 날(사용자가 정함, 2026-11-19)은 "20일(금) · 할 루틴 5개"만 적고 막대를 두지 않습니다 — 아직 오지 않은
- * 날의 0%는 못 한 날처럼 보입니다.
+ * 오늘 뒤 날(사용자가 정함, 2026-11-19 — 요일 줄의 오른쪽 사흘)은 "20일(금) · 할 루틴 5개"만 적고 막대를 두지 않습니다 —
+ * 아직 오지 않은 날의 0%는 못 한 날처럼 보입니다.
  */
 @Composable
 private fun RoutineProgressCard(
@@ -708,7 +711,7 @@ private fun RoutineProgressCard(
     restDay: Boolean = false,
     /** 요일 알약으로 고른 지난날. 오늘이면 null입니다. */
     pastDay: LocalDate? = null,
-    /** 요일 알약으로 고른 이번 주의 남은 날. 오늘이나 지난날이면 null입니다. */
+    /** 요일 알약으로 고른 오늘 뒤 날. 오늘이나 지난날이면 null입니다. */
     upcomingDay: LocalDate? = null
 ) {
     val ratio = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
@@ -1478,7 +1481,7 @@ private fun RoutineMemoDialog(
     /** 요일 알약으로 고른 지난날. 메모를 남기면 그날 한 번 한 것으로 셉니다. */
     pastDay: LocalDate? = null,
     /**
-     * 요일 알약으로 고른 이번 주의 남은 날(사용자가 정함, 2026-11-19). 메모를 남기면 그날 한 번 한 것으로 세는데 그날이 아직
+     * 요일 알약으로 고른 오늘 뒤 날(사용자가 정함, 2026-11-19). 메모를 남기면 그날 한 번 한 것으로 세는데 그날이 아직
      * 오지 않았으므로, 쓰는 칸 없이 지난 메모만 보여 줍니다.
      */
     upcomingDay: LocalDate? = null

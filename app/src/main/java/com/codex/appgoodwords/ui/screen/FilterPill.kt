@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
  * "몇 개나 되는지"를 같은 자리에서 읽게 하려는 것입니다.
  * 개수를 함께 적는 이유는, 눌러 보기 전에 빈 목록인지 알 수 있어야 하기 때문입니다.
  *
- * [subtitle]은 아랫줄에 작게 적습니다. 루틴의 요일 알약이 보이는 주의 그날("16일", "오늘")을 답니다.
+ * [subtitle]은 아랫줄에 작게 적습니다. 루틴의 요일 알약이 맡은 날("16일", "오늘")을 답니다.
  */
 @Composable
 internal fun CountFilterPill(
