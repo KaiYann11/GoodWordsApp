@@ -76,9 +76,10 @@ object RoutineStatsCalculator {
     /**
      * 루틴의 한 주. 월요일이 맨 앞입니다(사용자가 정함, 2026-11-19 — "루틴의 요일은 월요일부터 일요일까지").
      *
-     * 루틴 탭의 요일 줄과 그 주([RoutineDays.weekStart]), 고치기 창의 요일 칸, 카드의 요일 글자([RoutineSchedule.daysLabel]),
-     * 기록 화면의 요일 막대와 최근 4주, 홈 돌아보기의 루틴 달력이 모두 이 차례 하나를 씁니다. 웹 카드 글자
-     * (`routineScheduleLabel`)도 같은 차례입니다. AI 돌아보기 달력(`GrowthCalendarCard`)은 루틴 것이 아니라 일요일부터입니다.
+     * 고치기 창의 요일 칸, 카드의 요일 글자([RoutineSchedule.daysLabel]), 기록 화면의 요일 막대와 최근 4주, 홈 돌아보기의
+     * 루틴 달력이 모두 이 차례 하나를 씁니다. 웹 카드 글자(`routineScheduleLabel`)도 같은 차례입니다. AI 돌아보기 달력
+     * (`GrowthCalendarCard`)은 루틴 것이 아니라 일요일부터입니다. 루틴 탭의 요일 줄은 이 차례가 아니라 오늘을 가운데 둔
+     * 날짜 차례입니다([RoutineDays.rowStart], 사용자가 정함 2026-11-23).
      */
     val WEEK_ORDER: List<DayOfWeek> = listOf(
         DayOfWeek.MONDAY,
