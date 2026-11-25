@@ -7,6 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.codex.appgoodwords.data.AI_CATEGORY
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.AiModelRefreshState
+import com.codex.appgoodwords.data.AiModelRepository
+import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.AppContainer
 import com.codex.appgoodwords.data.AppDataSnapshot
 import com.codex.appgoodwords.data.AppUpdateDownloadStatus
@@ -184,6 +187,17 @@ class MainViewModel(
 
     val aiFeedbackSettings = container.settingsStore.aiFeedbackSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AiFeedbackSettings())
+
+    /** 공급자마다 받아 둔 모델 목록(설정 → AI의 모델 칸). */
+    val aiModelLists = container.settingsStore.aiModelListsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** 마지막으로 답한 모델. */
+    val aiLastAnswer = container.settingsStore.aiLastAnswerFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _aiModelRefresh = MutableStateFlow(AiModelRefreshState())
+    val aiModelRefresh: StateFlow<AiModelRefreshState> = _aiModelRefresh.asStateFlow()
 
     /** 복사해 두고 아직 답을 받아 적지 않은 물음. 없으면 null. */
     val pendingGrowthPrompt = container.settingsStore.pendingGrowthPromptFlow
@@ -1634,6 +1648,25 @@ class MainViewModel(
         container.dailyCoachCoordinator.preview()
     }
 
+    /**
+     * 모델 목록을 받아 옵니다. [force]가 아니면 받은 지 얼마 안 된 목록은 그대로 둡니다([AiModelRepository.refresh]).
+     * 받지 못한 사유는 "다른 모델…" 창에 보입니다. 받아 둔 목록이나 앱에 든 목록으로는 그대로 고를 수 있습니다.
+     */
+    fun refreshAiModels(provider: AiProvider, force: Boolean) {
+        if (_aiModelRefresh.value.loading == provider) return
+        viewModelScope.launch {
+            _aiModelRefresh.value = _aiModelRefresh.value.copy(loading = provider)
+            val result = container.aiModels.refresh(provider, force)
+            val current = _aiModelRefresh.value
+            _aiModelRefresh.value = current.copy(
+                loading = null,
+                errors = result.exceptionOrNull()
+                    ?.let { current.errors + (provider to (it.message ?: "목록을 받지 못했습니다.")) }
+                    ?: (current.errors - provider)
+            )
+        }
+    }
+
     fun updateAiFeedbackSettings(updated: AiFeedbackSettings) {
         viewModelScope.launch {
             container.settingsStore.updateAiFeedbackSettings(updated)
@@ -1677,14 +1710,15 @@ class MainViewModel(
             "임시저장 글이나 개념만 AI에게 물어볼 수 있습니다."
         }
         val aiSettings = container.settingsStore.getAiFeedbackSettings()
-        val rawAnswer = container.aiFeedbackClient.ask(
+        val answer = container.aiFeedbackClient.ask(
             system = ConceptExplanation.systemPrompt(),
             user = ConceptExplanation.userPrompt(item),
-            model = aiSettings.effectiveModel,
+            model = container.aiModels.requestModel(aiSettings),
             aiSettings = aiSettings,
             syncSettings = container.settingsStore.getServerSyncSettings()
         )
-        val explanation = ConceptExplanation.parse(rawAnswer)
+        container.aiModels.recordAnswer(aiSettings, answer)
+        val explanation = ConceptExplanation.parse(answer.text)
         container.repository.saveConceptExplanation(id, explanation)
     }
 

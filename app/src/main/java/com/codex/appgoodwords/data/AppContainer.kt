@@ -87,6 +87,9 @@ class AppContainer(
 
     val aiFeedbackClient: AiFeedbackClient by lazy { AiFeedbackClient() }
 
+    /** 받아 둔 모델 목록과, 부를 때 보낼 모델. 돌아보기·한마디·개념 설명이 같은 것을 씁니다. */
+    val aiModels: AiModelRepository by lazy { AiModelRepository(settingsStore, aiFeedbackClient) }
+
     val syncBackupStore: SyncBackupStore by lazy {
         SyncBackupStore(appContext)
     }
@@ -178,7 +181,8 @@ class AppContainer(
         GrowthFeedbackCoordinator(
             database = database,
             settingsStore = settingsStore,
-            client = aiFeedbackClient
+            client = aiFeedbackClient,
+            models = aiModels
         )
     }
 
@@ -189,6 +193,7 @@ class AppContainer(
             settingsStore = settingsStore,
             repository = repository,
             client = aiFeedbackClient,
+            models = aiModels,
             handOver = { reminderScheduler.handOverDailyCoach() }
         )
     }

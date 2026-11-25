@@ -49,7 +49,7 @@ class ConceptAiIntegrationTest {
     }
 
     @Test fun claudeCliExplainsADirectlyWrittenConceptAndTheAnswerIsSavedShort() = runBlocking {
-        explainWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
+        explainWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = AiModels.latest("haiku")))
     }
 
     @Test fun codexCliWithItsDefaultModelExplainsAConcept() = runBlocking {
@@ -64,14 +64,16 @@ class ConceptAiIntegrationTest {
         )
         val item = database.contentItemDao().getById(id)!!
 
-        val rawAnswer = AiFeedbackClient().ask(
+        val answer = AiFeedbackClient().ask(
             system = ConceptExplanation.systemPrompt(),
             user = ConceptExplanation.userPrompt(item),
-            model = aiSettings.effectiveModel,
+            model = aiSettings.requestModel(emptyList()),
             aiSettings = aiSettings,
             syncSettings = syncSettings
         )
-        val explanation = ConceptExplanation.parse(rawAnswer)
+        // 서버가 실제로 답한 모델을 돌려줍니다("Haiku 최신"·CLI 기본으로 물어도).
+        assertTrue("답한 모델을 알 수 없습니다: ${answer.model}", answer.model.startsWith("claude-") || answer.model.startsWith("gpt-"))
+        val explanation = ConceptExplanation.parse(answer.text)
         val concept = repository.saveConceptExplanation(id, explanation)
 
         assertEquals(ContentType.CONCEPT, concept.type)

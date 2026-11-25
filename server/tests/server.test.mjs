@@ -100,6 +100,123 @@ async function startFakeOllama() {
 }
 
 /**
+ * 열쇠로 부르는 두 API(Claude·OpenAI)의 가짜. 뿌리 주소를 `/anthropic`·`/openai`로 나눠 한 서버가 둘 다 받습니다
+ * (`APP_GOOD_WORDS_ANTHROPIC_BASE_URL`·`APP_GOOD_WORDS_OPENAI_BASE_URL`).
+ *
+ * 받은 요청은 `seen`에 남겨 무엇이 어떤 머리말로 나갔는지 시험이 볼 수 있게 합니다. 열쇠가 다르면 진짜처럼 401을 줍니다.
+ */
+async function startFakeApis() {
+  const seen = [];
+  const server = createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    const url = new URL(request.url, "http://fake");
+    let raw = "";
+    for await (const chunk of request) raw += chunk;
+    const body = raw ? JSON.parse(raw) : null;
+    seen.push({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: request.headers, body });
+
+    if (url.pathname.startsWith("/anthropic/") && request.headers["x-api-key"] !== "test-anthropic-key") {
+      send(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
+      return;
+    }
+    if (url.pathname.startsWith("/openai/") && request.headers.authorization !== "Bearer test-openai-key") {
+      send(401, { error: { message: "Incorrect API key provided" } });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/anthropic/v1/models") {
+      // 두 쪽으로 나눠 준다. 서버가 last_id로 다음 쪽을 받아야 Sonnet·Haiku가 보인다.
+      if (url.searchParams.get("after_id") === "claude-opus-5-5") {
+        send(200, {
+          data: [
+            { type: "model", id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", created_at: "2026-09-01T00:00:00Z" },
+            { type: "model", id: "claude-haiku-4-5-20251001", display_name: "Claude Haiku 4.5", created_at: "2025-10-01T00:00:00Z" },
+          ],
+          has_more: false,
+          first_id: "claude-sonnet-5-5",
+          last_id: "claude-haiku-4-5-20251001",
+        });
+      } else {
+        send(200, {
+          data: [
+            { type: "model", id: "claude-fable-5-2", display_name: "Claude Fable 5.2", created_at: "2026-11-01T00:00:00Z" },
+            { type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5", created_at: "2026-10-01T00:00:00Z" },
+          ],
+          has_more: true,
+          first_id: "claude-fable-5-2",
+          last_id: "claude-opus-5-5",
+        });
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/anthropic/v1/messages") {
+      send(200, {
+        type: "message",
+        role: "assistant",
+        model: body.model,
+        content: [{ type: "text", text: JSON.stringify({ system: body.system, model: body.model }) }],
+        stop_reason: "end_turn",
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/openai/v1/models") {
+      // 진짜 목록처럼 그림·임베딩·실시간 모델이 섞여 있고 차례도 뒤죽박죽이다.
+      send(200, {
+        object: "list",
+        data: [
+          { id: "gpt-6-luna", object: "model", created: 100 },
+          { id: "text-embedding-3-large", object: "model", created: 300 },
+          { id: "gpt-6.1-terra", object: "model", created: 200 },
+          { id: "gpt-image-1", object: "model", created: 400 },
+          { id: "o4-mini", object: "model", created: 50 },
+          { id: "gpt-4o-realtime-preview", object: "model", created: 500 },
+        ],
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/openai/v1/chat/completions") {
+      // 별칭으로 물어도 답에는 날짜가 붙은 실제 판이 온다.
+      send(200, {
+        model: `${body.model}-2026-11-01`,
+        choices: [{ message: { role: "assistant", content: JSON.stringify({ model: body.model }) } }],
+      });
+      return;
+    }
+    send(404, { error: { message: "not found" } });
+  });
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    seen,
+    stop: () => {
+      server.closeAllConnections();
+      server.close();
+    },
+  };
+}
+
+/** Codex CLI가 받아 두는 모델 목록 파일을 흉내 낸 폴더를 만듭니다(`CODEX_HOME`). 계정 칸도 진짜처럼 넣어 둡니다. */
+async function writeFakeCodexHome(dir) {
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "models_cache.json"),
+    JSON.stringify({
+      fetched_at: "2026-11-25T00:00:00Z",
+      identity: "someone@example.com",
+      models: [
+        { slug: "gpt-6-luna", display_name: "GPT-6-Luna", visibility: "list", priority: 6 },
+        { slug: "gpt-reserve", display_name: "GPT-Reserve", visibility: "hide", priority: 2 },
+        { slug: "gpt-6.1-terra", display_name: "GPT-6.1 Terra", visibility: "list", priority: 1 },
+        { slug: "no-priority", visibility: "list" },
+      ],
+    }),
+    "utf8",
+  );
+}
+
+/**
  * 진짜 CLI 대신 돌 가짜를 만듭니다.
  *
  * 서버가 CLI에 무엇을 어떻게 건네는지(표준 입력·파일·인자)를 그대로 되돌려 주어 시험이 볼 수
@@ -123,10 +240,20 @@ if (model === "slow-model") {
   setTimeout(() => {}, 60_000);
 } else {
   const system = flag("--system-prompt-file") ? fs.readFileSync(flag("--system-prompt-file"), "utf8") : "";
-  console.log(JSON.stringify({
+  const output = {
     type: "result", subtype: "success", is_error: false,
     result: JSON.stringify({ system, user: stdin, model, args, cwd: process.cwd() }),
-  }));
+  };
+  // 진짜 CLI처럼 별칭·기본 모델을 실제 이름으로 풀어 modelUsage에 싣는다. 곁일에 작은 모델을 조금 쓰기도 한다.
+  // "no-usage"는 쓴 모델을 알려 주지 않는 옛 CLI다.
+  const answered = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", "": "claude-sonnet-5-5" }[model] || model;
+  if (model !== "no-usage") {
+    output.modelUsage = {
+      "claude-haiku-5-5": { inputTokens: 40, outputTokens: 3 },
+      [answered]: { inputTokens: 900, outputTokens: 120 },
+    };
+  }
+  console.log(JSON.stringify(output));
 }
 `;
   const fakeCodex = `
@@ -140,7 +267,8 @@ if (model === "broken-model") {
   process.stderr.write('ERROR: {"type":"error","error":{"message":"이 모델은 쓸 수 없습니다"}}\\n');
   process.exit(1);
 }
-process.stderr.write("OpenAI Codex v0.0.0\\n--------\\nmodel: " + model + "\\n");
+// 진짜 CLI처럼 머리말에 쓸 모델을 찍는다. --model 없이 돌리면 CLI의 기본 모델이다.
+process.stderr.write("OpenAI Codex v0.0.0\\n--------\\nworkdir: " + process.cwd() + "\\nmodel: " + (model || "gpt-6.1-terra") + "\\nprovider: openai\\n--------\\n");
 fs.writeFileSync(flag("--output-last-message"), JSON.stringify({ input: stdin, model, args, cwd: process.cwd() }));
 console.log("done");
 `;
@@ -2906,6 +3034,233 @@ describe("AI 돌아보기", () => {
     } finally {
       server.stop();
     }
+  });
+});
+
+describe("AI 모델 목록과 답한 모델", () => {
+  // 열쇠가 있는 서버. 두 API는 가짜로, Codex 목록은 가짜 폴더로 붙인다(이 PC의 진짜 ~/.codex를 읽지 않게).
+  let fakeApis;
+  let keyed;
+  const askKeyed = (path, init = {}) =>
+    fetch(`${keyed.url}${path}`, {
+      ...init,
+      headers: { "X-API-Key": apiKey, "Content-Type": "application/json", ...(init.headers || {}) },
+    });
+
+  before(async () => {
+    fakeApis = await startFakeApis();
+    const codexHome = join(workDir, "codex-home");
+    await writeFakeCodexHome(codexHome);
+    keyed = await startServer({
+      OPENAI_API_KEY: "test-openai-key",
+      ANTHROPIC_API_KEY: "test-anthropic-key",
+      APP_GOOD_WORDS_OPENAI_BASE_URL: `${fakeApis.url}/openai/`,
+      APP_GOOD_WORDS_ANTHROPIC_BASE_URL: `${fakeApis.url}/anthropic`,
+      CODEX_HOME: codexHome,
+    });
+  });
+
+  after(() => {
+    if (keyed) keyed.stop();
+    if (fakeApis) fakeApis.stop();
+  });
+
+  it("모델 목록도 API 키가 있어야 준다", async () => {
+    const response = await api("/api/ai-models?provider=ollama", { key: "" });
+
+    assert.equal(response.status, 401);
+  });
+
+  it("모르는 공급자의 목록은 다른 곳 것으로 채우지 않고 400을 준다", async () => {
+    const response = await api("/api/ai-models?provider=gemini");
+
+    assert.equal(response.status, 400);
+  });
+
+  it("Ollama 목록은 받아 둔 글 모델을 최근 것부터 준다", async () => {
+    const response = await api("/api/ai-models?provider=ollama");
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.provider, "ollama");
+    // 임베딩 모델은 대화를 못 해서 빠진다. 기본으로 고르는 것과 같은 차례다.
+    assert.deepEqual(
+      body.models.map((model) => model.id),
+      ["qwen3.6:27b", "llama3.2:3b"],
+    );
+    assert.equal(typeof body.fetchedAt, "number");
+  });
+
+  it("Claude CLI는 목록을 내줄 길이 없어 빈 목록을 준다", async () => {
+    // 앱은 별칭(opus·sonnet·haiku)으로 고르고, 답한 모델은 답과 함께 받는다.
+    const response = await api("/api/ai-models?provider=claude_cli");
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.deepEqual(body.models, []);
+  });
+
+  it("Codex 목록은 CLI가 보여 주는 것만 그 차례로 주고 계정 칸은 싣지 않는다", async () => {
+    const response = await askKeyed("/api/ai-models?provider=codex_cli");
+    const raw = await response.text();
+    const body = JSON.parse(raw);
+
+    assert.equal(response.status, 200, raw);
+    assert.deepEqual(body.models, [
+      { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", createdAt: 0 },
+      { id: "gpt-6-luna", label: "GPT-6-Luna", createdAt: 0 },
+      // 차례가 없는 것은 맨 뒤로 간다.
+      { id: "no-priority", label: "no-priority", createdAt: 0 },
+    ]);
+    assert.ok(!raw.includes("example.com"), raw);
+  });
+
+  it("Codex 목록 파일이 없으면 어떻게 생기는지 알려 준다", async () => {
+    const emptyHome = join(workDir, "codex-empty");
+    await mkdir(emptyHome, { recursive: true });
+    const server = await startServer({ CODEX_HOME: emptyHome });
+    try {
+      const response = await fetch(`${server.url}/api/ai-models?provider=codex_cli`, { headers: { "X-API-Key": apiKey } });
+      const body = await response.json();
+
+      assert.equal(response.status, 503, JSON.stringify(body));
+      assert.ok(body.error.includes("models_cache.json"), body.error);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("Claude 목록은 다음 쪽까지 다 받고 열쇠와 판을 실어 보낸다", async () => {
+    fakeApis.seen.length = 0;
+    const response = await askKeyed("/api/ai-models?provider=anthropic");
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.deepEqual(
+      body.models.map((model) => model.id),
+      ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"],
+    );
+    assert.equal(body.models[0].label, "Claude Fable 5.2");
+    assert.equal(body.models[0].createdAt, Date.parse("2026-11-01T00:00:00Z"));
+
+    const pages = fakeApis.seen.filter((request) => request.path === "/anthropic/v1/models");
+    assert.equal(pages.length, 2);
+    assert.equal(pages[0].query.limit, "1000");
+    assert.equal(pages[1].query.after_id, "claude-opus-5-5");
+    assert.equal(pages[0].headers["x-api-key"], "test-anthropic-key");
+    assert.equal(pages[0].headers["anthropic-version"], "2023-06-01");
+  });
+
+  it("OpenAI 목록은 글 모델만 새로 나온 것부터 준다", async () => {
+    const response = await askKeyed("/api/ai-models?provider=openai");
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    // 그림·임베딩·실시간 모델을 고르면 돌아보기가 "지원하지 않는 모델"로만 끝난다.
+    assert.deepEqual(
+      body.models.map((model) => model.id),
+      ["gpt-6.1-terra", "gpt-6-luna", "o4-mini"],
+    );
+  });
+
+  it("서버에 열쇠가 없으면 목록도 부르지 않고 어떤 열쇠인지 알려 준다", async () => {
+    for (const [provider, envName] of [
+      ["anthropic", "ANTHROPIC_API_KEY"],
+      ["openai", "OPENAI_API_KEY"],
+    ]) {
+      const response = await api(`/api/ai-models?provider=${provider}`);
+      const body = await response.json();
+
+      assert.equal(response.status, 503, JSON.stringify(body));
+      assert.ok(body.error.includes(envName), body.error);
+    }
+  });
+
+  it("열쇠가 틀리면 공급자가 준 사유만 돌려준다", async () => {
+    const server = await startServer({
+      ANTHROPIC_API_KEY: "wrong-anthropic-key",
+      APP_GOOD_WORDS_ANTHROPIC_BASE_URL: `${fakeApis.url}/anthropic`,
+    });
+    try {
+      const response = await fetch(`${server.url}/api/ai-models?provider=anthropic`, { headers: { "X-API-Key": apiKey } });
+      const body = await response.json();
+
+      assert.equal(response.status, 502, JSON.stringify(body));
+      assert.ok(body.error.includes("401") && body.error.includes("invalid x-api-key"), body.error);
+      assert.ok(!body.error.includes("wrong-anthropic-key"), body.error);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("Claude CLI에 별칭이나 기본으로 물으면 실제로 답한 모델을 돌려준다", async () => {
+    const ask = async (model) => {
+      const response = await api("/api/growth-feedback", {
+        method: "POST",
+        body: { system: "코치입니다", user: "기록입니다", provider: "claude_cli", model },
+      });
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      return body.model;
+    };
+
+    // 곁일에 쓴 작은 모델이 아니라 글을 쓴 모델이다.
+    assert.equal(await ask("sonnet"), "claude-sonnet-5-5");
+    assert.equal(await ask("opus"), "claude-opus-5-5");
+    assert.equal(await ask(""), "claude-sonnet-5-5");
+    // 쓴 모델을 알려 주지 않는 CLI면 물은 이름을 그대로 돌려준다.
+    assert.equal(await ask("no-usage"), "no-usage");
+  });
+
+  it("Codex CLI는 머리말에 찍은 모델을 돌려준다", async () => {
+    const ask = async (model) => {
+      const response = await api("/api/growth-feedback", {
+        method: "POST",
+        body: { system: "코치입니다", user: "기록입니다", provider: "codex_cli", model },
+      });
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      return body.model;
+    };
+
+    assert.equal(await ask(""), "gpt-6.1-terra");
+    assert.equal(await ask("gpt-6-luna"), "gpt-6-luna");
+  });
+
+  it("Ollama는 서버가 고른 모델을 돌려준다", async () => {
+    const response = await api("/api/growth-feedback", {
+      method: "POST",
+      body: { system: "코치입니다", user: "기록입니다", provider: "ollama", model: "" },
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.model, "qwen3.6:27b");
+  });
+
+  it("열쇠로 부른 Claude·OpenAI도 답에 실린 모델을 돌려준다", async () => {
+    fakeApis.seen.length = 0;
+    const claude = await askKeyed("/api/growth-feedback", {
+      method: "POST",
+      body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "anthropic", model: "claude-opus-5-5" }),
+    });
+    const claudeBody = await claude.json();
+
+    assert.equal(claude.status, 200, JSON.stringify(claudeBody));
+    assert.equal(claudeBody.model, "claude-opus-5-5");
+    assert.equal(JSON.parse(claudeBody.text).system, "코치입니다");
+    const sent = fakeApis.seen.find((request) => request.path === "/anthropic/v1/messages");
+    assert.equal(sent.body.fallbacks, "default");
+    assert.equal(sent.headers["anthropic-beta"], "server-side-fallback-2026-07-01");
+
+    const openAi = await askKeyed("/api/growth-feedback", {
+      method: "POST",
+      body: JSON.stringify({ system: "코치입니다", user: "기록입니다", provider: "openai", model: "gpt-6-luna" }),
+    });
+    const openAiBody = await openAi.json();
+
+    assert.equal(openAi.status, 200, JSON.stringify(openAiBody));
+    assert.equal(openAiBody.model, "gpt-6-luna-2026-11-01");
   });
 });
 

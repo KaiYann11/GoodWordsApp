@@ -37,7 +37,7 @@ data class DailyCoachTip(
     val routine: String = "",
     /** 오늘 안에 해 볼 작은 한 가지. */
     val action: String = "",
-    /** 누가 썼는지. CLI 기본 모델이면 공급자 이름입니다([AiFeedbackSettings.reportModel]). */
+    /** 누가 썼는지. 답한 쪽이 알려 준 모델 이름이고, 모르면 보낸 이름이나 공급자 이름입니다([AiFeedbackSettings.reportModel]). */
     val model: String = "",
     val createdAt: Long = 0L,
     val sharing: DailyCoachSharing = DailyCoachSharing()

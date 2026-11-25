@@ -69,6 +69,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.AiLastAnswer
+import com.codex.appgoodwords.data.AiModelList
+import com.codex.appgoodwords.data.AiModelRefreshState
 import com.codex.appgoodwords.data.AppUpdateState
 import com.codex.appgoodwords.data.AiProvider
 import com.codex.appgoodwords.data.DailyStep
@@ -196,6 +199,13 @@ fun SettingsScreen(
     onDiaryLockChanged: (Boolean) -> Unit = {},
     aiFeedbackSettings: AiFeedbackSettings = AiFeedbackSettings(),
     onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
+    /** 공급자마다 받아 둔 모델 목록. 모델 칸의 계열과 "다른 모델…"이 여기서 나옵니다. */
+    aiModelLists: Map<AiProvider, AiModelList> = emptyMap(),
+    /** 마지막으로 답한 모델. CLI처럼 미리 알 수 없는 쪽의 "지금 답하는 모델"을 적습니다. */
+    aiLastAnswer: AiLastAnswer? = null,
+    aiModelRefresh: AiModelRefreshState = AiModelRefreshState(),
+    /** 모델 목록을 받아 옵니다. 두 번째 값이 거짓이면 받은 지 얼마 안 된 목록은 그대로 둡니다. */
+    onRefreshAiModels: (AiProvider, Boolean) -> Unit = { _, _ -> },
     /**
      * 오늘의 한마디로 무엇이 나가는지 보여 줍니다.
      *
@@ -588,6 +598,10 @@ fun SettingsScreen(
                         AiFeedbackSection(
                             settings = aiFeedbackSettings,
                             onChanged = onAiFeedbackSettingsChanged,
+                            modelLists = aiModelLists,
+                            lastAnswer = aiLastAnswer,
+                            modelRefresh = aiModelRefresh,
+                            onRefreshModels = onRefreshAiModels,
                             onPreviewCoachPrompt = onPreviewCoachPrompt,
                             canScheduleExactAlarms = canScheduleExactAlarms,
                             onOpenExactAlarmSettings = onOpenExactAlarmSettings
@@ -1331,6 +1345,10 @@ private fun List<DailyStep>.moved(from: Int, to: Int): List<DailyStep> {
 private fun AiFeedbackSection(
     settings: AiFeedbackSettings,
     onChanged: (AiFeedbackSettings) -> Unit,
+    modelLists: Map<AiProvider, AiModelList> = emptyMap(),
+    lastAnswer: AiLastAnswer? = null,
+    modelRefresh: AiModelRefreshState = AiModelRefreshState(),
+    onRefreshModels: (AiProvider, Boolean) -> Unit = { _, _ -> },
     onPreviewCoachPrompt: (suspend () -> Result<String>)? = null,
     canScheduleExactAlarms: Boolean = true,
     onOpenExactAlarmSettings: () -> Unit = {}
@@ -1344,6 +1362,11 @@ private fun AiFeedbackSection(
     // 공급자를 바꾸면 칸에 남아 있던 것이 다른 곳의 열쇠입니다. 그대로 저장하면 서로 뒤바뀝니다.
     LaunchedEffect(settings.activeKey, provider) {
         if (apiKeyText != settings.activeKey) apiKeyText = settings.activeKey
+    }
+    // 이 칸을 열거나 공급자를 바꾸면 모델 목록이 묵었는지 보고 새로 받습니다(받은 지 얼마 안 됐으면 그대로).
+    // 열쇠를 막 넣은 뒤에도 다시 봅니다 — 열쇠가 없어 못 받았던 목록을 그 열쇠로 받습니다.
+    LaunchedEffect(provider, settings.activeKey) {
+        onRefreshModels(provider, false)
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -1409,16 +1432,15 @@ private fun AiFeedbackSection(
                 }
             }
 
-            Text("모델", style = MaterialTheme.typography.titleSmall)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(provider.models) { model ->
-                    FilterChip(
-                        selected = settings.effectiveModel == model,
-                        onClick = { onChanged(settings.copy(model = model)) },
-                        label = { Text(provider.modelLabel(model)) }
-                    )
-                }
-            }
+            AiModelPicker(
+                settings = settings,
+                list = modelLists[provider] ?: AiModelList(),
+                lastAnswer = lastAnswer,
+                loading = modelRefresh.loading == provider,
+                error = modelRefresh.errors[provider],
+                onChanged = onChanged,
+                onRefresh = { onRefreshModels(provider, true) }
+            )
 
             Text("자동 실행 주기", style = MaterialTheme.typography.titleSmall)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -581,6 +581,8 @@ DELETE /api/books/{id}
 POST /api/books/{id}/quotes
 GET  /api/events
 DELETE /api/events?ids=1,2,3
+POST /api/growth-feedback
+GET  /api/ai-models?provider=anthropic|openai|claude_cli|codex_cli|ollama
 ```
 
 ### 루틴에는 하루에 밟는 차례가 있습니다
@@ -642,8 +644,14 @@ DELETE /api/events?ids=1,2,3
 
 ```text
 POST /api/growth-feedback   {"system":"...","user":"...","model":"gpt-6-luna"}
-           ->               {"text":"모델이 쓴 JSON 문자열"}
+           ->               {"text":"모델이 쓴 JSON 문자열","model":"실제로 답한 모델"}
 ```
+
+`model`은 **실제로 답한 모델**입니다(1.26.0부터). 앱은 "Sonnet 최신"(`sonnet`)이나 CLI 기본(빈 값)처럼
+세대를 적지 않고 물을 수 있어서, 돌아보기에 무엇이 썼는지 남기려면 답한 쪽이 알려 줘야 합니다.
+API는 답의 `model`, Claude CLI는 JSON의 `modelUsage`(글을 가장 많이 쓴 모델), Codex는 stderr 머리말의
+`model:` 줄, Ollama는 답의 `model`에서 읽습니다. 알 수 없으면 물은 이름을 그대로 돌려줍니다. 옛 앱은
+이 칸을 읽지 않습니다.
 
 **어디에 물어볼지는 기기가 정합니다.** `provider`에 `openai`나 `anthropic`을 실어 보내고, 서버는
 그에 맞는 열쇠를 골라 씁니다(`aiProviders`). 값이 없으면 OpenAI입니다. 이 값을 보내지 않던
@@ -672,7 +680,8 @@ POST /api/growth-feedback   {"system":"...","user":"...","provider":"claude_cli"
 POST /api/growth-feedback   {"system":"...","user":"...","provider":"codex_cli","model":"gpt-6.1-sol"}
 ```
 
-`model`을 비우면 `--model`을 붙이지 않아 CLI에 설정해 둔 기본 모델이 답합니다. 모델 이름은
+`model`을 비우면 `--model`을 붙이지 않아 CLI에 설정해 둔 기본 모델이 답합니다. Claude CLI는 별칭도
+받습니다(`sonnet` → 가장 새 Sonnet, 2.1.331에서 확인). 모델 이름은
 CLI에 인자로 나가는 **유일한 사용자 값**이라 글자를 검사합니다(영숫자와 `._:-`만). 셸이 다르게
 읽을 글자가 섞이면 400입니다.
 
@@ -730,6 +739,31 @@ JSON입니다. **생각 모드는 끕니다** — PC 한 대로 돌리면 생각
 
 Ollama가 꺼져 있으면 503과 함께 어디를 봐야 하는지, 없는 모델이면 Ollama가 준 사유
 (`model "..." not found`)를 502로 돌려줍니다.
+
+#### 고를 수 있는 모델 목록
+
+`GET /api/ai-models?provider=…`는 고를 수 있는 모델을 내줍니다(1.26.0부터). 예전에는 앱이 모델 이름을
+들고 있어서 새 모델이 나올 때마다 앱을 다시 게시해야 했습니다(사용자가 바꿈, 2026-11-25). 앱은 이 목록으로
+"Sonnet 최신" 같은 계열 칸의 가장 새 모델을 셉니다.
+
+```text
+GET /api/ai-models?provider=codex_cli
+  -> {"provider":"codex_cli","models":[{"id":"gpt-6.1-terra","label":"GPT-6.1 Terra","createdAt":0}, ...],"fetchedAt":1764...}
+```
+
+- `anthropic`·`openai` — 서버의 열쇠로 그 API의 모델 목록(`GET /v1/models`)을 받습니다. Claude는 새로 나온
+  것부터 오고 여러 쪽이면 `last_id`로 이어 받습니다. OpenAI는 그림·소리·임베딩 모델을 빼고 글 모델만 새로
+  나온 것부터 둡니다(`isOpenAiChatModel` — 앱 `AiModels.isOpenAiChatModel`과 같은 규칙). 열쇠가 없으면 503과
+  어느 열쇠인지를 돌려줍니다 — 앱은 그때 휴대폰의 열쇠로 직접 받습니다.
+- `codex_cli` — Codex CLI가 스스로 받아 두는 `models_cache.json`(`CODEX_HOME`, 없으면 `~/.codex`)에서
+  보여 주는 것(`visibility: "list"`)만 Codex의 차례(`priority`)로 둡니다. 파일의 계정 칸은 싣지 않습니다.
+  파일이 없으면 503입니다(서버 PC에서 `codex`를 한 번 돌리면 생깁니다).
+- `ollama` — 받아 둔 글 모델, 가장 최근에 받은 것부터(기본으로 고르는 것과 같은 차례).
+- `claude_cli` — 목록을 내주는 명령이 없어 빈 목록입니다. 앱은 별칭(`opus`·`sonnet`·`haiku`)으로 그 계열의
+  가장 새 모델을 부르고, 답한 실제 이름은 위의 `model`로 받습니다.
+
+시험은 열쇠로 부르는 두 API를 가짜로 붙입니다 — `APP_GOOD_WORDS_ANTHROPIC_BASE_URL`·
+`APP_GOOD_WORDS_OPENAI_BASE_URL`(Ollama 주소처럼 서버 설정에서만 읽습니다). 운영에서는 쓰지 않습니다.
 
 **서버는 물음을 만들지 않습니다.** 무엇이 나갈지는 앱 `GrowthPrompt`가 정하고 서버는 전달만
 합니다. 서버가 기록을 다시 읽어 물음을 짜면, 사용자가 앱에서 일기 본문은 빼라고 정해 둔 것이

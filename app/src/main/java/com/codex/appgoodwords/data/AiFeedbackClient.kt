@@ -26,7 +26,8 @@ class AiFeedbackClient {
     /**
      * 물어보고 답 글을 그대로 돌려줍니다. 해석은 [GrowthReportParser]가 맡습니다.
      *
-     * @return 모델이 쓴 글(JSON 문자열이기를 기대합니다)
+     * @param model 보낼 모델 이름([AiFeedbackSettings.requestModel]). CLI·Ollama는 빈 값이면 서버 쪽 기본입니다.
+     * @return 모델이 쓴 글(JSON 문자열이기를 기대합니다)과 실제로 답한 모델
      */
     suspend fun ask(
         system: String,
@@ -34,7 +35,7 @@ class AiFeedbackClient {
         model: String,
         aiSettings: AiFeedbackSettings,
         syncSettings: ServerSyncSettings
-    ): String = withContext(Dispatchers.IO) {
+    ): AiAnswer = withContext(Dispatchers.IO) {
         val provider = aiSettings.activeProvider
         val viaServer = syncSettings.serverUrl.isNotBlank()
         if (aiSettings.requiresServer) {
@@ -60,13 +61,92 @@ class AiFeedbackClient {
         }
     }
 
+    /**
+     * 고를 수 있는 모델 목록을 받아 옵니다.
+     *
+     * 예전에는 앱이 목록을 들고 있어 새 모델이 나올 때마다 앱을 다시 게시해야 했습니다(사용자가 바꿈, 2026-11-25). 받는 곳은
+     * 묻는 길과 같습니다 — 서버가 있으면 서버(`GET /api/ai-models`, 서버가 그 PC의 Codex 목록·Ollama·열쇠로 API 목록을
+     * 받아 줍니다), 서버에 열쇠가 없거나 서버가 없으면 이 기기의 열쇠로 공급자에게 직접 묻습니다. Claude CLI는 목록을 내줄
+     * 길이 없어 빈 목록입니다(계열 이름을 그대로 넘깁니다 — [AiProvider.familyAliases]).
+     *
+     * @throws IllegalStateException·IOException 받을 길이 없거나 실패했을 때. 사유는 화면에 그대로 보입니다.
+     */
+    suspend fun listModels(
+        aiSettings: AiFeedbackSettings,
+        syncSettings: ServerSyncSettings,
+        now: Long = System.currentTimeMillis()
+    ): AiModelList = withContext(Dispatchers.IO) {
+        val provider = aiSettings.activeProvider
+        val viaServer = syncSettings.serverUrl.isNotBlank()
+        val models: List<AiModelInfo> = when {
+            provider.familyAliases -> emptyList()
+            provider.serverOnly -> {
+                require(viaServer) { "${provider.label} 목록은 서버가 알려 줍니다. 설정에서 서버 주소를 먼저 지정해 주세요." }
+                listServerModels(provider, syncSettings)
+            }
+            viaServer -> runCatching { listServerModels(provider, syncSettings) }
+                .getOrElse { failure ->
+                    // 서버에 열쇠가 없는 것이 흔합니다(열쇠는 휴대폰에만 둔 사람). 이 기기 열쇠가 있으면 그것으로 묻습니다.
+                    if (aiSettings.canCallDirectly) listDirectly(provider, aiSettings.activeKey) else throw failure
+                }
+            else -> {
+                require(aiSettings.canCallDirectly) {
+                    "AI 열쇠가 없습니다. 설정에서 ${provider.label} API 키를 넣거나 서버 주소를 지정해 주세요."
+                }
+                listDirectly(provider, aiSettings.activeKey)
+            }
+        }
+        AiModelList(models = models, fetchedAt = now)
+    }
+
+    private fun listServerModels(provider: AiProvider, syncSettings: ServerSyncSettings): List<AiModelInfo> {
+        val url = "${normalizeServerUrl(syncSettings.serverUrl)}$MODELS_PATH?provider=${provider.name.lowercase()}"
+        return AiModelListJson.parseServer(
+            request(url = url, body = null, headers = serverHeaders(syncSettings), readTimeoutMillis = LIST_TIMEOUT)
+        )
+    }
+
+    private fun listDirectly(provider: AiProvider, apiKey: String): List<AiModelInfo> = when (provider) {
+        AiProvider.ANTHROPIC -> buildList {
+            // 쪽마다 천 개까지 옵니다. 다음 쪽이 있으면 이어 받되 끝없이 넘기지는 않습니다(서버 `listAnthropicModels`와 같게).
+            var afterId: String? = null
+            for (page in 0 until MAX_MODEL_PAGES) {
+                val query = "limit=1000" + afterId?.let { "&after_id=" + java.net.URLEncoder.encode(it, "UTF-8") }.orEmpty()
+                val (models, next) = AiModelListJson.parseAnthropicPage(
+                    request(
+                        url = "$ANTHROPIC_MODELS_URL?$query",
+                        body = null,
+                        headers = mapOf("x-api-key" to apiKey.trim(), "anthropic-version" to ANTHROPIC_VERSION),
+                        readTimeoutMillis = LIST_TIMEOUT
+                    )
+                )
+                addAll(models)
+                afterId = next ?: break
+            }
+        }
+        AiProvider.OPENAI -> AiModelListJson.parseOpenAi(
+            request(
+                url = OPENAI_MODELS_URL,
+                body = null,
+                headers = mapOf("Authorization" to "Bearer ${apiKey.trim()}"),
+                readTimeoutMillis = LIST_TIMEOUT
+            )
+        )
+        AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI, AiProvider.OLLAMA ->
+            error("${provider.label} 목록은 서버가 알려 줍니다. 서버 주소를 지정해 주세요.")
+    }
+
+    private fun serverHeaders(syncSettings: ServerSyncSettings): Map<String, String> = buildMap {
+        if (syncSettings.apiKey.isNotBlank()) put("X-API-Key", syncSettings.apiKey.trim())
+    }
+
     private fun askDirectly(
         system: String,
         user: String,
         model: String,
         provider: AiProvider,
         apiKey: String
-    ): String = when (provider) {
+    ): AiAnswer = when (provider) {
         AiProvider.OPENAI -> askOpenAi(system, user, model, apiKey)
         AiProvider.ANTHROPIC -> askAnthropic(system, user, model, apiKey)
         AiProvider.CLAUDE_CLI, AiProvider.CODEX_CLI, AiProvider.OLLAMA ->
@@ -79,7 +159,7 @@ class AiFeedbackClient {
         model: String,
         provider: AiProvider,
         syncSettings: ServerSyncSettings
-    ): String {
+    ): AiAnswer {
         val body = JSONObject()
             .put("system", system)
             .put("user", user)
@@ -91,12 +171,11 @@ class AiFeedbackClient {
             request(
                 url = "${normalizeServerUrl(syncSettings.serverUrl)}$SERVER_PATH",
                 body = body,
-                headers = buildMap {
-                    if (syncSettings.apiKey.isNotBlank()) put("X-API-Key", syncSettings.apiKey.trim())
-                }
+                headers = serverHeaders(syncSettings)
             )
         )
-        return response.optString("text")
+        // 1.26.0부터 서버가 답한 모델을 함께 보냅니다(`model`). 옛 서버면 없어서 보낸 이름으로 적습니다.
+        return AiAnswer(text = response.optString("text"), model = response.optString("model").ifBlank { model })
     }
 
     private fun askOpenAi(
@@ -104,7 +183,7 @@ class AiFeedbackClient {
         user: String,
         model: String,
         apiKey: String
-    ): String {
+    ): AiAnswer {
         val body = JSONObject()
             .put("model", model)
             .put(
@@ -124,11 +203,13 @@ class AiFeedbackClient {
                 headers = mapOf("Authorization" to "Bearer ${apiKey.trim()}")
             )
         )
-        return response.optJSONArray("choices")
+        val text = response.optJSONArray("choices")
             ?.optJSONObject(0)
             ?.optJSONObject("message")
             ?.optString("content")
             .orEmpty()
+        // 별칭으로 물어도 답에는 실제 판(`gpt-6-luna-2026-…`)이 실립니다.
+        return AiAnswer(text = text, model = response.optString("model").ifBlank { model })
     }
 
     /**
@@ -149,7 +230,7 @@ class AiFeedbackClient {
         user: String,
         model: String,
         apiKey: String
-    ): String {
+    ): AiAnswer {
         val body = JSONObject()
             .put("model", model)
             .put("max_tokens", ANTHROPIC_MAX_TOKENS)
@@ -175,7 +256,7 @@ class AiFeedbackClient {
         if (response.optString("stop_reason") == "refusal") {
             error("AI가 이 요청에 답하지 않았습니다. 설정에서 일기 본문 보내기를 끄고 다시 시도해 보세요.")
         }
-        return anthropicText(response)
+        return AiAnswer(text = anthropicText(response), model = response.optString("model").ifBlank { model })
     }
 
     /** 글 조각만 골라 잇습니다. 생각한 내용 같은 다른 조각이 섞여 있어도 버립니다. */
@@ -189,23 +270,32 @@ class AiFeedbackClient {
         }
     }
 
-    private fun request(url: String, body: String, headers: Map<String, String>): String {
+    /**
+     * 한 번 주고받습니다. [body]가 있으면 POST, 없으면 GET입니다.
+     *
+     * 글을 쓰는 데 시간이 걸려 기본은 동기화보다 넉넉히 기다립니다. 서버는 180초에 포기하고 사유를 돌려주므로, 그 사유가
+     * 닿도록 서버보다 조금 더 기다립니다. 목록 받기처럼 금방 끝날 일은 [readTimeoutMillis]를 줄여 부릅니다.
+     */
+    private fun request(
+        url: String,
+        body: String?,
+        headers: Map<String, String>,
+        readTimeoutMillis: Int = 200_000
+    ): String {
         val endpoint = URL(url)
         val connection = (endpoint.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
+            requestMethod = if (body == null) "GET" else "POST"
             instanceFollowRedirects = false
             connectTimeout = 15_000
-            // 글을 쓰는 데 시간이 걸립니다. 동기화보다 넉넉히 둡니다.
-            // 서버는 180초에 포기하고 사유를 돌려주므로, 그 사유가 닿도록 서버보다 조금 더 기다립니다.
-            readTimeout = 200_000
-            doOutput = true
+            readTimeout = readTimeoutMillis
+            doOutput = body != null
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            if (body != null) setRequestProperty("Content-Type", "application/json; charset=utf-8")
             headers.forEach { (name, value) -> setRequestProperty(name, value) }
         }
 
         return try {
-            connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(body) }
+            if (body != null) connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(body) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream ?: connection.inputStream
             val text = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -242,12 +332,22 @@ class AiFeedbackClient {
 
     private companion object {
         const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+        const val OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
         const val ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+        const val ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
         const val ANTHROPIC_VERSION = "2023-06-01"
         const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
         /** 돌아보기 한 편은 짧지만, 생각하는 데 쓰는 몫까지 여기서 셉니다. 모자라면 답이 끊깁니다. */
         const val ANTHROPIC_MAX_TOKENS = 16_000
         const val SERVER_PATH = "/api/growth-feedback"
+        const val MODELS_PATH = "/api/ai-models"
+
+        /** 목록은 금방 옵니다. 글을 쓸 때만큼 붙들고 있지 않습니다. */
+        const val LIST_TIMEOUT = 20_000
+        const val MAX_MODEL_PAGES = 5
     }
 }
+
+/** AI가 쓴 글과, 실제로 답한 모델(서버·API가 알려 준 이름. 모르면 보낸 이름). */
+data class AiAnswer(val text: String, val model: String)
