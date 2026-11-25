@@ -28,6 +28,8 @@ class DailyCoachCoordinator(
     private val settingsStore: SettingsStore,
     private val repository: AppRepository,
     private val client: AiFeedbackClient = AiFeedbackClient(),
+    /** 보낼 모델과 받아 둔 모델 목록([AiModelRepository]). 돌아보기와 같은 것을 씁니다. */
+    private val models: AiModelRepository = AiModelRepository(settingsStore, client),
     /**
      * 화면을 떠나 끊긴 물음을 배경 일꾼에게 넘깁니다([refresh]·[reply]의 `interrupted`).
      *
@@ -124,11 +126,12 @@ class DailyCoachCoordinator(
         update(today) { it.asked(today, now) }
         // 답은 그때의 상태에 얹습니다([update]). 묻는 데 몇 분이 걸리기도 해서, 그 사이 눌러 둔
         // 담기·보기나 보낸 내 말을 묻기 전의 것으로 덮지 않게 합니다.
-        val rawText = try {
+        val requested = models.requestModel(aiSettings)
+        val aiAnswer = try {
             client.ask(
                 system = DailyCoachPrompt.systemPrompt(),
                 user = DailyCoachPrompt.userPrompt(digest),
-                model = aiSettings.effectiveModel,
+                model = requested,
                 aiSettings = aiSettings,
                 syncSettings = syncSettings
             )
@@ -143,7 +146,12 @@ class DailyCoachCoordinator(
             return update(today) { it.withError(failure.message ?: "오늘의 한마디를 받지 못했습니다.") }
         }
 
-        val tip = DailyCoachParser.parse(rawText, model = aiSettings.reportModel, now = now)
+        models.recordAnswer(aiSettings, aiAnswer)
+        val tip = DailyCoachParser.parse(
+            aiAnswer.text,
+            model = aiSettings.reportModel(answered = aiAnswer.model, requested = requested),
+            now = now
+        )
             ?: return update(today) { it.withError("코치가 보낸 답을 읽지 못했습니다.") }
         // 받는 사이 설정을 껐어도 물을 때 허용했던 범위로 표시해야 다음 물음으로 새지 않습니다.
         val sharedTip = tip.copy(sharing = DailyCoachSharing(aiSettings.includeDiaryBody, aiSettings.includeGoals))
@@ -207,11 +215,12 @@ class DailyCoachCoordinator(
 
         // 한마디와 같은 기록에 오늘 나눈 말을 얹습니다. 무엇이 나가는지는 같은 설정(일기 본문·목표)이 정합니다.
         val digest = buildDigest(today, at, aiSettings.includeDiaryBody, aiSettings.includeGoals, stored)
-        val rawText = try {
+        val requested = models.requestModel(aiSettings)
+        val aiAnswer = try {
             client.ask(
                 system = DailyCoachPrompt.replySystemPrompt(),
                 user = DailyCoachPrompt.replyUserPrompt(digest),
-                model = aiSettings.effectiveModel,
+                model = requested,
                 aiSettings = aiSettings,
                 syncSettings = syncSettings
             )
@@ -225,9 +234,13 @@ class DailyCoachCoordinator(
         }
 
         // 답이 온 때를 적습니다. 대화 화면은 이 시각을 말풍선 아래에 적고, 화면을 연 뒤에 온 답만 써지듯 보여 줍니다.
-        val answer = DailyCoachParser.parseAnswer(rawText, model = aiSettings.reportModel, now = System.currentTimeMillis())
-            ?: return update(today) { it.withReplyError("코치가 보낸 답을 읽지 못했습니다.") }
-        val sharedAnswer = answer.copy(sharing = DailyCoachSharing(aiSettings.includeDiaryBody, aiSettings.includeGoals))
+        models.recordAnswer(aiSettings, aiAnswer)
+        val coachAnswer = DailyCoachParser.parseAnswer(
+            aiAnswer.text,
+            model = aiSettings.reportModel(answered = aiAnswer.model, requested = requested),
+            now = System.currentTimeMillis()
+        ) ?: return update(today) { it.withReplyError("코치가 보낸 답을 읽지 못했습니다.") }
+        val sharedAnswer = coachAnswer.copy(sharing = DailyCoachSharing(aiSettings.includeDiaryBody, aiSettings.includeGoals))
         return update(today) { it.answered(sharedAnswer, askedAt) }
     }
 

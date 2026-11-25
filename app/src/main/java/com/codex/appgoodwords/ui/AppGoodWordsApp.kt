@@ -303,6 +303,9 @@ fun AppGoodWordsApp(
     val attachmentShots by viewModel.attachmentShots.collectAsStateWithLifecycle()
     val growthReports by viewModel.growthReports.collectAsStateWithLifecycle()
     val aiFeedbackSettings by viewModel.aiFeedbackSettings.collectAsStateWithLifecycle()
+    val aiModelLists by viewModel.aiModelLists.collectAsStateWithLifecycle()
+    val aiLastAnswer by viewModel.aiLastAnswer.collectAsStateWithLifecycle()
+    val aiModelRefresh by viewModel.aiModelRefresh.collectAsStateWithLifecycle()
     val dailyCoach by viewModel.dailyCoach.collectAsStateWithLifecycle()
     val coachFingerprint by viewModel.coachFingerprint.collectAsStateWithLifecycle()
     val coachLoading by viewModel.coachLoading.collectAsStateWithLifecycle()
@@ -2360,6 +2363,10 @@ fun AppGoodWordsApp(
                             },
                             aiFeedbackSettings = aiFeedbackSettings,
                             onAiFeedbackSettingsChanged = { updated -> viewModel.updateAiFeedbackSettings(updated) },
+                            aiModelLists = aiModelLists,
+                            aiLastAnswer = aiLastAnswer,
+                            aiModelRefresh = aiModelRefresh,
+                            onRefreshAiModels = { provider, force -> viewModel.refreshAiModels(provider, force) },
                             // 켜기 전에 무엇이 나가는지 눈으로 볼 수 있어야 합니다.
                             onPreviewCoachPrompt = { viewModel.previewDailyCoachPrompt() },
                             canScheduleExactAlarms = canScheduleExactAlarms,

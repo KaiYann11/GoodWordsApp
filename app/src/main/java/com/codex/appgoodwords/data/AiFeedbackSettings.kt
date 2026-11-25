@@ -16,7 +16,10 @@ data class AiFeedbackSettings(
     val openAiKey: String = "",
     /** Claude 열쇠. 공급자를 바꿔 볼 때 앞서 넣어 둔 열쇠가 지워지지 않게 따로 둡니다. */
     val anthropicKey: String = "",
-    /** 비어 있으면 고른 공급자의 기본 모델. [effectiveModel]로 읽습니다. */
+    /**
+     * 고른 모델: 빈 값(공급자 기본), `latest:<계열>`(그 계열의 최신), 또는 모델 이름 그대로([AiModels]).
+     * [modelChoice]로 읽고, 보낼 이름은 [requestModel]이 정합니다.
+     */
     val model: String = "",
     /** [ReportPeriod]의 이름, 또는 꺼짐을 뜻하는 빈 문자열. */
     val schedule: String = "",
@@ -98,23 +101,40 @@ data class AiFeedbackSettings(
         }
 
     /**
-     * 실제로 부를 모델.
-     *
-     * 공급자를 바꾸면 앞서 고른 모델은 그 공급자에 없는 이름입니다. 그대로 보내면
-     * "모델을 찾을 수 없다"는 오류만 돌아오므로, 여기서 그 공급자의 기본으로 당겨 붙입니다.
-     * CLI·Ollama의 기본은 빈 값이고, 그러면 서버가 CLI에 설정해 둔 모델(Ollama는 서버가 고른 모델)로 돌립니다.
+     * 지금 고른 것. 빈 값이면 공급자 기본입니다 — 열쇠로 부르는 곳은 기본 계열의 최신(`latest:opus`), CLI·Ollama는 빈 값
+     * 그대로(서버 쪽 기본)입니다.
      */
-    val effectiveModel: String
-        get() = activeProvider.models.firstOrNull { it == model.trim() } ?: activeProvider.defaultModel
+    val modelChoice: String
+        get() = model.trim().ifBlank { activeProvider.defaultFamily?.let(AiModels::latest).orEmpty() }
 
     /**
-     * 돌아보기에 적어 둘 "누가 썼는지".
+     * 실제로 보낼 모델 이름.
      *
-     * CLI·Ollama 기본 모델로 돌리면 [effectiveModel]이 빈 값이라 무엇이 썼는지 남지 않습니다.
-     * 그때는 공급자 이름을 적습니다.
+     * 계열을 골랐으면 [models](받아 둔 목록)에서 그 계열의 가장 새 것을 고릅니다. 받아 둔 목록에 그 계열이 없으면 앱에 든
+     * 목록에서, 거기에도 없으면 공급자 기본 계열에서 고릅니다 — 고른 계열이 사라졌다고 돌아보기·한마디가 멈추지 않게
+     * (예전 판의 "목록에서 빠지면 기본으로"와 같은 뜻). Claude CLI는 계열 이름(별칭)을 그대로 넘기고 CLI가 가장 새 것을
+     * 고릅니다. 빈 값은 CLI·Ollama에서 "서버 쪽 기본"이라 그대로 갑니다.
      */
-    val reportModel: String
-        get() = effectiveModel.ifBlank { activeProvider.label }
+    fun requestModel(models: List<AiModelInfo>): String {
+        val provider = activeProvider
+        val choice = modelChoice
+        val family = AiModels.familyOfChoice(choice) ?: return choice
+        if (provider.familyAliases) return family
+        fun newest(of: String) = AiModels.newestIn(of, models) ?: AiModels.newestIn(of, provider.builtInModels)
+        return (newest(family) ?: provider.defaultFamily?.let(::newest))?.id.orEmpty()
+    }
+
+    /**
+     * 돌아보기·한마디에 적어 둘 "누가 썼는지".
+     *
+     * 답한 쪽이 알려 준 이름([answered] — 서버·API가 답과 함께 보냅니다)이 먼저입니다. "Sonnet 최신"이나 CLI 기본으로
+     * 물으면 보낸 이름에는 세대가 없습니다. 아무것도 모르면 공급자 이름을 적습니다.
+     */
+    fun reportModel(answered: String, requested: String): String =
+        answered.trim().ifBlank { requested.trim() }.ifBlank { activeProvider.label }
+
+    /** 모델만 바꿉니다. 빈 값은 공급자 기본입니다. */
+    fun withModel(choice: String): AiFeedbackSettings = copy(model = choice.trim())
 
     /** 서버가 있어야만 부를 수 있는지. CLI와 Ollama는 서버 PC에 있고 이 기기에는 없습니다. */
     val requiresServer: Boolean
@@ -179,7 +199,7 @@ data class AiFeedbackSettings(
         return last.plusDays(period.days.toLong()) <= today
     }
 
-    /** 열쇠는 그대로 두고 공급자만 바꿉니다. 모델은 [effectiveModel]이 알아서 당겨 붙입니다. */
+    /** 열쇠는 그대로 두고 공급자만 바꿉니다. 모델은 그 공급자의 기본으로 돌아갑니다 — 앞서 고른 것은 다른 곳의 이름입니다. */
     fun withProvider(provider: AiProvider): AiFeedbackSettings =
         copy(provider = provider.name, model = "")
 

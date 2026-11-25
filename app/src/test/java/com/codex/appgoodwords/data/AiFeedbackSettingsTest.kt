@@ -37,37 +37,88 @@ class AiFeedbackSettingsTest {
     }
 
     @Test
-    fun aModelFromTheOtherProviderIsPulledBackToItsDefault() {
-        // gpt-6.1-sol을 Claude에 보내면 "모델을 찾을 수 없다"는 말만 옵니다.
-        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "gpt-6.1-sol")
-
-        assertEquals("claude-opus-5-5", settings.effectiveModel)
-    }
-
-    @Test
-    fun anEmptyModelMeansTheDefaultOfWhicheverProviderIsChosen() {
-        assertEquals("gpt-6-luna", AiFeedbackSettings().effectiveModel)
-        assertEquals(
-            "claude-opus-5-5",
-            AiFeedbackSettings().withProvider(AiProvider.ANTHROPIC).effectiveModel
+    fun aFamilyTheProviderDoesNotHaveFallsBackToItsDefaultFamily() {
+        // gpt-6.1-sol을 들고 Claude로 넘어오면 "Sol 최신"이 됩니다. Claude에는 그런 계열이 없으니 기본(Opus)으로 묻습니다 —
+        // "모델을 찾을 수 없다"로 멈추지 않게.
+        val settings = AiFeedbackSettings(
+            provider = AiProvider.ANTHROPIC.name,
+            model = AiModels.migrateLegacy(AiProvider.ANTHROPIC, "gpt-6.1-sol")
         )
+
+        assertEquals("claude-opus-5-5", settings.requestModel(emptyList()))
     }
 
     @Test
-    fun aChosenModelIsKept() {
-        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-haiku-5-5")
-
-        assertEquals("claude-haiku-5-5", settings.effectiveModel)
+    fun anEmptyModelMeansTheNewestOfTheDefaultFamily() {
+        assertEquals(AiModels.latest("luna"), AiFeedbackSettings().modelChoice)
+        assertEquals("gpt-6-luna", AiFeedbackSettings().requestModel(emptyList()))
+        val claude = AiFeedbackSettings().withProvider(AiProvider.ANTHROPIC)
+        assertEquals(AiModels.latest("opus"), claude.modelChoice)
+        assertEquals("claude-opus-5-5", claude.requestModel(emptyList()))
     }
 
     @Test
-    fun aModelThatLeftTheListFallsBackToTheDefaultInsteadOfFailing() {
-        // 목록을 새 세대로 바꾸면 휴대폰에는 예전에 고른 이름이 그대로 남아 있습니다. 그 이름을 그대로 보내면
-        // 공급자가 "그런 모델 없음"으로 거절해, 업데이트만 했는데 돌아보기와 오늘의 한마디가 멈춥니다.
-        assertEquals("claude-opus-5-5", AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-opus-5").effectiveModel)
-        assertEquals("gpt-6-luna", AiFeedbackSettings(provider = AiProvider.OPENAI.name, model = "gpt-4o-mini").effectiveModel)
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-4-5").effectiveModel)
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = "gpt-5.5").effectiveModel)
+    fun aNameChosenFromTheListIsSentAsItIs() {
+        // "다른 모델…"에서 고른 이름은 그대로 갑니다. 목록에 없다고 바꾸면 고른 사람이 모르는 모델이 답합니다.
+        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = "claude-haiku-4-5-20251001")
+
+        assertEquals("claude-haiku-4-5-20251001", settings.requestModel(emptyList()))
+    }
+
+    @Test
+    fun theLatestOfAFamilyFollowsTheFetchedListWithoutAnAppUpdate() {
+        // 앱에 든 목록에는 Opus 5.5가 끝이지만, 받아 온 목록에 Opus 6이 있으면 그것을 부릅니다.
+        val settings = AiFeedbackSettings(provider = AiProvider.ANTHROPIC.name, model = AiModels.latest("opus"))
+        val fetched = listOf(
+            AiModelInfo("claude-opus-6", "Claude Opus 6"),
+            AiModelInfo("claude-sonnet-5-5"),
+            AiModelInfo("claude-opus-5-5")
+        )
+
+        assertEquals("claude-opus-5-5", settings.requestModel(emptyList()))
+        assertEquals("claude-opus-6", settings.requestModel(fetched))
+        // 받아 온 목록에 그 계열이 없으면 앱에 든 목록에서 셉니다.
+        assertEquals("claude-haiku-5-5", settings.withModel(AiModels.latest("haiku")).requestModel(fetched))
+    }
+
+    @Test
+    fun claudeCliGetsTheAliasAndPicksTheNewestItself() {
+        // Claude CLI는 `--model sonnet`을 가장 새 Sonnet으로 읽습니다. 앱이 세대를 정해 보내면 다시 낡습니다.
+        val settings = AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = AiModels.latest("sonnet"))
+
+        assertEquals("sonnet", settings.requestModel(listOf(AiModelInfo("claude-sonnet-9"))))
+    }
+
+    @Test
+    fun namesSavedByOldVersionsMoveToTheLatestOfTheirFamily() {
+        // 1.25.x는 목록에 있는 이름을 그대로 저장했습니다. 같은 계열의 최신으로 옮깁니다(사용자가 고름, 2026-11-25) —
+        // 지금은 같은 모델이고 다음 세대가 나오면 저절로 넘어갑니다.
+        assertEquals(AiModels.latest("sonnet"), AiModels.migrateLegacy(AiProvider.ANTHROPIC, "claude-sonnet-5-5"))
+        assertEquals(AiModels.latest("sonnet"), AiModels.migrateLegacy(AiProvider.CLAUDE_CLI, "claude-sonnet-5-5"))
+        assertEquals(AiModels.latest("fable"), AiModels.migrateLegacy(AiProvider.ANTHROPIC, "claude-fable-5-1"))
+        assertEquals(AiModels.latest("sol"), AiModels.migrateLegacy(AiProvider.CODEX_CLI, "gpt-6.1-sol"))
+        assertEquals(AiModels.latest("luna"), AiModels.migrateLegacy(AiProvider.OPENAI, "gpt-6-luna"))
+        // 예전 판이 이미 기본으로 돌리던 이름은 계속 기본입니다(빈 값).
+        assertEquals("", AiModels.migrateLegacy(AiProvider.OPENAI, "gpt-4o-mini"))
+        assertEquals("", AiModels.migrateLegacy(AiProvider.CODEX_CLI, "gpt-5.5"))
+        assertEquals("", AiModels.migrateLegacy(AiProvider.OLLAMA, "gpt-4o"))
+        // CLI에 칸이 없는 계열은 CLI 기본으로 둡니다(Fable은 구독에서 막혀 있었습니다).
+        assertEquals("", AiModels.migrateLegacy(AiProvider.CLAUDE_CLI, "claude-fable-5-1"))
+        // 빈 값과 이미 옮긴 값은 그대로입니다.
+        assertEquals("", AiModels.migrateLegacy(AiProvider.ANTHROPIC, ""))
+        assertEquals(AiModels.latest("opus"), AiModels.migrateLegacy(AiProvider.ANTHROPIC, AiModels.latest("opus")))
+    }
+
+    @Test
+    fun anOldSavedNameStillGetsAnAnswerAfterTheUpdate() {
+        // 업데이트만 했는데 돌아보기와 오늘의 한마디가 "그런 모델 없음"으로 멈추면 안 됩니다.
+        fun after(provider: AiProvider, stored: String) =
+            AiFeedbackSettings(provider = provider.name, model = AiModels.migrateLegacy(provider, stored)).requestModel(emptyList())
+
+        assertEquals("claude-opus-5-5", after(AiProvider.ANTHROPIC, "claude-opus-5"))
+        assertEquals("gpt-6-luna", after(AiProvider.OPENAI, "gpt-4o-mini"))
+        assertEquals("haiku", after(AiProvider.CLAUDE_CLI, "claude-haiku-4-5"))
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, after(AiProvider.CODEX_CLI, "gpt-5.5"))
     }
 
     @Test
@@ -94,23 +145,25 @@ class AiFeedbackSettingsTest {
     }
 
     @Test
-    fun cliDefaultModelIsBlankAndTheReportNamesTheProvider() {
+    fun cliDefaultModelIsBlankAndTheReportNamesWhoAnswered() {
         // 빈 모델은 "서버의 CLI에 설정해 둔 모델"이라는 뜻입니다. 서버가 --model을 붙이지 않습니다.
         val settings = AiFeedbackSettings().withProvider(AiProvider.CODEX_CLI)
 
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.effectiveModel)
-        // 그래도 돌아보기에는 누가 썼는지 남아야 합니다.
-        assertEquals("Codex CLI", settings.reportModel)
-        assertEquals("gpt-6.1-sol", settings.copy(model = "gpt-6.1-sol").reportModel)
-        // 목록에 없는 이름을 들고 오면 CLI 기본으로 되돌립니다.
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.copy(model = "gpt-4o").effectiveModel)
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.requestModel(emptyList()))
+        // 돌아보기에는 답한 쪽이 알려 준 이름이 남고, 모르면 보낸 이름, 그것도 없으면 공급자 이름입니다.
+        assertEquals("gpt-6.1-terra", settings.reportModel(answered = "gpt-6.1-terra", requested = ""))
+        assertEquals("gpt-6.1-sol", settings.reportModel(answered = "", requested = "gpt-6.1-sol"))
+        assertEquals("Codex CLI", settings.reportModel(answered = "", requested = ""))
     }
 
     @Test
-    fun onlyServerSideProvidersOfferTheBlankDefaultModel() {
-        // API 공급자에 빈 모델을 보내면 "모델이 없다"는 400만 돌아옵니다.
+    fun onlyServerSideProvidersLeaveTheDefaultToTheServer() {
+        // API 공급자에 빈 모델을 보내면 "모델이 없다"는 400만 돌아옵니다. 그래서 기본 계열이 꼭 있습니다.
         AiProvider.entries.forEach { provider ->
-            assertEquals(provider.name, provider.serverOnly, provider.models.contains(AiProvider.CLI_DEFAULT_MODEL))
+            assertEquals(provider.name, provider.serverOnly, provider.defaultFamily == null)
+            if (!provider.serverOnly) {
+                assertTrue(provider.name, AiFeedbackSettings().withProvider(provider).requestModel(emptyList()).isNotBlank())
+            }
         }
     }
 
@@ -133,19 +186,19 @@ class AiFeedbackSettingsTest {
         // 서버 PC에 무엇을 받아 두었는지 이 기기는 모릅니다. 다른 공급자의 모델을 들고 가면 없는 모델이 됩니다.
         val settings = AiFeedbackSettings(model = "gpt-4o").withProvider(AiProvider.OLLAMA)
 
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.effectiveModel)
-        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.copy(model = "gpt-4o").effectiveModel)
-        assertEquals("Ollama", settings.reportModel)
+        assertEquals(AiProvider.CLI_DEFAULT_MODEL, settings.requestModel(emptyList()))
+        assertEquals("Ollama", settings.reportModel(answered = "", requested = ""))
         // CLI가 아니니 "CLI 기본"이라 적지 않습니다.
         assertEquals("서버 기본", AiProvider.OLLAMA.modelLabel(AiProvider.CLI_DEFAULT_MODEL))
         assertEquals("CLI 기본", AiProvider.CODEX_CLI.modelLabel(AiProvider.CLI_DEFAULT_MODEL))
+        assertEquals("Sonnet 최신", AiProvider.CLAUDE_CLI.modelLabel(AiModels.latest("sonnet")))
     }
 
     @Test
-    fun everyProviderHasAtLeastOneModel() {
-        // 모델이 없으면 defaultModel이 터집니다.
-        AiProvider.entries.forEach { provider ->
-            assertTrue(provider.name, provider.models.isNotEmpty())
+    fun everyKeyProviderCanAnswerWithoutAFetchedList() {
+        // 목록을 한 번도 받지 못해도(열쇠만 넣고 인터넷이 없을 때) 앱에 든 목록으로 기본 계열을 셀 수 있어야 합니다.
+        AiProvider.entries.filter { it.defaultFamily != null }.forEach { provider ->
+            assertTrue(provider.name, AiModels.newestIn(provider.defaultFamily!!, provider.builtInModels) != null)
         }
     }
 

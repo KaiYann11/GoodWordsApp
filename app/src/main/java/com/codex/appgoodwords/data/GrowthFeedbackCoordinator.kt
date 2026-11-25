@@ -11,7 +11,8 @@ import java.time.LocalDate
 class GrowthFeedbackCoordinator(
     private val database: AppDatabase,
     private val settingsStore: SettingsStore,
-    private val client: AiFeedbackClient = AiFeedbackClient()
+    private val client: AiFeedbackClient = AiFeedbackClient(),
+    private val models: AiModelRepository = AiModelRepository(settingsStore, client)
 ) {
     /**
      * 보내기 전에 무엇이 나가는지 보여 주기 위한 미리 보기.
@@ -100,11 +101,12 @@ class GrowthFeedbackCoordinator(
             "돌아볼 기록이 아직 없습니다. 루틴을 밟거나 일기를 남긴 뒤에 다시 눌러 주세요."
         }
 
-        val rawText = try {
+        val requested = models.requestModel(aiSettings)
+        val answer = try {
             client.ask(
                 system = GrowthPrompt.systemPrompt(),
                 user = GrowthPrompt.userPrompt(digest),
-                model = aiSettings.effectiveModel,
+                model = requested,
                 aiSettings = aiSettings,
                 syncSettings = syncSettings
             )
@@ -116,13 +118,14 @@ class GrowthFeedbackCoordinator(
             throw failure
         }
 
+        models.recordAnswer(aiSettings, answer)
         val report = GrowthReportParser.parse(
-            rawText = rawText,
+            rawText = answer.text,
             period = period,
             periodStart = digest.from.toString(),
             periodEnd = digest.to.toString(),
-            // CLI 기본 모델로 돌리면 모델 이름이 비어 있어, 누가 썼는지는 공급자 이름으로 남깁니다.
-            model = aiSettings.reportModel
+            // "Sonnet 최신"·CLI 기본으로 물으면 보낸 이름에 세대가 없어, 답한 쪽이 알려 준 이름을 남깁니다.
+            model = aiSettings.reportModel(answered = answer.model, requested = requested)
         )
         if (report == null) {
             val message = "AI가 보낸 답을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요."

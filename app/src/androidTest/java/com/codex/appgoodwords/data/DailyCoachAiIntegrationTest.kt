@@ -38,15 +38,19 @@ class DailyCoachAiIntegrationTest {
     }
 
     @Test fun claudeCliAnswersWithOneShortWord() = runBlocking {
-        askWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
+        // "Haiku 최신"으로 묻습니다. 서버는 별칭(`haiku`)을 넘기고, 답한 실제 모델을 함께 돌려줘야 합니다.
+        val model = askWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = AiModels.latest("haiku")))
+        assertTrue("답한 모델이 Haiku가 아닙니다: $model", model.startsWith("claude-haiku-"))
     }
 
     @Test fun codexCliWithItsDefaultModelAnswers() = runBlocking {
-        askWith(AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = AiProvider.CLI_DEFAULT_MODEL))
+        // CLI 기본으로 물어도 무엇이 답했는지 남습니다(Codex가 머리말에 찍는 모델).
+        val model = askWith(AiFeedbackSettings(provider = AiProvider.CODEX_CLI.name, model = AiProvider.CLI_DEFAULT_MODEL))
+        assertTrue("답한 모델을 알 수 없습니다: $model", model.startsWith("gpt-"))
     }
 
     @Test fun claudeCliAnswersWhatISaid() = runBlocking {
-        replyWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5"))
+        replyWith(AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = AiModels.latest("haiku")))
     }
 
     @Test fun codexCliAnswersWhatISaid() = runBlocking {
@@ -55,16 +59,17 @@ class DailyCoachAiIntegrationTest {
 
     /** 같은 기록·같은 시각으로 다시 묻습니다. 비용 때문에 새 반복 시험은 Claude 한 공급자로만 합니다. */
     @Test fun claudeCliVariesTheTipForTheSameRecordsWithoutAReply() = runBlocking {
-        val aiSettings = AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = "claude-haiku-5-5")
+        val aiSettings = AiFeedbackSettings(provider = AiProvider.CLAUDE_CLI.name, model = AiModels.latest("haiku"))
         val at = LocalTime.of(15, 12)
         val firstDigest = digest(at = at)
         suspend fun ask(digest: DailyCoachDigest, now: Long): DailyCoachTip {
-            val raw = AiFeedbackClient().ask(
+            val requested = aiSettings.requestModel(emptyList())
+            val answer = AiFeedbackClient().ask(
                 system = DailyCoachPrompt.systemPrompt(), user = DailyCoachPrompt.userPrompt(digest),
-                model = aiSettings.effectiveModel, aiSettings = aiSettings, syncSettings = syncSettings
+                model = requested, aiSettings = aiSettings, syncSettings = syncSettings
             )
-            return requireNotNull(DailyCoachParser.parse(raw, aiSettings.reportModel, now)) {
-                "형식에 맞는 한마디가 오지 않았습니다: $raw"
+            return requireNotNull(DailyCoachParser.parse(answer.text, aiSettings.reportModel(answer.model, requested), now)) {
+                "형식에 맞는 한마디가 오지 않았습니다: ${answer.text}"
             }.copy(sharing = DailyCoachSharing(false, false))
         }
         val first = ask(firstDigest, recordedAt)
@@ -101,15 +106,17 @@ class DailyCoachAiIntegrationTest {
             ),
             DailyCoachLine(kind = DailyCoachLine.Kind.REPLY, text = "오늘은 다리가 아파서 걷기는 어려울 것 같아요.", at = now)
         )
-        val rawAnswer = AiFeedbackClient().ask(
+        val requested = aiSettings.requestModel(emptyList())
+        val aiAnswer = AiFeedbackClient().ask(
             system = DailyCoachPrompt.replySystemPrompt(),
             user = DailyCoachPrompt.replyUserPrompt(digest(talk)),
-            model = aiSettings.effectiveModel,
+            model = requested,
             aiSettings = aiSettings,
             syncSettings = syncSettings
         )
+        val rawAnswer = aiAnswer.text
 
-        val answer = DailyCoachParser.parseAnswer(rawAnswer, model = aiSettings.reportModel)
+        val answer = DailyCoachParser.parseAnswer(rawAnswer, model = aiSettings.reportModel(aiAnswer.model, requested))
         assertNotNull("답이 오지 않았습니다: $rawAnswer", answer)
         assertTrue(rawAnswer, answer!!.text.isNotBlank())
         assertTrue("일러 준 형식이 아닙니다: $rawAnswer", rawAnswer.contains("\"message\""))
@@ -117,17 +124,20 @@ class DailyCoachAiIntegrationTest {
         assertTrue(answer.text, answer.text.length <= 241)
     }
 
-    private suspend fun askWith(aiSettings: AiFeedbackSettings) {
+    /** @return 답한 모델(서버가 알려 준 이름) */
+    private suspend fun askWith(aiSettings: AiFeedbackSettings): String {
         val digest = digest()
-        val rawAnswer = AiFeedbackClient().ask(
+        val requested = aiSettings.requestModel(emptyList())
+        val aiAnswer = AiFeedbackClient().ask(
             system = DailyCoachPrompt.systemPrompt(),
             user = DailyCoachPrompt.userPrompt(digest),
-            model = aiSettings.effectiveModel,
+            model = requested,
             aiSettings = aiSettings,
             syncSettings = syncSettings
         )
+        val rawAnswer = aiAnswer.text
 
-        val tip = DailyCoachParser.parse(rawAnswer, model = aiSettings.reportModel)
+        val tip = DailyCoachParser.parse(rawAnswer, model = aiSettings.reportModel(aiAnswer.model, requested))
         assertNotNull("형식에 맞는 한마디가 오지 않았습니다: $rawAnswer", tip)
         assertTrue(rawAnswer, tip!!.message.isNotBlank())
         // 밤에도 글귀는 늘 하나 받습니다(사용자가 정함, 2026-10-29).
@@ -136,6 +146,8 @@ class DailyCoachAiIntegrationTest {
         assertTrue(tip.message, tip.message.length <= 161)
         // 일기는 켜지 않았으므로 본문이 나가지 않았습니다. 받은 말에도 묻어 있으면 안 됩니다.
         assertFalse(tip.message, tip.message.contains("아무에게도"))
+        assertEquals(aiAnswer.model, tip.model)
+        return aiAnswer.model
     }
 
     /** 오늘 한 것이 조금 있는 하루. 빈 하루로는 묻지 않습니다. */

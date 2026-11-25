@@ -93,6 +93,16 @@ class SettingsStore(
         /** 걷기를 하루의 걸음에 한 번 넣었는지([addWalkStepOnce]). 사용자가 뺀 뒤에 다시 넣지 않으려고 둡니다. */
         val walkStepAdded = booleanPreferencesKey("walk_step_added")
         /**
+         * [aiModel]을 어느 꼴로 적었는지([AiModels.SCHEME]). 없으면 1.25.x까지 적은 모델 이름이라 읽을 때 옮깁니다
+         * ([AiModels.migrateLegacy]). 설정을 한 번 저장하면 옮긴 값과 함께 지금 판이 적힙니다.
+         */
+        val aiModelScheme = intPreferencesKey("ai_model_scheme")
+        /** 마지막으로 답한 모델(공급자·고른 것·모델을 줄바꿈으로 이음). 이 기기에만 둡니다. */
+        val aiLastAnswer = stringPreferencesKey("ai_last_answer")
+
+        /** 공급자마다 받아 둔 모델 목록([AiModelListJson]). 열쇠·서버가 기기마다 달라 이 기기에만 둡니다. */
+        fun aiModelList(provider: AiProvider) = stringPreferencesKey("ai_models_" + provider.name.lowercase())
+        /**
          * 목표에 들이는 시간을 재는 타이머([GoalTimer]). **이 기기에만 둡니다** — 재는 것은 이 휴대폰에서 하는 일이고,
          * 남기기를 눌러야 기록이 되어 동기화됩니다.
          */
@@ -164,12 +174,19 @@ class SettingsStore(
     }
 
     val aiFeedbackSettingsFlow: Flow<AiFeedbackSettings> = context.dataStore.data.map { preferences ->
+        val provider = preferences[Keys.aiProvider].orEmpty().ifBlank { AiProvider.OPENAI.name }
+        val storedModel = preferences[Keys.aiModel].orEmpty()
         AiFeedbackSettings(
-            provider = preferences[Keys.aiProvider].orEmpty().ifBlank { AiProvider.OPENAI.name },
+            provider = provider,
             // 예전 열쇠 자리는 그대로 OpenAI 열쇠로 읽습니다. 이미 넣어 둔 사람이 다시 넣지 않아야 합니다.
             openAiKey = preferences[Keys.aiApiKey].orEmpty(),
             anthropicKey = preferences[Keys.aiAnthropicKey].orEmpty(),
-            model = preferences[Keys.aiModel].orEmpty(),
+            // 1.25.x까지 적은 이름(`claude-sonnet-5-5`)은 같은 계열의 최신으로 읽습니다(사용자가 고름, 2026-11-25).
+            model = if ((preferences[Keys.aiModelScheme] ?: 1) < AiModels.SCHEME) {
+                AiModels.migrateLegacy(AiProvider.of(provider), storedModel)
+            } else {
+                storedModel
+            },
             schedule = preferences[Keys.aiSchedule].orEmpty(),
             hour = preferences[Keys.aiHour] ?: AiFeedbackSettings.DEFAULT_HOUR,
             minute = preferences[Keys.aiMinute] ?: 0,
@@ -384,6 +401,8 @@ class SettingsStore(
             preferences[Keys.aiAnthropicKey] = settings.anthropicKey.trim()
             // 빈 값은 "그 공급자의 기본"이라는 뜻이라 그대로 둡니다.
             preferences[Keys.aiModel] = settings.model.trim()
+            // 읽을 때 옮긴 값을 적었으니 다시 옮기지 않습니다. 옮긴 뒤 "다른 모델…"에서 고른 이름을 또 계열로 바꾸면 안 됩니다.
+            preferences[Keys.aiModelScheme] = AiModels.SCHEME
             preferences[Keys.aiSchedule] = settings.schedule
             preferences[Keys.aiHour] = settings.hour.coerceIn(0, 23)
             preferences[Keys.aiMinute] = settings.minute.coerceIn(0, 59)
@@ -396,6 +415,31 @@ class SettingsStore(
             preferences[Keys.aiCoachNudgeEnabled] = settings.coachNudgeEnabled
             preferences[Keys.aiCoachBackground] = settings.coachBackground
         }
+    }
+
+    /** 공급자마다 받아 둔 모델 목록. 받은 적이 없으면 빈 목록입니다(그때는 [AiProvider.builtInModels]로 버팁니다). */
+    val aiModelListsFlow: Flow<Map<AiProvider, AiModelList>> = context.dataStore.data.map { preferences ->
+        AiProvider.entries.associateWith { AiModelListJson.decode(preferences[Keys.aiModelList(it)]) }
+    }
+
+    suspend fun getAiModelList(provider: AiProvider): AiModelList =
+        AiModelListJson.decode(context.dataStore.data.first()[Keys.aiModelList(provider)])
+
+    suspend fun saveAiModelList(provider: AiProvider, list: AiModelList) {
+        context.dataStore.edit { preferences -> preferences[Keys.aiModelList(provider)] = AiModelListJson.encode(list) }
+    }
+
+    /** 마지막으로 답한 모델. 답한 적이 없으면 null입니다. */
+    val aiLastAnswerFlow: Flow<AiLastAnswer?> = context.dataStore.data.map { preferences ->
+        val parts = preferences[Keys.aiLastAnswer].orEmpty().split('\n')
+        if (parts.size != 3 || parts[2].isBlank()) return@map null
+        AiLastAnswer(provider = AiProvider.of(parts[0]), choice = parts[1], model = parts[2])
+    }
+
+    suspend fun recordAiAnswer(answer: AiLastAnswer) {
+        // 이름에 줄바꿈이 들 일은 없지만, 들면 칸이 밀려 다른 공급자의 것으로 읽힙니다.
+        val fields = listOf(answer.provider.name, answer.choice, answer.model).map { it.replace('\n', ' ').trim() }
+        context.dataStore.edit { preferences -> preferences[Keys.aiLastAnswer] = fields.joinToString("\n") }
     }
 
     /**

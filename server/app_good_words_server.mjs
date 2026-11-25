@@ -279,6 +279,10 @@ async function route(request, response) {
     sendJson(response, 200, result);
     return;
   }
+  if (method === "GET" && url.pathname === "/api/ai-models") {
+    sendJson(response, 200, await listAiModels(url.searchParams.get("provider")));
+    return;
+  }
   if (method === "GET" && url.pathname === "/api/routines") {
     sendJson(response, 200, { routines: sortedRoutines((await loadDb()).routines) });
     return;
@@ -501,7 +505,11 @@ async function routeContentMember(method, parts, request, response) {
  *
  * 길이 셋입니다. 열쇠로 HTTP API를 부르는 길(`askHttp`), 이 서버에 로그인해 둔
  * Claude Code·Codex CLI를 그대로 돌리는 길(`askCli`), 이 PC에서 도는 Ollama에 묻는 길
- * (`askOllama`)입니다. 뒤의 둘은 열쇠가 없어도 됩니다. 어느 길이든 돌려주는 모양은 같습니다 — `{ text }`.
+ * (`askOllama`)입니다. 뒤의 둘은 열쇠가 없어도 됩니다. 어느 길이든 돌려주는 모양은 같습니다 — `{ text, model }`.
+ *
+ * `model`은 **실제로 답한 모델**입니다. 앱은 "Sonnet 최신"(`sonnet`)이나 "CLI 기본"(빈 값)처럼 세대를 적지 않고
+ * 물을 수 있어서, 돌아보기에 무엇이 썼는지 남기려면 답한 쪽이 알려 줘야 합니다. 알 수 없으면 물은 이름을 그대로
+ * 돌려줍니다(빈 값일 수 있음). 옛 앱은 이 칸을 읽지 않습니다.
  */
 async function askAi(payload) {
   const system = text(payload?.system);
@@ -514,7 +522,7 @@ async function askAi(payload) {
 
   const model = text(payload?.model);
   const ask = plan.cli ? askCli : plan.local ? askOllama : askHttp;
-  return { text: await ask(plan, system, user, model) };
+  return ask(plan, system, user, model);
 }
 
 async function askHttp(plan, system, user, model) {
@@ -557,7 +565,8 @@ async function askHttp(plan, system, user, model) {
   } catch {
     throw new HttpError(502, "AI 응답을 읽지 못했습니다.");
   }
-  return plan.read(parsed);
+  // 두 API 모두 답에 `model`을 싣습니다. 거절을 다른 모델이 이어받았으면 그 이름일 수 있습니다.
+  return { text: plan.read(parsed), model: text(parsed?.model) || model };
 }
 
 /**
@@ -604,7 +613,7 @@ async function askOllama(plan, system, user, model) {
   }
   const answer = plan.read(parsed);
   if (!answer) throw new HttpError(502, `Ollama(${chosen})가 빈 답을 돌려주었습니다.`);
-  return answer;
+  return { text: answer, model: text(parsed?.model) || chosen };
 }
 
 /**
@@ -677,7 +686,7 @@ async function askCli(plan, system, user, model) {
     if (run.timedOut) throw new HttpError(504, `${plan.label}가 ${Math.round(aiTimeoutMs / 1000)}초 안에 답하지 않았습니다.`);
     const answer = await plan.read(run, workDir);
     if (!answer) throw new HttpError(502, `${plan.label}가 빈 답을 돌려주었습니다.`);
-    return answer;
+    return { text: answer, model: plan.answeredModel(run) || model };
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
@@ -793,6 +802,19 @@ const aiModelPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$|^$/;
 /** Ollama가 기본으로 듣는 자리. 끝의 `/`는 떼어 둡니다 — 뒤에 `/api/...`를 붙입니다. */
 const ollamaUrl = (text(process.env.APP_GOOD_WORDS_OLLAMA_URL) || "http://127.0.0.1:11434").replace(/\/+$/, "");
 const ollamaDefaultModel = text(process.env.APP_GOOD_WORDS_OLLAMA_MODEL);
+/**
+ * 열쇠로 부르는 두 API의 뿌리 주소. 바꾸는 것은 시험(가짜 API)뿐입니다.
+ *
+ * Ollama 주소처럼 서버를 띄울 때의 환경 변수에서만 읽습니다 — 기기가 보낸 주소로 부르면 서버의 열쇠를 남이 시키는
+ * 곳으로 실어 보내게 됩니다.
+ */
+const openAiBaseUrl = (text(process.env.APP_GOOD_WORDS_OPENAI_BASE_URL) || "https://api.openai.com").replace(/\/+$/, "");
+const anthropicBaseUrl = (text(process.env.APP_GOOD_WORDS_ANTHROPIC_BASE_URL) || "https://api.anthropic.com").replace(
+  /\/+$/,
+  "",
+);
+/** Claude API가 읽을 요청의 판. 메시지와 모델 목록이 같은 값을 씁니다(앱 `AiFeedbackClient`와 같게). */
+const anthropicVersion = "2023-06-01";
 
 /**
  * 공급자마다 다른 것만 모아 둡니다.
@@ -808,7 +830,7 @@ const aiProviders = {
     label: "OpenAI",
     envName: "OPENAI_API_KEY",
     key: () => config.openAiKey,
-    url: "https://api.openai.com/v1/chat/completions",
+    url: `${openAiBaseUrl}/v1/chat/completions`,
     headers: (key) => ({ Authorization: `Bearer ${key}` }),
     body: (system, user, model) => ({
       model: model || "gpt-6-luna",
@@ -816,15 +838,16 @@ const aiProviders = {
       response_format: { type: "json_object" },
     }),
     read: (parsed) => parsed?.choices?.[0]?.message?.content || "",
+    listModels: () => listOpenAiModels(),
   },
   anthropic: {
     label: "Claude",
     envName: "ANTHROPIC_API_KEY",
     key: () => config.anthropicKey,
-    url: "https://api.anthropic.com/v1/messages",
+    url: `${anthropicBaseUrl}/v1/messages`,
     headers: (key) => ({
       "x-api-key": key,
-      "anthropic-version": "2023-06-01",
+      "anthropic-version": anthropicVersion,
       // 안전 분류기가 거절했을 때 같은 요청을 다른 모델로 한 번 더 돌려 줍니다.
       "anthropic-beta": "server-side-fallback-2026-07-01",
     }),
@@ -843,10 +866,13 @@ const aiProviders = {
         .filter((block) => block?.type === "text")
         .map((block) => block.text || "")
         .join(""),
+    listModels: () => listAnthropicModels(),
   },
   claude_cli: {
     label: "Claude CLI",
     cli: true,
+    // 목록을 내주는 명령이 없습니다. 앱은 별칭(`opus`·`sonnet`·`haiku`)으로 그 계열의 가장 새 모델을 부릅니다.
+    listModels: async () => [],
     command: "claude",
     envName: "APP_GOOD_WORDS_CLAUDE_CLI",
     invocation: async ({ system, user, model, workDir }) => {
@@ -882,6 +908,21 @@ const aiProviders = {
       }
       if (parsed?.is_error) throw new HttpError(502, `Claude CLI 요청이 실패했습니다: ${text(parsed.result)}`);
       return text(parsed?.result);
+    },
+    // 별칭(`sonnet`)이나 CLI 기본으로 물어도 답한 모델은 `modelUsage`의 열쇠로 옵니다(2.1.331에서 확인:
+    // `--model haiku` → `claude-haiku-5-5`). 둘 이상이면 글을 가장 많이 쓴 쪽이 답한 모델입니다.
+    answeredModel: (run) => {
+      let usage;
+      try {
+        usage = JSON.parse(run.stdout)?.modelUsage;
+      } catch {
+        return "";
+      }
+      if (!usage || typeof usage !== "object") return "";
+      const [best] = Object.entries(usage).sort(
+        ([, a], [, b]) => (Number(b?.outputTokens) || 0) - (Number(a?.outputTokens) || 0),
+      );
+      return best ? text(best[0]) : "";
     },
   },
   codex_cli: {
@@ -925,6 +966,9 @@ const aiProviders = {
       }
       return answer.trim();
     },
+    // Codex는 시작할 때 stderr 머리말에 `model: gpt-6.1-terra` 한 줄을 찍습니다. CLI 기본으로 돌려도 그 이름이 옵니다.
+    answeredModel: (run) => text(String(run.stderr || "").match(/^model:\s*(\S+)\s*$/m)?.[1]),
+    listModels: () => listCodexModels(),
   },
   ollama: {
     label: "Ollama",
@@ -941,8 +985,140 @@ const aiProviders = {
     }),
     // 생각한 내용은 `message.thinking`에 따로 옵니다. 답 글은 `content`뿐입니다.
     read: (parsed) => text(parsed?.message?.content),
+    // 받아 둔 모델, 가장 최근에 받은 것부터. 기본으로 고르는 것(`ollamaModel`)과 같은 차례입니다.
+    listModels: async () => (await ollamaModels()).map((name) => ({ id: name, label: name, createdAt: 0 })),
   },
 };
+
+/**
+ * 고를 수 있는 모델 목록을 내줍니다(`GET /api/ai-models?provider=`).
+ *
+ * 예전에는 앱이 목록을 들고 있어서 새 모델이 나올 때마다 앱을 다시 게시해야 했습니다. 이제 목록은 그때그때 받습니다
+ * (사용자가 정함, 2026-11-25) — 열쇠로 부르는 API는 그 API의 모델 목록, Codex는 CLI가 받아 둔 목록, Ollama는 받아 둔
+ * 모델입니다. Claude CLI는 목록을 내주는 길이 없어 빈 목록입니다.
+ *
+ * 모양은 공급자와 상관없이 같습니다 — `{ provider, models: [{ id, label, createdAt }], fetchedAt }`. 차례는 공급자가 준
+ * 대로(API는 새 것부터, Codex는 Codex가 보여 주는 차례)입니다. 무엇을 "가장 새 것"으로 볼지는 앱이 이름으로 셉니다
+ * (`AiModels`). 받는 데 실패하면 사유를 503·502로 돌려주고, 앱은 받아 둔 목록이나 앱에 든 목록으로 버팁니다.
+ */
+async function listAiModels(providerName) {
+  const provider = text(providerName).toLowerCase();
+  const plan = aiProviders[provider];
+  if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider || "(없음)"}`);
+  return { provider, models: await plan.listModels(), fetchedAt: Date.now() };
+}
+
+/**
+ * 열쇠로 모델 목록을 받아 JSON으로 돌려줍니다. 열쇠가 없으면 부르지 않고, 실패하면 사유의 message만 넘깁니다
+ * (응답 본문을 통째로 넘기면 열쇠 조각이 섞일 수 있습니다 — `askHttp`와 같은 까닭).
+ */
+async function fetchModelList(plan, url) {
+  const key = plan.key();
+  if (!key) {
+    throw new HttpError(
+      503,
+      `서버에 ${plan.label} 열쇠가 없습니다. ${plan.envName}을 넣고 서버를 다시 띄우거나, 앱 설정에 열쇠를 넣어 주세요.`,
+    );
+  }
+  let response;
+  let raw;
+  try {
+    response = await fetch(url, { headers: plan.headers(key), signal: AbortSignal.timeout(20_000) });
+    raw = await response.text();
+  } catch (error) {
+    throw new HttpError(502, `${plan.label}에 연결하지 못했습니다: ${error.message}`);
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    const detail = text(parsed?.error?.message);
+    throw new HttpError(502, `${plan.label} 모델 목록을 받지 못했습니다(${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  if (!parsed) throw new HttpError(502, `${plan.label} 모델 목록을 읽지 못했습니다.`);
+  return parsed;
+}
+
+/** 목록이 여러 쪽이어도 다 받되, 끝없이 넘기지는 않습니다. 한 쪽에 천 개까지 옵니다. */
+const maxModelPages = 5;
+
+/** Claude API의 모델 목록. 새로 나온 것부터 옵니다(`GET /v1/models`, `has_more`·`last_id`로 다음 쪽). */
+async function listAnthropicModels() {
+  const plan = aiProviders.anthropic;
+  const models = [];
+  let afterId = "";
+  for (let page = 0; page < maxModelPages; page += 1) {
+    const query = new URLSearchParams({ limit: "1000" });
+    if (afterId) query.set("after_id", afterId);
+    const parsed = await fetchModelList(plan, `${anthropicBaseUrl}/v1/models?${query}`);
+    for (const model of Array.isArray(parsed?.data) ? parsed.data : []) {
+      const id = text(model?.id);
+      if (id) models.push({ id, label: text(model?.display_name) || id, createdAt: Date.parse(model?.created_at) || 0 });
+    }
+    afterId = text(parsed?.last_id);
+    if (!parsed?.has_more || !afterId) break;
+  }
+  return models;
+}
+
+/** OpenAI의 모델 목록에서 글로 묻고 답하는 것만, 새로 나온 것부터. */
+async function listOpenAiModels() {
+  const parsed = await fetchModelList(aiProviders.openai, `${openAiBaseUrl}/v1/models`);
+  return (Array.isArray(parsed?.data) ? parsed.data : [])
+    .map((model) => ({ id: text(model?.id), label: text(model?.id), createdAt: (Number(model?.created) || 0) * 1000 }))
+    .filter((model) => isOpenAiChatModel(model.id))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * OpenAI 목록에는 그림·소리·임베딩·검열 모델까지 다 들어 있습니다. 그것을 고르면 돌아보기가 "지원하지 않는 모델"로만
+ * 끝나므로 글 모델만 남깁니다. **앱 `AiModels.isOpenAiChatModel`과 같은 규칙**입니다(앱도 열쇠로 직접 받습니다).
+ */
+function isOpenAiChatModel(id) {
+  return /^(gpt-\d|o\d)/.test(id) && !openAiNonChatWords.some((word) => id.includes(word));
+}
+
+const openAiNonChatWords = [
+  "audio",
+  "realtime",
+  "transcribe",
+  "tts",
+  "search",
+  "image",
+  "embedding",
+  "moderation",
+  "instruct",
+  "codex",
+  "computer",
+  "whisper",
+  "dall-e",
+];
+
+/**
+ * Codex CLI가 고르라고 보여 주는 모델. CLI가 스스로 받아 두는 `models_cache.json`(`CODEX_HOME`, 없으면 `~/.codex`)을
+ * 읽습니다. 숨긴 것(`visibility: "hide"`)은 빼고 Codex가 보여 주는 차례(`priority`)로 놓습니다. 파일에는 계정 정보
+ * (`identity`)도 있어 모델 칸만 꺼내 돌려줍니다.
+ */
+async function listCodexModels() {
+  const path = join(text(process.env.CODEX_HOME) || join(homedir(), ".codex"), "models_cache.json");
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    throw new HttpError(
+      503,
+      "서버 PC에서 Codex 모델 목록(~/.codex/models_cache.json)을 찾지 못했습니다. 서버 PC에서 codex를 한 번 실행하면 생깁니다.",
+    );
+  }
+  const order = (model) => (Number.isFinite(Number(model?.priority)) ? Number(model.priority) : Number.MAX_SAFE_INTEGER);
+  return (Array.isArray(parsed?.models) ? parsed.models : [])
+    .filter((model) => text(model?.slug) && (model?.visibility ?? "list") === "list")
+    .sort((a, b) => order(a) - order(b))
+    .map((model) => ({ id: text(model.slug), label: text(model.display_name) || text(model.slug), createdAt: 0 }));
+}
 
 /** Codex는 실패 사유를 stderr에 `ERROR: {json}`으로 찍습니다. 그 안의 message만 뽑습니다. */
 function codexFailure(stderr) {
