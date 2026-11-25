@@ -24,12 +24,58 @@ class AiModelRepository(
         val stored = settingsStore.getAiModelList(provider)
         if (provider.familyAliases) return Result.success(stored)
         if (!force && !stored.isStale(now(), SCREEN_MAX_AGE_MILLIS)) return Result.success(stored)
-        val aiSettings = settingsStore.getAiFeedbackSettings().let {
-            // 열쇠는 공급자마다 따로 있습니다. 지금 고른 곳이 아니어도 그 공급자의 열쇠로 묻습니다.
-            if (it.activeProvider == provider) it else it.withProvider(provider)
-        }
+        val aiSettings = settingsFor(provider)
         return runCatching { client.listModels(aiSettings, settingsStore.getServerSyncSettings(), now()) }
             .onSuccess { settingsStore.saveAiModelList(provider, it) }
+    }
+
+    /**
+     * "모델 정보 받아오기"(설정 → AI의 단추, 사용자가 정함 2026-11-25).
+     *
+     * 목록을 새로 받고, 서버가 모델을 고르는 칸([AiModels.serverPickedChoices] — CLI·Ollama 기본, Claude CLI의 계열 칸)은
+     * 서버에 이름을 물어 적어 둡니다. 서버는 CLI에 칸마다 짧게 한 번씩 물어보므로 몇 초 걸리고 구독 사용량이 조금 듭니다 —
+     * 그래서 설정 화면을 열 때가 아니라 단추를 누를 때만 합니다.
+     *
+     * 칸 하나를 알아내지 못하면 그 칸에 사유가 남고([AiModelCheck.errors]) 나머지는 적힙니다. 새로 안 것이 하나도 없으면
+     * 누른 때를 남기지 않습니다 — 단추 아래 "…에 받음"이 지난 이름을 새것처럼 보이게 합니다.
+     *
+     * @return 목록이나 서버를 받지 못했으면 그 사유(화면에 그대로 보입니다). 그래도 받은 것은 적혀 있습니다.
+     */
+    suspend fun check(provider: AiProvider): Result<Unit> {
+        val failures = mutableListOf<String>()
+        var listFetched = false
+        if (!provider.familyAliases) {
+            refresh(provider, force = true)
+                .onSuccess { listFetched = true }
+                .onFailure { failures += "목록: " + (it.message ?: "받지 못했습니다.") }
+        }
+        val aiSettings = settingsFor(provider)
+        // 칸 → 실제로 보내는 이름(`latest:sonnet` → `sonnet`). 서버는 보낸 이름으로 답합니다.
+        val requests = AiModels.serverPickedChoices(provider, aiSettings.modelChoice)
+            .associateWith { aiSettings.withModel(it).requestModel(emptyList()) }
+        var resolved: Map<String, AiResolvedModel>? = null
+        if (requests.isNotEmpty()) {
+            runCatching { client.resolveModels(provider, requests.values.distinct(), settingsStore.getServerSyncSettings()) }
+                .onSuccess { byRequest ->
+                    resolved = requests.mapValues { (_, request) ->
+                        byRequest[request] ?: AiResolvedModel(model = "", error = "서버가 이 칸을 알려 주지 않았습니다.")
+                    }
+                }
+                .onFailure { failures += it.message ?: "모델 이름을 알아 오지 못했습니다." }
+        }
+        val learned = resolved
+        val learnedSomething = if (requests.isEmpty()) listFetched else learned != null
+        if (learnedSomething) {
+            settingsStore.updateAiModelCheck(provider) { current ->
+                val found = learned.orEmpty()
+                AiModelCheck(
+                    checkedAt = now(),
+                    names = current.names + found.filterValues { it.model.isNotBlank() }.mapValues { it.value.model },
+                    errors = found.filterValues { it.model.isBlank() }.mapValues { it.value.error.ifBlank { "알아내지 못했습니다." } }
+                )
+            }
+        }
+        return if (failures.isEmpty()) Result.success(Unit) else Result.failure(IllegalStateException(failures.joinToString("\n")))
     }
 
     /**
@@ -52,13 +98,25 @@ class AiModelRepository(
         return aiSettings.requestModel(list.models)
     }
 
-    /** 답한 모델을 적어 둡니다. 설정의 "지금 답하는 모델" 줄이 CLI처럼 미리 알 수 없는 쪽을 보여 줄 때 씁니다. */
+    /**
+     * 답한 모델을 그 칸에 적어 둡니다([AiModelCheck.withAnswer]). 설정의 "지금 답하는 모델" 줄과 "모델 정보 받아오기" 아래
+     * 목록이 CLI처럼 미리 알 수 없는 칸을 보여 줄 때 씁니다.
+     *
+     * 서버가 답한 모델을 알려 주지 않으면(옛 서버, 모델을 알리지 않는 CLI) 보낸 이름이 그대로 옵니다. 서버가 고르는 칸에서
+     * 그것은 이름이 아니라 별칭(`sonnet`)이라 적지 않습니다.
+     */
     suspend fun recordAnswer(aiSettings: AiFeedbackSettings, answer: AiAnswer) {
-        if (answer.model.isBlank()) return
-        settingsStore.recordAiAnswer(
-            AiLastAnswer(provider = aiSettings.activeProvider, choice = aiSettings.modelChoice, model = answer.model.trim())
-        )
+        val model = answer.model.trim()
+        if (model.isBlank()) return
+        val provider = aiSettings.activeProvider
+        val choice = aiSettings.modelChoice
+        if (AiModels.isServerPicked(provider, choice) && model == aiSettings.requestModel(emptyList())) return
+        settingsStore.recordAiAnswer(provider, choice, model)
     }
+
+    /** 열쇠는 공급자마다 따로 있습니다. 지금 고른 곳이 아니어도 그 공급자의 설정(열쇠·고른 모델)으로 묻습니다. */
+    private suspend fun settingsFor(provider: AiProvider): AiFeedbackSettings =
+        settingsStore.getAiFeedbackSettings().let { if (it.activeProvider == provider) it else it.withProvider(provider) }
 
     companion object {
         /** 설정 화면을 열 때 이보다 묵은 목록은 새로 받습니다. */

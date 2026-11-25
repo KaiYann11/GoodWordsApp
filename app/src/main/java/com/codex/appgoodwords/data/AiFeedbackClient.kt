@@ -99,6 +99,37 @@ class AiFeedbackClient {
         AiModelList(models = models, fetchedAt = now)
     }
 
+    /**
+     * 서버가 모델을 고르는 칸의 이름을 알아 옵니다(`POST /api/ai-models/resolve`, 설정 → AI의 "모델 정보 받아오기").
+     *
+     * Claude CLI·Codex CLI는 서버가 칸마다 아주 짧게 한 번씩 물어 실제로 답한 모델을 읽습니다. 그래서 몇 초 걸리고 구독
+     * 사용량이 조금 듭니다 — 사용자가 단추를 누를 때만 부릅니다(2026-11-25). Ollama 기본은 서버가 고를 모델을 그대로 알려 줍니다.
+     *
+     * @param requests 보낼 이름(`""`·`sonnet`·`fable`). 칸이 아니라 실제로 보내는 이름입니다.
+     * @return 보낸 이름 → 알아 온 것. 칸 하나가 실패하면 그 칸에 사유가 실립니다.
+     * @throws IllegalArgumentException·IllegalStateException·IOException 서버가 없거나 닿지 못했을 때
+     */
+    suspend fun resolveModels(
+        provider: AiProvider,
+        requests: List<String>,
+        syncSettings: ServerSyncSettings
+    ): Map<String, AiResolvedModel> = withContext(Dispatchers.IO) {
+        require(syncSettings.serverUrl.isNotBlank()) {
+            "${provider.label} 모델은 서버가 알아 옵니다. 설정에서 서버 주소를 먼저 지정해 주세요."
+        }
+        val body = JSONObject()
+            .put("provider", provider.name.lowercase())
+            .put("models", JSONArray().apply { requests.forEach { put(it) } })
+            .toString()
+        AiModelListJson.parseResolved(
+            request(
+                url = "${normalizeServerUrl(syncSettings.serverUrl)}$RESOLVE_PATH",
+                body = body,
+                headers = serverHeaders(syncSettings)
+            )
+        )
+    }
+
     private fun listServerModels(provider: AiProvider, syncSettings: ServerSyncSettings): List<AiModelInfo> {
         val url = "${normalizeServerUrl(syncSettings.serverUrl)}$MODELS_PATH?provider=${provider.name.lowercase()}"
         return AiModelListJson.parseServer(
@@ -342,6 +373,7 @@ class AiFeedbackClient {
         const val ANTHROPIC_MAX_TOKENS = 16_000
         const val SERVER_PATH = "/api/growth-feedback"
         const val MODELS_PATH = "/api/ai-models"
+        const val RESOLVE_PATH = "/api/ai-models/resolve"
 
         /** 목록은 금방 옵니다. 글을 쓸 때만큼 붙들고 있지 않습니다. */
         const val LIST_TIMEOUT = 20_000

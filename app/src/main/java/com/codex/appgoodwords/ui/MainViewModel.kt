@@ -192,9 +192,9 @@ class MainViewModel(
     val aiModelLists = container.settingsStore.aiModelListsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /** 마지막으로 답한 모델. */
-    val aiLastAnswer = container.settingsStore.aiLastAnswerFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /** 공급자마다 칸별로 알아 둔 "지금 답하는 모델"("모델 정보 받아오기"와 AI가 답한 모델). */
+    val aiModelChecks = container.settingsStore.aiModelChecksFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     private val _aiModelRefresh = MutableStateFlow(AiModelRefreshState())
     val aiModelRefresh: StateFlow<AiModelRefreshState> = _aiModelRefresh.asStateFlow()
@@ -1663,6 +1663,25 @@ class MainViewModel(
                 errors = result.exceptionOrNull()
                     ?.let { current.errors + (provider to (it.message ?: "목록을 받지 못했습니다.")) }
                     ?: (current.errors - provider)
+            )
+        }
+    }
+
+    /**
+     * "모델 정보 받아오기"(설정 → AI). 서버가 CLI에 칸마다 짧게 물어보므로 몇 초 걸립니다([AiModelRepository.check]).
+     * 받지 못한 사유는 단추 아래에 보입니다. 칸 하나의 실패는 그 칸 줄에 보입니다.
+     */
+    fun checkAiModels(provider: AiProvider) {
+        if (_aiModelRefresh.value.checking != null) return
+        viewModelScope.launch {
+            _aiModelRefresh.value = _aiModelRefresh.value.copy(checking = provider)
+            val result = container.aiModels.check(provider)
+            val current = _aiModelRefresh.value
+            _aiModelRefresh.value = current.copy(
+                checking = null,
+                checkErrors = result.exceptionOrNull()
+                    ?.let { current.checkErrors + (provider to (it.message ?: "모델 정보를 받지 못했습니다.")) }
+                    ?: (current.checkErrors - provider)
             )
         }
     }

@@ -283,6 +283,11 @@ async function route(request, response) {
     sendJson(response, 200, await listAiModels(url.searchParams.get("provider")));
     return;
   }
+  if (method === "POST" && url.pathname === "/api/ai-models/resolve") {
+    const payload = await readJson(request);
+    sendJson(response, 200, await resolveAiModels(payload));
+    return;
+  }
   if (method === "GET" && url.pathname === "/api/routines") {
     sendJson(response, 200, { routines: sortedRoutines((await loadDb()).routines) });
     return;
@@ -670,6 +675,15 @@ function ollamaUnreachable() {
  * 일기가 CLI 세션 기록으로 서버 디스크에 쌓이면 안 됩니다.
  */
 async function askCli(plan, system, user, model) {
+  const { answer, answered } = await runCli(plan, system, user, model);
+  return { text: answer, model: answered || model };
+}
+
+/**
+ * CLI를 한 번 돌려 답 글(`answer`)과, CLI가 알려 준 답한 모델(`answered`, 알려 주지 않으면 빈 값)을 돌려줍니다.
+ * 물은 이름으로 메우지 않습니다 — 모델 이름 알아보기(`resolveAiModels`)는 알아낸 것과 모르는 것을 갈라야 합니다.
+ */
+async function runCli(plan, system, user, model) {
   if (!aiModelPattern.test(model)) throw new HttpError(400, `모델 이름이 올바르지 않습니다: ${model}`);
   const executable = resolveCli(plan);
   if (!executable) {
@@ -686,7 +700,7 @@ async function askCli(plan, system, user, model) {
     if (run.timedOut) throw new HttpError(504, `${plan.label}가 ${Math.round(aiTimeoutMs / 1000)}초 안에 답하지 않았습니다.`);
     const answer = await plan.read(run, workDir);
     if (!answer) throw new HttpError(502, `${plan.label}가 빈 답을 돌려주었습니다.`);
-    return { text: answer, model: plan.answeredModel(run) || model };
+    return { answer, answered: plan.answeredModel(run) };
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
@@ -872,6 +886,7 @@ const aiProviders = {
     label: "Claude CLI",
     cli: true,
     // 목록을 내주는 명령이 없습니다. 앱은 별칭(`opus`·`sonnet`·`haiku`)으로 그 계열의 가장 새 모델을 부릅니다.
+    // 별칭이 지금 어느 모델인지는 짧게 한 번 물어 알아냅니다(`resolveAiModels`).
     listModels: async () => [],
     command: "claude",
     envName: "APP_GOOD_WORDS_CLAUDE_CLI",
@@ -1007,6 +1022,57 @@ async function listAiModels(providerName) {
   if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider || "(없음)"}`);
   return { provider, models: await plan.listModels(), fetchedAt: Date.now() };
 }
+
+/**
+ * 칸마다 지금 답하는 모델 이름을 알아 옵니다(`POST /api/ai-models/resolve`, 앱 설정 → AI의 "모델 정보 받아오기").
+ *
+ * Claude CLI는 별칭(`sonnet`)과 CLI 기본(빈 값)을 CLI가 그때그때 이름으로 바꾸는데, 그 이름을 내주는 명령이 없습니다.
+ * 알려면 한 번 물어보는 수밖에 없어 "OK"만 답하게 하는 아주 짧은 물음을 칸마다 한 번씩 보내고, 답한 모델을 읽습니다
+ * (2026-11-25 이 맥에서 재어 보니 한 번에 1~3초였습니다). Codex CLI 기본도 같습니다. Ollama 기본은 서버가 고르는 것이라
+ * 묻지 않습니다(`ollamaModel`). 열쇠로 부르는 곳은 앱이 목록의 이름을 그대로 보내므로 알아볼 것이 없습니다.
+ *
+ * 구독 사용량이 조금 드는 일이라 앱은 사용자가 단추를 누를 때만 부릅니다(사용자가 정함, 2026-11-25). 칸 하나가 실패해도
+ * 나머지는 돌려줍니다 — 실패한 칸에는 사유(`error`)를 싣습니다.
+ *
+ * 받는 것 `{ provider, models: ["", "opus", …] }` → 돌려주는 것 `{ provider, models: [{ requested, model, error }], resolvedAt }`.
+ */
+async function resolveAiModels(payload) {
+  const provider = text(payload?.provider).toLowerCase();
+  const plan = aiProviders[provider];
+  if (!plan) throw new HttpError(400, `모르는 AI 공급자입니다: ${provider || "(없음)"}`);
+  if (!plan.cli && !plan.local) {
+    throw new HttpError(400, `${plan.label}는 목록의 이름을 그대로 보내므로 알아볼 것이 없습니다. 목록을 새로 받아 주세요.`);
+  }
+  const requested = Array.isArray(payload?.models) ? payload.models : [];
+  if (requested.length === 0 || requested.length > maxResolveModels) {
+    throw new HttpError(400, `알아볼 모델을 1~${maxResolveModels}개 보내 주세요.`);
+  }
+  if (requested.some((name) => typeof name !== "string" || !aiModelPattern.test(name.trim()))) {
+    throw new HttpError(400, "모델 이름이 올바르지 않습니다.");
+  }
+  const names = [...new Set(requested.map((name) => name.trim()))];
+  // CLI를 칸 수만큼 한꺼번에 띄웁니다. 칸은 많아야 여섯이라 하나씩 기다리는 것보다 낫습니다.
+  const models = await Promise.all(names.map((name) => resolveAiModel(plan, name)));
+  return { provider, models, resolvedAt: Date.now() };
+}
+
+/** 칸 하나. 알아내지 못하면 `model`을 비우고 사유를 싣습니다. */
+async function resolveAiModel(plan, requested) {
+  try {
+    if (plan.local) return { requested, model: requested || (await ollamaModel()), error: "" };
+    const { answered } = await runCli(plan, resolveSystemPrompt, resolveUserPrompt, requested);
+    if (!answered) throw new HttpError(502, `${plan.label}가 답한 모델 이름을 알려 주지 않았습니다.`);
+    return { requested, model: answered, error: "" };
+  } catch (error) {
+    return { requested, model: "", error: text(error?.message) || "알아내지 못했습니다." };
+  }
+}
+
+/** 이름만 알면 되는 물음입니다. 답을 길게 쓰면 시간과 사용량만 듭니다. */
+const resolveSystemPrompt = "Reply with exactly: OK";
+const resolveUserPrompt = "OK";
+/** 앱의 칸은 CLI 기본·계열 셋·적어 둔 별칭 하나로 많아야 다섯입니다. CLI를 한꺼번에 너무 많이 띄우지 않게 막아 둡니다. */
+const maxResolveModels = 6;
 
 /**
  * 열쇠로 모델 목록을 받아 JSON으로 돌려줍니다. 열쇠가 없으면 부르지 않고, 실패하면 사유의 message만 넘깁니다

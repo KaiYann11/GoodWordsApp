@@ -22,18 +22,38 @@ data class AiModelList(
     fun isStale(now: Long, maxAgeMillis: Long): Boolean = fetchedAt <= 0L || now - fetchedAt > maxAgeMillis
 }
 
-/** 마지막으로 답한 모델. "지금 답하는 모델" 줄이 CLI처럼 미리 알 수 없는 쪽을 보여 줄 때 씁니다. */
-data class AiLastAnswer(
-    val provider: AiProvider,
-    /** 그때 고른 것(`latest:sonnet`·빈 값·이름). 지금 고른 것과 같을 때만 보여 줍니다. */
-    val choice: String,
-    val model: String
-)
+/**
+ * 칸마다 알아 둔 "지금 답하는 모델"(설정 → AI). 공급자마다 하나씩, 이 기기에만 둡니다.
+ *
+ * CLI·Ollama의 기본과 Claude CLI의 계열 칸은 서버 쪽이 모델을 골라서, 앱은 물어보기 전에는 이름을 모릅니다
+ * ([AiModels.serverPickedChoices]). 그래서 "모델 정보 받아오기" 단추를 누르면 서버에 물어 적어 두고, AI가 답할 때마다 답한
+ * 모델로 고쳐 둡니다(사용자가 정함, 2026-11-25). 1.26.0은 마지막 답 하나만 기억해서 칸을 바꾸면 이름이 사라졌습니다.
+ * 열쇠로 부르는 곳의 칸은 받아 온 목록으로 셉니다 — 여기에는 단추를 누른 때만 남습니다.
+ */
+data class AiModelCheck(
+    /** "모델 정보 받아오기"를 누른 때. 0이면 누른 적이 없어 단추 아래 목록을 보여 주지 않습니다. */
+    val checkedAt: Long = 0L,
+    /** 칸(빈 값·`latest:sonnet`·적어 둔 별칭) → 답하는 모델 이름. */
+    val names: Map<String, String> = emptyMap(),
+    /** 칸 → 지난번에 알아내지 못한 사유. 그 칸으로 답을 받으면 지웁니다. */
+    val errors: Map<String, String> = emptyMap()
+) {
+    /** AI가 [model]로 답했습니다. 그 칸의 이름을 고치고 지난 실패는 지웁니다. 단추를 누른 때는 그대로 둡니다. */
+    fun withAnswer(choice: String, model: String): AiModelCheck =
+        copy(names = names + (choice to model), errors = errors - choice)
+}
 
-/** 모델 목록을 받는 중인 공급자와, 공급자마다 마지막으로 받지 못한 사유. 화면에만 둡니다. */
+/** 서버가 알아 온 이름 하나(`POST /api/ai-models/resolve`). 알아내지 못하면 [model]이 비고 [error]에 사유가 있습니다. */
+data class AiResolvedModel(val model: String, val error: String = "")
+
+/** 모델 목록·모델 정보를 받는 중인 공급자와, 공급자마다 마지막으로 받지 못한 사유. 화면에만 둡니다. */
 data class AiModelRefreshState(
     val loading: AiProvider? = null,
-    val errors: Map<AiProvider, String> = emptyMap()
+    val errors: Map<AiProvider, String> = emptyMap(),
+    /** "모델 정보 받아오기"가 도는 공급자. */
+    val checking: AiProvider? = null,
+    /** 공급자마다 "모델 정보 받아오기"가 받지 못한 사유(목록이나 서버). 칸 하나의 실패는 [AiModelCheck.errors]에 있습니다. */
+    val checkErrors: Map<AiProvider, String> = emptyMap()
 )
 
 /**
@@ -123,6 +143,26 @@ object AiModels {
 
     /** 직접 적은 이름으로 받을 수 있는지. 빈칸·따옴표처럼 서버가 CLI에 넘기지 않는 글자는 막습니다. */
     fun isValidName(name: String): Boolean = NAME.matches(name.trim())
+
+    /**
+     * 서버에 물어야 이름을 아는 칸 — CLI·Ollama의 기본(빈 값), Claude CLI의 계열 칸과 적어 둔 별칭(`fable`).
+     *
+     * 나머지 칸은 앱이 보낼 이름을 이미 압니다(받아 온 목록에서 셉니다 — [AiFeedbackSettings.requestModel]). Claude CLI에
+     * 적은 온전한 이름(`claude-fable-5-2`)도 그 이름 그대로 답합니다.
+     *
+     * @param current 지금 고른 것. Claude CLI에 별칭을 적어 골랐으면 그것도 알아봅니다.
+     */
+    fun serverPickedChoices(provider: AiProvider, current: String): List<String> = buildList {
+        if (provider.defaultFamily == null) add("")
+        if (provider.familyAliases) {
+            provider.familyChoices.forEach { add(latest(it)) }
+            val typed = current.trim()
+            if (typed.isNotEmpty() && familyOfChoice(typed) == null && familyOf(typed) == null) add(typed)
+        }
+    }
+
+    /** 서버가 모델을 고르는 칸인지([serverPickedChoices]). */
+    fun isServerPicked(provider: AiProvider, choice: String): Boolean = choice in serverPickedChoices(provider, choice)
 
     /**
      * 1.25.x까지 저장한 모델 이름을 이 꼴로 옮깁니다.

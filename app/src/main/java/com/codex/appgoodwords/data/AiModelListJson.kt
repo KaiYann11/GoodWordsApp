@@ -74,6 +74,51 @@ object AiModelListJson {
         }.getOrDefault(AiModelList())
     }
 
+    /**
+     * 서버가 알아 온 이름(`POST /api/ai-models/resolve`): `{ provider, models: [{ requested, model, error }], resolvedAt }`.
+     *
+     * @return 보낸 이름(`""`·`sonnet`) → 알아 온 것
+     */
+    fun parseResolved(body: String): Map<String, AiResolvedModel> {
+        val array = JSONObject(body).optJSONArray("models") ?: JSONArray()
+        return buildMap {
+            for (index in 0 until array.length()) {
+                val row = array.optJSONObject(index) ?: continue
+                put(
+                    row.optString("requested").trim(),
+                    AiResolvedModel(model = row.optString("model").trim(), error = row.optString("error").trim())
+                )
+            }
+        }
+    }
+
+    /** 칸마다 알아 둔 이름([AiModelCheck])을 이 기기에 적어 둘 꼴. 빈 값(CLI 기본)도 칸 이름으로 씁니다. */
+    fun encodeCheck(check: AiModelCheck): String = JSONObject()
+        .put("checkedAt", check.checkedAt)
+        .put("names", JSONObject().apply { check.names.forEach { (choice, model) -> put(choice, model) } })
+        .put("errors", JSONObject().apply { check.errors.forEach { (choice, error) -> put(choice, error) } })
+        .toString()
+
+    /** 적어 둔 것을 읽습니다. 비었거나 꼴이 어긋나면 알아 둔 것이 없는 것으로 봅니다(다시 받으면 됩니다). */
+    fun decodeCheck(text: String?): AiModelCheck {
+        if (text.isNullOrBlank()) return AiModelCheck()
+        return runCatching {
+            val json = JSONObject(text)
+            AiModelCheck(
+                checkedAt = json.optLong("checkedAt"),
+                names = readStrings(json.optJSONObject("names")),
+                errors = readStrings(json.optJSONObject("errors"))
+            )
+        }.getOrDefault(AiModelCheck())
+    }
+
+    private fun readStrings(json: JSONObject?): Map<String, String> {
+        if (json == null) return emptyMap()
+        return buildMap {
+            json.keys().forEach { key -> json.optString(key).trim().takeIf { it.isNotEmpty() }?.let { put(key, it) } }
+        }
+    }
+
     private fun readModels(array: JSONArray?): List<AiModelInfo> {
         if (array == null) return emptyList()
         return buildList {

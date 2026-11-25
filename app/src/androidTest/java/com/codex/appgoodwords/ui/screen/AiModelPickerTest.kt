@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertTextContains
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.codex.appgoodwords.data.AiFeedbackSettings
+import com.codex.appgoodwords.data.AiModelCheck
 import com.codex.appgoodwords.data.AiModelInfo
 import com.codex.appgoodwords.data.AiModelList
 import com.codex.appgoodwords.data.AiModelRefreshState
@@ -33,7 +35,8 @@ import org.junit.Test
  * 설정 → AI의 모델 칸.
  *
  * 모델이 앱에 박혀 있어 새 모델이 나올 때마다 앱을 다시 게시해야 했습니다. 이제 계열 칸("Sonnet 최신")을 고르고, 이름은
- * 받아 온 목록에서 고르거나 적습니다(사용자가 고름, 2026-11-25).
+ * 받아 온 목록에서 고르거나 적습니다(사용자가 고름, 2026-11-25). 칸 아래 "모델 정보 받아오기"를 누르면 칸마다 지금 답하는
+ * 모델을 한 줄씩 보여 줍니다(같은 날 사용자가 고름 — 단추 아래 목록).
  */
 class AiModelPickerTest {
     @get:Rule
@@ -41,7 +44,9 @@ class AiModelPickerTest {
 
     private var settings by mutableStateOf(AiFeedbackSettings())
     private var refreshState by mutableStateOf(AiModelRefreshState())
+    private var modelChecks by mutableStateOf(emptyMap<AiProvider, AiModelCheck>())
     private val refreshes = mutableListOf<Pair<AiProvider, Boolean>>()
+    private val checks = mutableListOf<AiProvider>()
 
     private val claudeList = AiModelList(
         models = listOf(
@@ -126,6 +131,55 @@ class AiModelPickerTest {
         assertEquals("", settings.model)
     }
 
+    @Test
+    fun theCheckButtonAsksTheServerAndTheRowsNameEachChip() {
+        show(AiFeedbackSettings().withProvider(AiProvider.CLAUDE_CLI).withModel(AiModels.latest("sonnet")), emptyMap())
+
+        // 누르기 전에는 줄이 없습니다. 서버가 CLI에 묻는 데 사용량이 들어 화면을 열 때는 받지 않습니다.
+        compose.onNodeWithTag(aiModelCheckTimeTag).assertDoesNotExist()
+        assertTrue(checks.toString(), checks.isEmpty())
+        compose.onNodeWithTag(aiModelCheckTag).performScrollTo().assertTextContains("모델 정보 받아오기").performClick()
+        assertEquals(listOf(AiProvider.CLAUDE_CLI), checks)
+
+        // 받는 동안에는 다시 누를 수 없습니다.
+        refreshState = AiModelRefreshState(checking = AiProvider.CLAUDE_CLI)
+        compose.onNodeWithTag(aiModelCheckTag).assertTextContains("받는 중…").assertIsNotEnabled()
+
+        refreshState = AiModelRefreshState()
+        modelChecks = mapOf(
+            AiProvider.CLAUDE_CLI to AiModelCheck(
+                checkedAt = System.currentTimeMillis(),
+                names = mapOf(
+                    "" to "claude-opus-5-5",
+                    AiModels.latest("opus") to "claude-opus-5-5",
+                    AiModels.latest("sonnet") to "claude-sonnet-5-5"
+                ),
+                errors = mapOf(AiModels.latest("haiku") to "사용 한도에 걸렸습니다")
+            )
+        )
+        compose.onNodeWithTag(aiModelCheckTimeTag).performScrollTo().assertTextContains("에 받음", substring = true)
+        compose.onNodeWithTag(aiModelCheckRowTag("")).assertTextContains("CLI 기본").assertTextContains("claude-opus-5-5")
+        compose.onNodeWithTag(aiModelCheckRowTag(AiModels.latest("sonnet"))).assertTextContains("claude-sonnet-5-5")
+        compose.onNodeWithTag(aiModelCheckRowTag(AiModels.latest("haiku")))
+            .assertTextContains("알아내지 못함: 사용 한도에 걸렸습니다")
+        // 고른 칸의 이름은 "지금 답하는 모델" 줄에도 나옵니다.
+        compose.onNodeWithTag(aiModelNowTag).assertTextContains("지금 답하는 모델: claude-sonnet-5-5", substring = true)
+    }
+
+    @Test
+    fun aCheckThatCouldNotReachTheServerSaysWhy() {
+        show(AiFeedbackSettings().withProvider(AiProvider.CODEX_CLI), emptyMap())
+
+        refreshState = AiModelRefreshState(
+            checkErrors = mapOf(AiProvider.CODEX_CLI to "Codex CLI 모델은 서버가 알아 옵니다. 설정에서 서버 주소를 먼저 지정해 주세요.")
+        )
+
+        compose.onNodeWithTag(aiModelCheckErrorTag).performScrollTo()
+            .assertTextContains("모델 정보를 받지 못했습니다: Codex CLI 모델은 서버가 알아 옵니다", substring = true)
+        // 새로 안 것이 없으면 "…에 받음" 줄을 만들지 않습니다.
+        compose.onNodeWithTag(aiModelCheckTimeTag).assertDoesNotExist()
+    }
+
     private fun chip(choice: String) = compose.onNodeWithTag(aiModelChoiceTag(choice))
 
     /** 실제 앱처럼 설정을 밖에서 들고 고친 것을 다시 넘깁니다. */
@@ -155,8 +209,10 @@ class AiModelPickerTest {
                     aiFeedbackSettings = settings,
                     onAiFeedbackSettingsChanged = { settings = it },
                     aiModelLists = lists,
+                    aiModelChecks = modelChecks,
                     aiModelRefresh = refreshState,
                     onRefreshAiModels = { provider, force -> refreshes += provider to force },
+                    onCheckAiModels = { provider -> checks += provider },
                     section = SettingsSection.AI,
                     onSectionChange = {}
                 )

@@ -6,14 +6,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -26,9 +33,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
-import com.codex.appgoodwords.data.AiLastAnswer
+import com.codex.appgoodwords.data.AiModelCheck
 import com.codex.appgoodwords.data.AiModelInfo
 import com.codex.appgoodwords.data.AiModelList
 import com.codex.appgoodwords.data.AiModels
@@ -43,11 +51,17 @@ internal const val aiModelDialogSourceTag = "ai_model_dialog_source"
 internal const val aiModelDialogFieldTag = "ai_model_dialog_field"
 internal const val aiModelDialogRefreshTag = "ai_model_dialog_refresh"
 internal const val aiModelDialogConfirmTag = "ai_model_dialog_confirm"
+internal const val aiModelCheckTag = "ai_model_check"
+internal const val aiModelCheckTimeTag = "ai_model_check_time"
+internal const val aiModelCheckErrorTag = "ai_model_check_error"
 
 /** 칸 하나. 빈 값은 서버 쪽 기본, `latest:opus`는 계열 최신, 그 밖은 모델 이름입니다. */
 internal fun aiModelChoiceTag(choice: String): String = "ai_model_" + choice.ifBlank { "default" }
 
 internal fun aiModelRowTag(id: String): String = "ai_model_row_$id"
+
+/** "모델 정보 받아오기" 아래 한 줄(칸 하나). */
+internal fun aiModelCheckRowTag(choice: String): String = "ai_model_check_row_" + choice.ifBlank { "default" }
 
 /**
  * 모델 고르기(설정 → AI).
@@ -55,17 +69,24 @@ internal fun aiModelRowTag(id: String): String = "ai_model_row_$id"
  * 계열 칸("Sonnet 최신")이 앞에 섭니다 — 골라 두면 다음 세대가 나왔을 때 앱을 고치지 않고 그 모델로 넘어갑니다(사용자가 고름,
  * 2026-11-25). 이름을 콕 집어 고르려면 "다른 모델…"에서 받아 온 목록을 고르거나 적습니다. 계열 칸은 받아 온 목록에서 셉니다
  * ([AiModels.families]) — 새 계열이 나오면 칸도 저절로 생깁니다.
+ *
+ * 칸 아래 "모델 정보 받아오기"를 누르면 칸마다 지금 답하는 모델을 한 줄씩 보여 줍니다(사용자가 고름, 2026-11-25 — 단추 아래
+ * 목록). CLI·Ollama 기본과 Claude CLI 칸은 서버가 모델을 골라 앱이 미리 알 수 없어, 서버가 CLI에 짧게 물어 알아 옵니다.
+ * 몇 초 걸리고 구독 사용량이 조금 들어 누를 때만 받습니다. 목록은 다시 누를 때까지 그대로 둡니다.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AiModelPicker(
     settings: AiFeedbackSettings,
     list: AiModelList,
-    lastAnswer: AiLastAnswer?,
+    check: AiModelCheck,
     loading: Boolean,
     error: String?,
+    checking: Boolean,
+    checkError: String?,
     onChanged: (AiFeedbackSettings) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onCheck: () -> Unit
 ) {
     val provider = settings.activeProvider
     val choice = settings.modelChoice
@@ -101,11 +122,56 @@ internal fun AiModelPicker(
         ModelChip(selected = false, label = "다른 모델…", tag = aiModelOtherTag) { showDialog = true }
     }
     Text(
-        text = nowLine(settings, list, lastAnswer),
+        text = nowLine(settings, list, check),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.testTag(aiModelNowTag)
     )
+    OutlinedButton(
+        onClick = onCheck,
+        enabled = !checking,
+        modifier = Modifier.testTag(aiModelCheckTag)
+    ) {
+        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (checking) "받는 중…" else "모델 정보 받아오기")
+    }
+    if (!checkError.isNullOrBlank()) {
+        Text(
+            text = "모델 정보를 받지 못했습니다: $checkError",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag(aiModelCheckErrorTag)
+        )
+    }
+    if (check.checkedAt > 0L) {
+        // 줄 사이를 좁게 둡니다. 바깥 칸 간격으로 벌리면 한 덩이로 읽히지 않습니다.
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = checkedLine(check.checkedAt),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(aiModelCheckTimeTag)
+            )
+            checkRows(settings, models, families, check).forEach { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp)
+                        .semantics(mergeDescendants = true) {}
+                        .testTag(aiModelCheckRowTag(row.choice))
+                ) {
+                    Text(row.label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(104.dp))
+                    Text(
+                        text = row.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (row.model.isBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
 
     if (showDialog) {
         AiModelDialog(
@@ -138,31 +204,77 @@ private fun ModelChip(selected: Boolean, label: String, tag: String, onClick: ()
 /**
  * "지금 답하는 모델" 줄.
  *
- * 계열을 골랐으면 그 계열에서 지금 가장 새 것과, 다음 세대가 나오면 저절로 바뀐다는 것을 적습니다. Claude CLI는 CLI가 고르므로
- * 마지막으로 답한 이름을 적습니다(아직 답한 적이 없으면 무엇이 고르는지만).
+ * 계열을 골랐으면 그 계열에서 지금 가장 새 것과, 다음 세대가 나오면 저절로 바뀐다는 것을 적습니다. 서버가 모델을 고르는 칸
+ * (CLI·Ollama 기본, Claude CLI 칸 — [AiModels.isServerPicked])은 알아 둔 이름("모델 정보 받아오기"나 그 칸으로 받은 마지막 답)을
+ * 적고, 아직 모르면 누가 고르는지만 적습니다.
  */
-internal fun nowLine(settings: AiFeedbackSettings, list: AiModelList, lastAnswer: AiLastAnswer?): String {
+internal fun nowLine(settings: AiFeedbackSettings, list: AiModelList, check: AiModelCheck): String {
     val provider = settings.activeProvider
     val choice = settings.modelChoice
-    val answered = lastAnswer?.takeIf { it.provider == provider && it.choice == choice }?.model
+    val serverPicked = AiModels.isServerPicked(provider, choice)
+    val known = check.names[choice]?.takeIf { serverPicked && it.isNotBlank() }
     val family = AiModels.familyOfChoice(choice)
     return when {
         family != null -> {
             val name = family.replaceFirstChar { it.uppercase() }
             val current = when {
-                answered != null -> "지금 답하는 모델: $answered"
+                known != null -> "지금 답하는 모델: $known"
                 provider.familyAliases -> "서버의 ${provider.label}가 가장 새 $name 모델로 답합니다."
                 else -> "지금 답하는 모델: ${settings.requestModel(list.models)}"
             }
             "$current\n$name 다음 세대가 나오면 저절로 바뀝니다."
         }
-        choice.isEmpty() -> answered?.let { "지금 답하는 모델: $it" } ?: when (provider) {
+        choice.isEmpty() -> known?.let { "지금 답하는 모델: $it" } ?: when (provider) {
             AiProvider.OLLAMA -> "서버에 받아 둔 모델 가운데 가장 최근에 받은 것이 답합니다."
             else -> "서버의 ${provider.label}에 정해 둔 모델이 답합니다."
         }
+        // Claude CLI에 적은 별칭(`fable`)은 CLI가 그 계열의 가장 새 모델로 바꿉니다. "바뀌지 않습니다"가 아닙니다.
+        serverPicked -> (known?.let { "지금 답하는 모델: $it" } ?: "서버의 ${provider.label}가 이 별칭의 모델로 답합니다.") +
+            "\n별칭이라 새 모델이 나오면 ${provider.label}가 바꿉니다."
         else -> "이 이름으로 묻습니다. 새 모델이 나와도 바뀌지 않습니다."
     }
 }
+
+/** "모델 정보 받아오기" 아래 한 줄 — 칸 이름과, 그 칸이 지금 답하는 모델(모르면 사유). */
+internal data class CheckRow(val choice: String, val label: String, val model: String, val error: String) {
+    val text: String
+        get() = model.ifBlank { if (error.isNotBlank()) "알아내지 못함: $error" else "아직 모릅니다. 다시 받아 보세요." }
+}
+
+/**
+ * 칸이 보이는 차례대로 한 줄씩.
+ *
+ * 서버가 고르는 칸은 알아 둔 이름으로 적습니다 — 지난번에 알아내지 못했으면 지난 이름 대신 그 사유를 적습니다(지금 모르는
+ * 것을 아는 것처럼 보이지 않게). 나머지 계열 칸은 받아 둔 목록에서 지금 보낼 이름을 셉니다(목록을 새로 받으면 그 자리에서
+ * 바뀝니다). 이름을 그대로 고른 칸은 칸에 이름이 적혀 있어 줄을 두지 않습니다(Claude CLI에 적은 별칭만 둡니다).
+ */
+internal fun checkRows(
+    settings: AiFeedbackSettings,
+    models: List<AiModelInfo>,
+    families: List<String>,
+    check: AiModelCheck
+): List<CheckRow> {
+    val provider = settings.activeProvider
+    val choices = buildList {
+        if (provider.defaultFamily == null) add("")
+        families.forEach { add(AiModels.latest(it)) }
+        val current = settings.modelChoice
+        if (current !in this && AiModels.isServerPicked(provider, current)) add(current)
+    }
+    return choices.map { choice ->
+        val label = provider.modelLabel(choice)
+        if (AiModels.isServerPicked(provider, choice)) {
+            val error = check.errors[choice].orEmpty()
+            CheckRow(choice, label, model = if (error.isEmpty()) check.names[choice].orEmpty() else "", error = error)
+        } else {
+            CheckRow(choice, label, model = settings.withModel(choice).requestModel(models), error = "")
+        }
+    }
+}
+
+/** 단추를 누른 때. "11월 25일 15:30에 받음". */
+internal fun checkedLine(checkedAt: Long, zoneId: ZoneId = ZoneId.systemDefault()): String =
+    DateTimeFormatter.ofPattern("M월 d일 HH:mm").format(Instant.ofEpochMilli(checkedAt).atZone(zoneId)) + "에 받음"
 
 /**
  * 받아 온 목록에서 고르거나 이름을 적는 창.
