@@ -3264,6 +3264,85 @@ describe("AI 모델 목록과 답한 모델", () => {
   });
 });
 
+describe("모델 이름 알아보기", () => {
+  // 앱 설정 → AI의 "모델 정보 받아오기". 별칭·기본이 지금 어느 모델인지 서버가 알아 온다(사용자가 정함, 2026-11-25).
+  const resolve = (body, key) => api("/api/ai-models/resolve", { method: "POST", body, key });
+
+  it("API 키가 있어야 한다", async () => {
+    const response = await resolve({ provider: "claude_cli", models: ["sonnet"] }, "");
+
+    assert.equal(response.status, 401);
+  });
+
+  it("Claude CLI는 칸마다 짧게 물어 별칭과 기본을 실제 이름으로 바꾼다", async () => {
+    const response = await resolve({ provider: "claude_cli", models: ["", "opus", "sonnet", "haiku", "sonnet"] });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.provider, "claude_cli");
+    assert.equal(typeof body.resolvedAt, "number");
+    // 같은 것을 두 번 보내도 한 번만 묻는다. 곁일에 쓴 작은 모델이 아니라 답을 쓴 모델이다.
+    assert.deepEqual(body.models, [
+      { requested: "", model: "claude-sonnet-5-5", error: "" },
+      { requested: "opus", model: "claude-opus-5-5", error: "" },
+      { requested: "sonnet", model: "claude-sonnet-5-5", error: "" },
+      { requested: "haiku", model: "claude-haiku-5-5", error: "" },
+    ]);
+  });
+
+  it("알아내지 못한 칸은 사유를 싣고 나머지는 돌려준다", async () => {
+    const response = await resolve({ provider: "claude_cli", models: ["sonnet", "broken-model", "no-usage"] });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    const byName = Object.fromEntries(body.models.map((row) => [row.requested, row]));
+    assert.equal(byName.sonnet.model, "claude-sonnet-5-5");
+    assert.equal(byName["broken-model"].model, "");
+    assert.ok(byName["broken-model"].error.includes("모델을 찾을 수 없습니다"), byName["broken-model"].error);
+    // 답은 왔지만 어느 모델이 썼는지 알려 주지 않으면 물은 이름으로 메우지 않는다.
+    assert.equal(byName["no-usage"].model, "");
+    assert.ok(byName["no-usage"].error.includes("알려 주지 않았습니다"), byName["no-usage"].error);
+  });
+
+  it("Codex CLI 기본은 머리말에 찍힌 모델로 알아낸다", async () => {
+    const response = await resolve({ provider: "codex_cli", models: [""] });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.deepEqual(body.models, [{ requested: "", model: "gpt-6.1-terra", error: "" }]);
+  });
+
+  it("Ollama 기본은 묻지 않고 서버가 고를 모델을 알려 준다", async () => {
+    const response = await resolve({ provider: "ollama", models: ["", "llama3.2:3b"] });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.deepEqual(body.models, [
+      { requested: "", model: "qwen3.6:27b", error: "" },
+      { requested: "llama3.2:3b", model: "llama3.2:3b", error: "" },
+    ]);
+  });
+
+  it("열쇠로 부르는 곳, 모르는 공급자, 잘못된 목록은 400이다", async () => {
+    for (const body of [
+      { provider: "anthropic", models: [""] },
+      { provider: "gemini", models: [""] },
+      { provider: "claude_cli", models: [] },
+      { provider: "claude_cli" },
+      { provider: "claude_cli", models: "sonnet" },
+      { provider: "claude_cli", models: ["a", "b", "c", "d", "e", "f", "g"] },
+      { provider: "claude_cli", models: ["sonnet; rm -rf /"] },
+      { provider: "claude_cli", models: [42] },
+    ]) {
+      const response = await resolve(body);
+      const payload = await response.json();
+
+      assert.equal(response.status, 400, `${JSON.stringify(body)} → ${JSON.stringify(payload)}`);
+      assert.ok(payload.error, JSON.stringify(payload));
+    }
+  });
+});
+
 describe("임시저장소와 메모", () => {
   it("분류할 때 원문과 식별자가 유지된다", async () => {
     const created = await (await api("/api/content", {

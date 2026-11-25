@@ -69,7 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codex.appgoodwords.data.AiFeedbackSettings
-import com.codex.appgoodwords.data.AiLastAnswer
+import com.codex.appgoodwords.data.AiModelCheck
 import com.codex.appgoodwords.data.AiModelList
 import com.codex.appgoodwords.data.AiModelRefreshState
 import com.codex.appgoodwords.data.AppUpdateState
@@ -201,11 +201,13 @@ fun SettingsScreen(
     onAiFeedbackSettingsChanged: (AiFeedbackSettings) -> Unit = {},
     /** 공급자마다 받아 둔 모델 목록. 모델 칸의 계열과 "다른 모델…"이 여기서 나옵니다. */
     aiModelLists: Map<AiProvider, AiModelList> = emptyMap(),
-    /** 마지막으로 답한 모델. CLI처럼 미리 알 수 없는 쪽의 "지금 답하는 모델"을 적습니다. */
-    aiLastAnswer: AiLastAnswer? = null,
+    /** 공급자마다 칸별로 알아 둔 "지금 답하는 모델". CLI처럼 미리 알 수 없는 칸의 이름이 여기 있습니다. */
+    aiModelChecks: Map<AiProvider, AiModelCheck> = emptyMap(),
     aiModelRefresh: AiModelRefreshState = AiModelRefreshState(),
     /** 모델 목록을 받아 옵니다. 두 번째 값이 거짓이면 받은 지 얼마 안 된 목록은 그대로 둡니다. */
     onRefreshAiModels: (AiProvider, Boolean) -> Unit = { _, _ -> },
+    /** "모델 정보 받아오기" — 서버에 칸마다 지금 답하는 모델을 물어 옵니다. */
+    onCheckAiModels: (AiProvider) -> Unit = {},
     /**
      * 오늘의 한마디로 무엇이 나가는지 보여 줍니다.
      *
@@ -599,9 +601,10 @@ fun SettingsScreen(
                             settings = aiFeedbackSettings,
                             onChanged = onAiFeedbackSettingsChanged,
                             modelLists = aiModelLists,
-                            lastAnswer = aiLastAnswer,
+                            modelChecks = aiModelChecks,
                             modelRefresh = aiModelRefresh,
                             onRefreshModels = onRefreshAiModels,
+                            onCheckModels = onCheckAiModels,
                             onPreviewCoachPrompt = onPreviewCoachPrompt,
                             canScheduleExactAlarms = canScheduleExactAlarms,
                             onOpenExactAlarmSettings = onOpenExactAlarmSettings
@@ -1346,9 +1349,10 @@ private fun AiFeedbackSection(
     settings: AiFeedbackSettings,
     onChanged: (AiFeedbackSettings) -> Unit,
     modelLists: Map<AiProvider, AiModelList> = emptyMap(),
-    lastAnswer: AiLastAnswer? = null,
+    modelChecks: Map<AiProvider, AiModelCheck> = emptyMap(),
     modelRefresh: AiModelRefreshState = AiModelRefreshState(),
     onRefreshModels: (AiProvider, Boolean) -> Unit = { _, _ -> },
+    onCheckModels: (AiProvider) -> Unit = {},
     onPreviewCoachPrompt: (suspend () -> Result<String>)? = null,
     canScheduleExactAlarms: Boolean = true,
     onOpenExactAlarmSettings: () -> Unit = {}
@@ -1435,11 +1439,14 @@ private fun AiFeedbackSection(
             AiModelPicker(
                 settings = settings,
                 list = modelLists[provider] ?: AiModelList(),
-                lastAnswer = lastAnswer,
+                check = modelChecks[provider] ?: AiModelCheck(),
                 loading = modelRefresh.loading == provider,
                 error = modelRefresh.errors[provider],
+                checking = modelRefresh.checking == provider,
+                checkError = modelRefresh.checkErrors[provider],
                 onChanged = onChanged,
-                onRefresh = { onRefreshModels(provider, true) }
+                onRefresh = { onRefreshModels(provider, true) },
+                onCheck = { onCheckModels(provider) }
             )
 
             Text("자동 실행 주기", style = MaterialTheme.typography.titleSmall)

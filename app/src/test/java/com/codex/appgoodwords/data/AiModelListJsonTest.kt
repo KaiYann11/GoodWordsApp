@@ -71,4 +71,30 @@ class AiModelListJsonTest {
         assertEquals(false, AiModelList(fetchedAt = 9_500L).isStale(now = 10_000L, maxAgeMillis = 1_000L))
         assertEquals(true, AiModelList(fetchedAt = 8_000L).isStale(now = 10_000L, maxAgeMillis = 1_000L))
     }
+
+    @Test
+    fun theResolvedNamesAreKeyedByWhatWasSent() {
+        val resolved = AiModelListJson.parseResolved(
+            """{"provider":"claude_cli","models":[{"requested":"","model":"claude-opus-5-5","error":""},""" +
+                """{"requested":"sonnet","model":"claude-sonnet-5-5","error":""},""" +
+                """{"requested":"haiku","model":"","error":"사용 한도에 걸렸습니다"}],"resolvedAt":1}"""
+        )
+
+        assertEquals(AiResolvedModel("claude-opus-5-5"), resolved[""])
+        assertEquals(AiResolvedModel("claude-sonnet-5-5"), resolved["sonnet"])
+        assertEquals(AiResolvedModel("", "사용 한도에 걸렸습니다"), resolved["haiku"])
+    }
+
+    @Test
+    fun aCheckSurvivesTheRoundTripWithTheBlankChoice() {
+        val check = AiModelCheck(
+            checkedAt = 1_764_050_000_000L,
+            names = mapOf("" to "claude-opus-5-5", "latest:sonnet" to "claude-sonnet-5-5"),
+            errors = mapOf("latest:haiku" to "사용 한도")
+        )
+
+        assertEquals(check, AiModelListJson.decodeCheck(AiModelListJson.encodeCheck(check)))
+        assertEquals(AiModelCheck(), AiModelListJson.decodeCheck(null))
+        assertEquals(AiModelCheck(), AiModelListJson.decodeCheck("{꼴이 어긋남"))
+    }
 }

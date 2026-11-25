@@ -583,6 +583,7 @@ GET  /api/events
 DELETE /api/events?ids=1,2,3
 POST /api/growth-feedback
 GET  /api/ai-models?provider=anthropic|openai|claude_cli|codex_cli|ollama
+POST /api/ai-models/resolve
 ```
 
 ### 루틴에는 하루에 밟는 차례가 있습니다
@@ -760,7 +761,27 @@ GET /api/ai-models?provider=codex_cli
   파일이 없으면 503입니다(서버 PC에서 `codex`를 한 번 돌리면 생깁니다).
 - `ollama` — 받아 둔 글 모델, 가장 최근에 받은 것부터(기본으로 고르는 것과 같은 차례).
 - `claude_cli` — 목록을 내주는 명령이 없어 빈 목록입니다. 앱은 별칭(`opus`·`sonnet`·`haiku`)으로 그 계열의
-  가장 새 모델을 부르고, 답한 실제 이름은 위의 `model`로 받습니다.
+  가장 새 모델을 부르고, 답한 실제 이름은 위의 `model`로 받습니다. 별칭이 지금 어느 모델인지는 아래
+  `POST /api/ai-models/resolve`로 알아봅니다.
+
+#### 칸마다 지금 답하는 모델 알아보기
+
+`POST /api/ai-models/resolve`는 서버 쪽이 모델을 고르는 칸이 지금 어느 모델인지 알아 옵니다(1.26.1부터, 앱 설정 → AI의
+"모델 정보 받아오기"). Claude CLI는 별칭(`sonnet`)과 CLI 기본을 CLI가 그때그때 이름으로 바꾸는데 그 이름을 내주는 명령이
+없어서, "OK"만 답하게 하는 아주 짧은 물음을 칸마다 한 번씩 보내고 답한 모델(`modelUsage`)을 읽습니다. Codex CLI 기본도
+같습니다(머리말의 `model:`). Ollama 기본은 묻지 않고 서버가 고를 모델(`ollamaModel`)을 알려 줍니다.
+
+```text
+POST /api/ai-models/resolve  {"provider":"claude_cli","models":["","opus","sonnet","haiku"]}
+  -> {"provider":"claude_cli","models":[{"requested":"","model":"claude-opus-5-5","error":""}, ...],"resolvedAt":1764...}
+```
+
+- 칸마다 CLI를 한 번씩, 한꺼번에 띄웁니다(많아야 6칸). 그래서 몇 초 걸리고 구독 사용량이 조금 듭니다 — 앱은 사용자가
+  단추를 누를 때만 부릅니다(사용자가 정함, 2026-11-25). 2026-11-25 이 맥에서 재어 보니 한 칸에 1~3초였습니다.
+- 칸 하나가 실패해도(사용 한도, 없는 모델, 쓴 모델을 알려 주지 않는 CLI) 나머지는 돌려주고 그 칸의 `error`에 사유를
+  싣습니다. 알려 주지 않으면 물은 이름으로 메우지 않습니다(`runCli`의 `answered`).
+- 열쇠로 부르는 `anthropic`·`openai`는 앱이 목록의 이름을 그대로 보내므로 400입니다. 이름은 `/api/growth-feedback`과
+  같은 규칙(`aiModelPattern`)으로 검사합니다.
 
 시험은 열쇠로 부르는 두 API를 가짜로 붙입니다 — `APP_GOOD_WORDS_ANTHROPIC_BASE_URL`·
 `APP_GOOD_WORDS_OPENAI_BASE_URL`(Ollama 주소처럼 서버 설정에서만 읽습니다). 운영에서는 쓰지 않습니다.

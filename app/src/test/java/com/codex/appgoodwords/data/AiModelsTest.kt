@@ -129,4 +129,47 @@ class AiModelsTest {
         assertNull(AiModels.familyOfChoice("latest:"))
         assertEquals("Fable 최신", AiModels.familyLabel("fable"))
     }
+
+    @Test
+    fun onlyTheChoicesTheServerPicksNeedTheServerToNameThem() {
+        // "모델 정보 받아오기"가 서버에 물을 칸. CLI·Ollama 기본과 Claude CLI의 계열 칸·적은 별칭입니다.
+        assertEquals(
+            listOf("", "latest:opus", "latest:sonnet", "latest:haiku"),
+            AiModels.serverPickedChoices(AiProvider.CLAUDE_CLI, "latest:sonnet")
+        )
+        assertEquals(
+            listOf("", "latest:opus", "latest:sonnet", "latest:haiku", "fable"),
+            AiModels.serverPickedChoices(AiProvider.CLAUDE_CLI, "fable")
+        )
+        // 온전한 이름은 그 이름으로 답합니다.
+        assertEquals(4, AiModels.serverPickedChoices(AiProvider.CLAUDE_CLI, "claude-fable-5-2").size)
+        // Codex의 계열 칸은 받아 온 목록의 이름을 그대로 보냅니다. 기본만 Codex가 고릅니다.
+        assertEquals(listOf(""), AiModels.serverPickedChoices(AiProvider.CODEX_CLI, "latest:terra"))
+        assertEquals(listOf(""), AiModels.serverPickedChoices(AiProvider.OLLAMA, "qwen3.6:27b"))
+        // 열쇠로 부르는 곳은 앱이 이름을 다 압니다.
+        assertEquals(emptyList<String>(), AiModels.serverPickedChoices(AiProvider.ANTHROPIC, "latest:opus"))
+        assertEquals(emptyList<String>(), AiModels.serverPickedChoices(AiProvider.OPENAI, ""))
+
+        assertTrue(AiModels.isServerPicked(AiProvider.CLAUDE_CLI, "fable"))
+        assertTrue(AiModels.isServerPicked(AiProvider.CODEX_CLI, ""))
+        assertFalse(AiModels.isServerPicked(AiProvider.CODEX_CLI, "latest:terra"))
+        assertFalse(AiModels.isServerPicked(AiProvider.CLAUDE_CLI, "claude-sonnet-5-5"))
+        assertFalse(AiModels.isServerPicked(AiProvider.ANTHROPIC, "latest:sonnet"))
+    }
+
+    @Test
+    fun anAnswerNamesItsChoiceAndClearsItsLastFailure() {
+        val check = AiModelCheck(
+            checkedAt = 5L,
+            names = mapOf("" to "claude-opus-5-5"),
+            errors = mapOf("latest:sonnet" to "사용 한도")
+        )
+
+        val answered = check.withAnswer("latest:sonnet", "claude-sonnet-5-5")
+
+        assertEquals(mapOf("" to "claude-opus-5-5", "latest:sonnet" to "claude-sonnet-5-5"), answered.names)
+        assertEquals(emptyMap<String, String>(), answered.errors)
+        // 단추를 누른 때는 그대로입니다.
+        assertEquals(5L, answered.checkedAt)
+    }
 }

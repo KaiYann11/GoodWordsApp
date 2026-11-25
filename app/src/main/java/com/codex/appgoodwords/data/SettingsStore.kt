@@ -97,11 +97,15 @@ class SettingsStore(
          * ([AiModels.migrateLegacy]). 설정을 한 번 저장하면 옮긴 값과 함께 지금 판이 적힙니다.
          */
         val aiModelScheme = intPreferencesKey("ai_model_scheme")
-        /** 마지막으로 답한 모델(공급자·고른 것·모델을 줄바꿈으로 이음). 이 기기에만 둡니다. */
+        /**
+         * 1.26.0이 마지막으로 답한 모델 하나를 적던 칸. 이제 칸마다 [aiModelCheck]에 둡니다 — 답을 적을 때 이 칸은 지웁니다.
+         */
         val aiLastAnswer = stringPreferencesKey("ai_last_answer")
 
         /** 공급자마다 받아 둔 모델 목록([AiModelListJson]). 열쇠·서버가 기기마다 달라 이 기기에만 둡니다. */
         fun aiModelList(provider: AiProvider) = stringPreferencesKey("ai_models_" + provider.name.lowercase())
+        /** 공급자마다 칸별로 알아 둔 "지금 답하는 모델"([AiModelListJson.encodeCheck]). 이 기기에만 둡니다. */
+        fun aiModelCheck(provider: AiProvider) = stringPreferencesKey("ai_model_check_" + provider.name.lowercase())
         /**
          * 목표에 들이는 시간을 재는 타이머([GoalTimer]). **이 기기에만 둡니다** — 재는 것은 이 휴대폰에서 하는 일이고,
          * 남기기를 눌러야 기록이 되어 동기화됩니다.
@@ -429,17 +433,29 @@ class SettingsStore(
         context.dataStore.edit { preferences -> preferences[Keys.aiModelList(provider)] = AiModelListJson.encode(list) }
     }
 
-    /** 마지막으로 답한 모델. 답한 적이 없으면 null입니다. */
-    val aiLastAnswerFlow: Flow<AiLastAnswer?> = context.dataStore.data.map { preferences ->
-        val parts = preferences[Keys.aiLastAnswer].orEmpty().split('\n')
-        if (parts.size != 3 || parts[2].isBlank()) return@map null
-        AiLastAnswer(provider = AiProvider.of(parts[0]), choice = parts[1], model = parts[2])
+    /** 공급자마다 칸별로 알아 둔 "지금 답하는 모델"(설정 → AI). 알아 둔 것이 없으면 빈 [AiModelCheck]입니다. */
+    val aiModelChecksFlow: Flow<Map<AiProvider, AiModelCheck>> = context.dataStore.data.map { preferences ->
+        AiProvider.entries.associateWith { AiModelListJson.decodeCheck(preferences[Keys.aiModelCheck(it)]) }
     }
 
-    suspend fun recordAiAnswer(answer: AiLastAnswer) {
-        // 이름에 줄바꿈이 들 일은 없지만, 들면 칸이 밀려 다른 공급자의 것으로 읽힙니다.
-        val fields = listOf(answer.provider.name, answer.choice, answer.model).map { it.replace('\n', ' ').trim() }
-        context.dataStore.edit { preferences -> preferences[Keys.aiLastAnswer] = fields.joinToString("\n") }
+    suspend fun getAiModelCheck(provider: AiProvider): AiModelCheck =
+        AiModelListJson.decodeCheck(context.dataStore.data.first()[Keys.aiModelCheck(provider)])
+
+    /**
+     * 알아 둔 이름을 고칩니다. 읽고 고치고 쓰는 것을 한 번에 합니다 — "모델 정보 받아오기"가 몇 초 도는 사이에 AI가 답해
+     * 이름을 적어도 서로 덮어쓰지 않습니다.
+     */
+    suspend fun updateAiModelCheck(provider: AiProvider, transform: (AiModelCheck) -> AiModelCheck) {
+        context.dataStore.edit { preferences ->
+            val key = Keys.aiModelCheck(provider)
+            preferences[key] = AiModelListJson.encodeCheck(transform(AiModelListJson.decodeCheck(preferences[key])))
+            preferences.remove(Keys.aiLastAnswer)
+        }
+    }
+
+    /** AI가 [model]로 답했습니다 — [choice] 칸의 이름을 그것으로 고쳐 둡니다. */
+    suspend fun recordAiAnswer(provider: AiProvider, choice: String, model: String) {
+        updateAiModelCheck(provider) { it.withAnswer(choice.trim(), model.trim()) }
     }
 
     /**
