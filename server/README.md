@@ -82,60 +82,6 @@ node server/publish_update.mjs --web-root ~/Library/Application\ Support/AppGood
 릴리스를 게시하면 기존 앱에 업데이트할 수 없습니다. [Android 앱 서명 안내](https://developer.android.com/studio/publish/app-signing)
 설치는 Android의 사용자 확인을 거칩니다. [웹사이트를 통한 배포 안내](https://developer.android.com/distribute/marketing-tools/alternative-distribution)
 
-### 배포 이력 — 다른 시스템에 넘기는 파일
-
-게시할 때마다 **지금까지 휴대폰에 내놓은 판 전부**를 두 꼴로 다시 씁니다(사용자가 정함, 2026-11-26). `latest.json`처럼
-접속 키 없이 받습니다 — 서버가 tailnet 안에서만 열려 있으므로 tailnet 안의 기기만 닿습니다.
-
-| 주소 | 꼴 |
-|---|---|
-| `https://<서버>/update/releases.json` | `application/json; charset=utf-8` |
-| `https://<서버>/update/releases.xml` | `application/xml; charset=utf-8` |
-
-- 맨 위: `formatVersion`(지금 1) · `app`(`com.codex.appgoodwords`) · `generatedAt`(파일을 쓴 시각) · `latestVersionCode`(지금
-  `latest.json`이 내놓은 판, 없으면 null).
-- `releases`: 새 판이 앞입니다. 판마다 `latest.json`과 같은 칸 — `versionName` · `versionCode` · `publishedAt`(UTC, ISO 8601) ·
-  `fileName`(받는 주소는 `/update/<fileName>`) · `sizeBytes` · `sha256`.
-- XML은 JSON 키와 같은 이름의 요소에 같은 값을 담습니다(`<releaseHistory>` → `<releases>` → `<release>`). JSON의 null은 요소를
-  두지 않습니다.
-- **이력은 `releases.json` 그 자체**라 한 번 적은 판은 바뀌지 않습니다. 같은 파일을 다시 게시해도 처음 시각이 남고, APK를
-  지워도 판은 남습니다.
-- 이력이 생기기 전에 게시한 판(1.10.0~1.26.1)은 서버에 남은 APK로 채웠습니다. 이름 속 해시 앞 8자를 잰 해시와 맞춰 보고(다르면
-  넣지 않음), 게시 시각은 파일 시각입니다 — 게시가 APK를 복사해 둔 시각이라 `latest.json`에 적힌 시각과 같습니다(1.26.1은
-  밀리초까지 같았음).
-- 휴대폰이 무엇을 언제 받았는지는 담지 않습니다. 앱이 알려 주지 않아 서버가 모릅니다.
-- **받는 시스템이 읽는 꼴입니다.** 칸 이름을 바꾸거나 빼지 말고 더하기만 합니다. 바꿔야 하면 `formatVersion`을 올립니다.
-
-APK 없이 이력만 다시 쓰려면(이력 파일을 지웠거나 처음 채울 때):
-
-```sh
-node server/publish_update.mjs --history-only                       # 저장소의 server/web
-.\server\publish_update.ps1 -HistoryOnly -WebRoot "<설치한 web 폴더>"   # 윈도우
-```
-
-XML은 이렇게 생겼습니다.
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<releaseHistory>
-  <formatVersion>1</formatVersion>
-  <app>com.codex.appgoodwords</app>
-  <generatedAt>2026-11-26T05:30:00.000Z</generatedAt>
-  <latestVersionCode>39</latestVersionCode>
-  <releases>
-    <release>
-      <versionName>1.26.1</versionName>
-      <versionCode>39</versionCode>
-      <publishedAt>2026-11-25T07:08:56.650Z</publishedAt>
-      <fileName>app-good-words-1.26.1-39-628eab2b.apk</fileName>
-      <sizeBytes>27933525</sizeBytes>
-      <sha256>628eab2b05fa6bc6bef641b321edee8a772398c156e5bd88d6dd38b3f43399b9</sha256>
-    </release>
-    …
-  </releases>
-</releaseHistory>
-```
-
 ## macOS에서 실행
 
 **서버는 Windows와 macOS 어느 쪽에서도 같은 일을 합니다.** 서버 본체는 Node 표준 라이브러리만

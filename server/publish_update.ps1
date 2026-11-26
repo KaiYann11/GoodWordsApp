@@ -1,8 +1,6 @@
 ﻿param(
     [string] $ApkPath,
-    [string] $WebRoot,
-    # APK 없이 배포 이력(update/releases.json · releases.xml)만 다시 씁니다.
-    [switch] $HistoryOnly
+    [string] $WebRoot
 )
 
 # 게시 규칙은 publish_update.mjs 한 곳에 있습니다. 서버가 맥에서도 돌아가야 해서, 같은 일을
@@ -13,7 +11,6 @@ $ErrorActionPreference = 'Stop'
 $arguments = @("$PSScriptRoot\publish_update.mjs")
 if ($ApkPath) { $arguments += @('--apk', $ApkPath) }
 if ($WebRoot) { $arguments += @('--web-root', $WebRoot) }
-if ($HistoryOnly) { $arguments += '--history-only' }
 
 node @arguments
 if ($LASTEXITCODE -ne 0) { throw '게시하지 못했습니다.' }
