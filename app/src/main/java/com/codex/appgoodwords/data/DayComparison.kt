@@ -71,9 +71,64 @@ data class DayComparison(
         get() = rows.any { it.today > 0 } && rows.any { it.yesterday > 0 }
 }
 
+/** 어제와 오늘 두 날의 요약. 어제보다 카드·홈 띠·어제와 오늘 화면이 같은 두 날을 봅니다. */
+data class DayPair(val today: DayDigest, val yesterday: DayDigest) {
+    val comparison: DayComparison
+        get() = DayComparisons.of(today, yesterday)
+}
+
+/**
+ * 홈 글귀 아래 한 줄 띠(사용자가 고름, 2026-11-27 — 글귀 아래 한 줄 띠). 누르면 어제와 오늘 화면입니다.
+ *
+ * 카드와 같은 생각입니다 — **오늘이 어제보다 많거나 같은 것만** 짚고, 적은 것은 숫자 없이 빠집니다. 띠는 늘 열려 있는 입구라
+ * 오늘 아직 한 것이 없어도 두지만, 그때는 수 없이 "나란히 봅니다"만 말합니다. 두 날 모두 비었으면 두지 않습니다.
+ */
+sealed interface DayStrip {
+    /** "루틴 +1", "글귀 =", "걸음 +1,240" — 많아야 [DayComparisons.STRIP_CHIPS]개, 넘친 수는 [more]. */
+    data class Ahead(val chips: List<String>, val more: Int) : DayStrip
+
+    /** 앞선 것은 없고 둘 다 한 것만 있을 때 — "어제처럼 오늘도 루틴·글귀". */
+    data class Shared(val kinds: List<ComparedKind>) : DayStrip
+
+    /** 오늘 아직 아무것도 없을 때. */
+    data object Start : DayStrip
+}
+
 object DayComparisons {
     /** 카드에 펼치는 줄의 수. 나머지는 "두 날 나란히"에서 봅니다. */
     const val CARD_LINES = 4
+
+    /** 홈 띠에 펼치는 칸의 수. 한 줄을 넘기지 않습니다. */
+    const val STRIP_CHIPS = 3
+
+    /** 홈 띠. 두 날 모두 한 것이 없으면 null — 띠를 두지 않습니다. */
+    fun strip(comparison: DayComparison): DayStrip? {
+        if (comparison.rows.isEmpty()) return null
+        val ahead = comparison.aheadOrEven
+        if (ahead.isNotEmpty()) {
+            return DayStrip.Ahead(
+                chips = ahead.take(STRIP_CHIPS).map { chip(it) },
+                more = (ahead.size - STRIP_CHIPS).coerceAtLeast(0)
+            )
+        }
+        val shared = comparison.shared.map { it.kind }
+            .distinctBy { if (it == ComparedKind.WALK) ComparedKind.STEPS else it }
+        if (shared.isNotEmpty()) return DayStrip.Shared(shared.take(STRIP_CHIPS))
+        return DayStrip.Start
+    }
+
+    /** 띠의 한 칸 — "루틴 +1", "글귀 =", "걸음 +1,240". 띠에는 앞서거나 같은 것만 오므로 음수가 없습니다. */
+    fun chip(row: ComparedCount): String {
+        val delta = row.today - row.yesterday
+        return "${row.kind.label} " + if (delta <= 0) "=" else "+${grouped(delta)}"
+    }
+
+    /** 띠에 적는 글 한 줄. */
+    fun stripText(strip: DayStrip): String = when (strip) {
+        is DayStrip.Ahead -> strip.chips.joinToString(" · ") + if (strip.more > 0) " 외 ${strip.more}" else ""
+        is DayStrip.Shared -> "어제처럼 오늘도 " + strip.kinds.joinToString("·") { it.label }
+        DayStrip.Start -> "어제 하루와 나란히 봅니다"
+    }
 
     /** "어제처럼 오늘도"에 이어 말하는 수. 길어지면 한 줄이 아니게 됩니다. */
     private const val SHARED_KINDS = 3

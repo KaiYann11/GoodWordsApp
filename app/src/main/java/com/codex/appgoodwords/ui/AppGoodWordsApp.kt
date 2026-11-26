@@ -5,6 +5,17 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.codex.appgoodwords.ui.screen.rememberHaptics
+import com.codex.appgoodwords.ui.screen.animationsEnabled
+import com.codex.appgoodwords.ui.theme.Motion
+import com.codex.appgoodwords.data.DayComparisons
+import com.codex.appgoodwords.ui.screen.DayCompareScreen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.health.connect.client.HealthConnectClient
@@ -213,6 +224,11 @@ private enum class AppTab(
      * 아래쪽 글 칸이 자판 위로 올라와야 해서 대화 화면처럼 하단 바를 두지 않습니다.
      */
     DAY_CLOSE("하루 마무리"),
+    /**
+     * 어제와 오늘(사용자가 고름, 2026-11-27 — 항목 카드 두 칸). 홈 글귀 아래 어제보다 띠나 돌아보기 칸의 어제보다 카드에서
+     * 엽니다. 하단 바에는 없습니다.
+     */
+    DAY_COMPARE("어제와 오늘"),
     /** 검색은 어느 탭에서나 위쪽 돋보기로 엽니다. 다섯 기능을 한 번에 찾아 하단 바에 두지 않았습니다. */
     SEARCH("검색"),
     SETTINGS("설정"),
@@ -282,6 +298,7 @@ fun AppGoodWordsApp(
     val scoreTrend by viewModel.scoreTrend.collectAsStateWithLifecycle()
     val todayScore by viewModel.todayScore.collectAsStateWithLifecycle()
     val dayComparison by viewModel.dayComparison.collectAsStateWithLifecycle()
+    val dayPair by viewModel.dayPair.collectAsStateWithLifecycle()
     val todayDigest by viewModel.todayDigest.collectAsStateWithLifecycle()
     val dayCloseDue by viewModel.dayCloseDue.collectAsStateWithLifecycle()
     val dayCloseRoutines by viewModel.dayCloseRoutines.collectAsStateWithLifecycle()
@@ -1100,6 +1117,9 @@ fun AppGoodWordsApp(
             bottomBar = {
                 // 대화 화면과 하루 마무리에는 하단 바를 두지 않습니다. 글 칸이 자판 바로 위에 올라와야 합니다.
                 if (selectedItem == null && currentTab != AppTab.COACH_TALK && currentTab != AppTab.DAY_CLOSE) {
+                    // 칸을 옮길 때 손에 가볍게 닿습니다(은은한 빛과 깊이, 2026-11-27).
+                    val navHaptics = rememberHaptics()
+                    val navGlow = MaterialTheme.colorScheme.primary
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp
@@ -1117,9 +1137,39 @@ fun AppGoodWordsApp(
                                     aiFeedbackSettings.coachEnabled && dailyCoach.hasNewTip
                                 NavigationBarItem(
                                     selected = selected,
-                                    onClick = { selectTab(tab) },
+                                    onClick = {
+                                        if (!selected) navHaptics.tap()
+                                        selectTab(tab)
+                                    },
                                     icon = {
-                                        BadgedBox(badge = { if (coachDot) Badge() }) {
+                                        // 고른 칸의 아이콘이 살짝 커지며 뒤에 빛이 번집니다(은은한 빛과 깊이, 2026-11-27).
+                                        val lift by animateFloatAsState(
+                                            targetValue = if (selected) 1f else 0f,
+                                            animationSpec = Motion.press(),
+                                            label = "navLift"
+                                        )
+                                        BadgedBox(
+                                            badge = { if (coachDot) Badge() },
+                                            modifier = Modifier
+                                                .drawBehind {
+                                                    val glow = lift.coerceIn(0f, 1f)
+                                                    if (glow > 0.01f) {
+                                                        val radius = size.maxDimension * 1.25f
+                                                        drawCircle(
+                                                            brush = Brush.radialGradient(
+                                                                listOf(navGlow.copy(alpha = 0.28f * glow), Color.Transparent),
+                                                                radius = radius
+                                                            ),
+                                                            radius = radius
+                                                        )
+                                                    }
+                                                }
+                                                .graphicsLayer {
+                                                    val scale = 1f + 0.12f * lift
+                                                    scaleX = scale
+                                                    scaleY = scale
+                                                }
+                                        ) {
                                         Icon(
                                             imageVector = when (tab) {
                                                 AppTab.HOME -> Icons.Outlined.Home
@@ -1138,6 +1188,7 @@ fun AppGoodWordsApp(
                                                 AppTab.GALLERY -> Icons.Outlined.Image
                                                 AppTab.WALK -> Icons.AutoMirrored.Outlined.DirectionsWalk
                                                 AppTab.DAY_CLOSE -> Icons.Outlined.EditNote
+                                                AppTab.DAY_COMPARE -> Icons.Outlined.AutoAwesome
                                                 AppTab.SEARCH -> Icons.Outlined.Search
                                                 AppTab.SETTINGS, AppTab.SYNC_BACKUPS -> Icons.Outlined.Settings
                                             },
@@ -1159,10 +1210,21 @@ fun AppGoodWordsApp(
                 }
             }
         ) { innerPadding ->
+            // 화면이 바뀌면 새 화면이 옅게 떠오릅니다(은은한 빛과 깊이, 2026-11-27). 나가는 화면은 함께 그리지 않습니다 — 화면 값이
+            // 지금 화면을 기준으로 짜여 있어, 나가는 화면을 같이 그리면 새 화면의 값으로 그려집니다.
+            val screenRoute = navStack.last()
+            val screenMoves = animationsEnabled()
+            val entering = remember(screenRoute) { Animatable(if (screenMoves) 0f else 1f) }
+            LaunchedEffect(screenRoute) { entering.animateTo(1f, animationSpec = Motion.screen()) }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
+                    .graphicsLayer {
+                        val value = entering.value
+                        alpha = 0.4f + 0.6f * value
+                        translationY = (1f - value) * 16.dp.toPx()
+                    }
             ) {
                 saveableStateHolder.SaveableStateProvider(navStack.last()) {
                 if (selectedItem != null) {
@@ -1356,6 +1418,9 @@ fun AppGoodWordsApp(
                             scoreTrend = scoreTrend,
                             dayComparison = dayComparison,
                             onOpenDay = { date -> viewModel.openDay(date) },
+                            // 글귀 아래 어제보다 띠(사용자가 고름, 2026-11-27). 두 날 모두 비었으면 띠가 없습니다.
+                            dayStrip = remember(dayPair) { dayPair?.let { DayComparisons.strip(it.comparison) } },
+                            onOpenCompare = { pushRoute(tabRoute(AppTab.DAY_COMPARE)) },
                             memories = if (diaryLocked) onThisDay.filter { it.kind != SearchKind.DIARY } else onThisDay,
                             moodPractice = moodPractice,
                             todayMood = todayMood,
@@ -2109,6 +2174,14 @@ fun AppGoodWordsApp(
                                 settingsSection = SettingsSection.AI
                                 pushRoute(tabRoute(AppTab.SETTINGS))
                             }
+                        )
+
+                        // 어제와 오늘(사용자가 고름, 2026-11-27 — 항목 카드 두 칸). 잠긴 일기는 그날 요약처럼 제목 대신 편 수만 둡니다.
+                        AppTab.DAY_COMPARE -> DayCompareScreen(
+                            modifier = Modifier.padding(innerPadding),
+                            pair = dayPair,
+                            diaryLocked = diaryLocked,
+                            onOpenDay = { date -> viewModel.openDay(date) }
                         )
 
                         // 하루 마무리(사용자가 정함, 2026-11-19 — 한 장에 네 칸). 기분·루틴은 누르는 즉시, 감사 한 줄과 내일 할 일은

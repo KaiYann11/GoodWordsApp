@@ -1219,14 +1219,19 @@ private fun RoutineCard(
                 ) {
                     Text("메모 $memoCount")
                 }
+                // 수행 +1을 누를 때마다 단추 자리에서 빛이 한 번 터집니다(은은한 빛과 깊이, 2026-11-27).
+                var burstCount by remember { mutableIntStateOf(0) }
                 Button(
                     // 기록이 남는 일이라 손에 한 번 닿게 합니다. 그날(보통 오늘) 한 일이 하나 늘어납니다.
                     onClick = {
                         haptics.commit()
+                        burstCount += 1
                         onCheckRoutine(routine)
                     },
                     enabled = canCheck,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .burst(trigger = burstCount, color = MaterialTheme.colorScheme.secondary)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.CheckCircle,

@@ -106,7 +106,12 @@ data class DayDigest(
     val moodLogs: List<MoodLogEntity> = emptyList(),
     val moodSettled: Boolean = true,
     /** 그날 다 걸은 걷기의 숫자. 지나온 길은 담지 않습니다 — 이 묶음은 AI에도 갑니다. */
-    val walks: List<WalkSummary> = emptyList()
+    val walks: List<WalkSummary> = emptyList(),
+    /**
+     * 루틴마다 그날 밟은 횟수(처음 밟은 차례). [routineTitles]는 한 줄씩이라 "물 마시기 ×3"을 말할 수 없어 따로 둡니다 —
+     * 어제와 오늘 화면이 씁니다(사용자가 고름, 2026-11-27).
+     */
+    val routineCounts: Map<String, Int> = emptyMap()
 ) {
     val isEmpty: Boolean
         get() = score.isEmpty
@@ -218,7 +223,12 @@ object DayScoreCalculator {
             bookTitles = readToday.map { it.bookTitle }.filter { it.isNotBlank() }.distinct(),
             moodLogs = DayMood.logsOn(moodLogs, date),
             moodSettled = moodEntry?.settled ?: true,
-            walks = Walking.walksOn(walkRecords, date, zoneId)
+            walks = Walking.walksOn(walkRecords, date, zoneId),
+            routineCounts = checksToday.sortedBy { it.checkedAt }
+                .map { it.routineTitle }
+                .filter { it.isNotBlank() }
+                .groupingBy { it }
+                .eachCount()
         )
     }
 

@@ -176,7 +176,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 목표에 들인 시간(`goalTimeLogs`) | 같은 목표·같은 밀리초면 같은 것(앱·서버 `goalTimeLogFingerprint`), 목표가 합쳐지면 남은 목표로 옮김(앱 `SyncDeduplicator`·서버 `deduplicate`), 목표를 지우면 함께 지우고 표식(앱 `AppRepository.deleteContent`·서버 `DELETE /api/content/{id}`) |
 | 글 쌓이는 새 자리 | `AppSearch`에 찾을 길(딸린 글은 부모에 얹기) |
 | `routineChecks`를 "실천했다"로 세는 곳 | `DailyLoop` · `StatsSummary` · `FeedbackWriter` · `MoodPractice` · `GrowthPrompt` · `DailyCoachPrompt` · `RoutineNudge` |
-| 홈 목록의 줄(`HomeScreen`) | `QUOTE_ITEM_INDEX`·`TAB_ROW_ITEM_INDEX`·`PAGES_ITEM_INDEX` |
+| 홈 목록의 줄(`HomeScreen`) | `QUOTE_ITEM_INDEX`·`TAB_ROW_ITEM_INDEX`·`PAGES_ITEM_INDEX` — 글귀 아래 어제보다 띠는 없는 날에도 빈 줄로 자리를 지킵니다 |
+| 어제와 오늘(띠·카드·화면) | 같은 두 날은 `MainViewModel.dayPair` 하나에서 나눕니다 — 띠(`DayComparisons.strip`)·돌아보기 카드(`dayComparison`)·화면(`DayCompareDetails`)이 따로 세면 서로 다른 수를 말합니다. 칸을 더하면 `CompareSection`·`DayCompareDetails`(수·줄·요약)와 화면의 빛깔(`sectionColors`). 기분은 견주지 않습니다(빛 칩·차이 없음). 잠긴 일기는 제목 대신 편 수 |
+| 빛과 움직임 | `ui/screen/Glow.kt`(`softShadow`·`aurora`·`riseIn`·`burst`)와 `Motion`. 흐르는 빛은 `rememberInfiniteTransition`으로만(Compose 시험이 기다리지 않음, 값은 그리기 단계에서만 읽음). 움직임을 끈 기기(`animationsEnabled`)에서는 멈춥니다. 감싼 상자는 카드가 그려질 때만 — 빈 상자도 칸 간격을 차지합니다 |
 
 ## 조용히 망가지는 것들
 

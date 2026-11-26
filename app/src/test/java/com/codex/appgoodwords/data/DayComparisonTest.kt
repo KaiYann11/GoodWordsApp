@@ -79,6 +79,55 @@ class DayComparisonTest {
         )
     }
 
+    /* 홈 글귀 아래 한 줄 띠(사용자가 고름, 2026-11-27). 카드와 같은 생각 — 앞서거나 같은 것만, 적은 것은 숫자 없이. */
+
+    @Test
+    fun theStripNamesOnlyWhatTodayMatchedOrBeatAtMostThree() {
+        val strip = DayComparisons.strip(
+            DayComparisons.of(
+                today = day(today, routines = 3, quotes = 2, todos = 1, books = 1, diaries = 0, steps = 8_040),
+                yesterday = day(today.minusDays(1), routines = 2, quotes = 2, diaries = 1, steps = 6_800)
+            )
+        )
+
+        // 루틴 +1 · 글귀 = · 할 일 +1(어제 없음) — 독서·걸음은 넘쳐 "외 2", 적은 일기는 빠집니다.
+        assertEquals(DayStrip.Ahead(chips = listOf("루틴 +1", "글귀 =", "할 일 +1"), more = 2), strip)
+        assertEquals("루틴 +1 · 글귀 = · 할 일 +1 외 2", DayComparisons.stripText(strip!!))
+    }
+
+    @Test
+    fun stepsInTheStripAreGroupedAndShownAlone() {
+        val strip = DayComparisons.strip(
+            DayComparisons.of(day(today, steps = 8_040), day(today.minusDays(1), steps = 6_800))
+        )
+
+        assertEquals("걸음 +1,240", DayComparisons.stripText(strip!!))
+    }
+
+    @Test
+    fun withNothingAheadTheStripSaysWhatBothDaysDidWithoutNumbers() {
+        val strip = DayComparisons.strip(
+            DayComparisons.of(
+                today = day(today, routines = 1, steps = 900, walks = 1),
+                yesterday = day(today.minusDays(1), routines = 4, steps = 8_000, walks = 2)
+            )
+        )
+
+        // 걸음과 걷기는 한 번만 셉니다.
+        assertEquals(DayStrip.Shared(listOf(ComparedKind.ROUTINE, ComparedKind.STEPS)), strip)
+        assertEquals("어제처럼 오늘도 루틴·걸음", DayComparisons.stripText(strip!!))
+    }
+
+    @Test
+    fun theStripIsAnEntranceEvenBeforeTodayStartsButNotOnTwoEmptyDays() {
+        // 오늘 아직 아무것도 없으면 수 없이 "나란히 봅니다"만 — 아침에 지는 수를 보여 주지 않습니다.
+        val morning = DayComparisons.strip(DayComparisons.of(day(today), day(today.minusDays(1), routines = 3)))
+        assertEquals(DayStrip.Start, morning)
+        assertEquals("어제 하루와 나란히 봅니다", DayComparisons.stripText(morning!!))
+        // 두 날 모두 비었으면 띠가 없습니다.
+        assertNull(DayComparisons.strip(DayComparisons.of(day(today), day(today.minusDays(1)))))
+    }
+
     private fun day(
         date: LocalDate,
         routines: Int = 0,

@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -391,13 +392,21 @@ private fun TodoRow(
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val haptics = rememberHaptics()
+                // 끝낼 때만 빛이 한 번 터집니다(은은한 빛과 깊이, 2026-11-27). 되돌릴 때는 고치는 일이라 조용합니다.
+                var burstCount by remember { mutableIntStateOf(0) }
                 Checkbox(
                     checked = todo.isDone,
                     onCheckedChange = {
                         // 끝냈을 때만 울립니다. 되돌리는 것은 기쁜 일이 아니라 고치는 일입니다.
-                        if (!todo.isDone) haptics.commit() else haptics.tap()
+                        if (!todo.isDone) {
+                            haptics.commit()
+                            burstCount += 1
+                        } else {
+                            haptics.tap()
+                        }
                         onToggleDone()
-                    }
+                    },
+                    modifier = Modifier.burst(trigger = burstCount, color = MaterialTheme.colorScheme.secondary)
                 )
                 Column(
                     modifier = Modifier

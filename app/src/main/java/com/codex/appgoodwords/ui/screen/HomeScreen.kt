@@ -64,6 +64,8 @@ import com.codex.appgoodwords.data.DailyCoachState
 import com.codex.appgoodwords.data.DailyProgress
 import com.codex.appgoodwords.data.DailyStep
 import com.codex.appgoodwords.data.DayComparison
+import com.codex.appgoodwords.data.DayComparisons
+import com.codex.appgoodwords.data.DayStrip
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.ScoreTrend
 import com.codex.appgoodwords.data.FeedbackKind
@@ -78,6 +80,7 @@ import com.codex.appgoodwords.data.RoutineCheckEntity
 import com.codex.appgoodwords.data.RoutineEntity
 import com.codex.appgoodwords.data.RoutineNudge
 import com.codex.appgoodwords.data.StatsSummary
+import com.codex.appgoodwords.ui.theme.Indigo
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -221,7 +224,14 @@ fun HomeScreen(
     /** 어제보다 — 오늘 지금까지와 어제 하루(사용자가 정함, 2026-11-19). 견줄 것이 없는 날에는 null이라 카드가 없습니다. */
     dayComparison: DayComparison? = null,
     /** 그날 요약을 펼칩니다. 그래프의 막대를 눌러도 옵니다. */
-    onOpenDay: (LocalDate) -> Unit = {}
+    onOpenDay: (LocalDate) -> Unit = {},
+    /**
+     * 글귀 아래 한 줄 띠(사용자가 고름, 2026-11-27 — 글귀 아래 한 줄 띠). null이면 두 날 모두 한 것이 없어 띠가 없습니다
+     * ([DayComparisons.strip]).
+     */
+    dayStrip: DayStrip? = null,
+    /** 어제와 오늘 화면을 엽니다(띠·돌아보기의 어제보다 카드). */
+    onOpenCompare: () -> Unit = {}
 ) {
     var selectedMonthText by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
     var selectedDateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
@@ -255,6 +265,10 @@ fun HomeScreen(
         }
     }
 
+    // 홈 카드 아래에 스미는 옅은 남색 그림자와 그 모서리(카드와 같은 큰 모서리).
+    val cardGlow = Indigo.copy(alpha = 0.55f)
+    val cardShape = MaterialTheme.shapes.large
+
     LazyColumn(
         state = listState,
         modifier = modifier
@@ -280,6 +294,19 @@ fun HomeScreen(
                 readToday = quotesReadToday,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
+        }
+
+        // 글귀 바로 아래 한 줄 띠(사용자가 고름, 2026-11-27). 띠가 없는 날도 이 줄(빈 줄)은 둡니다 — 아래 줄들의 자리
+        // (`TAB_ROW_ITEM_INDEX`·`PAGES_ITEM_INDEX`)가 날마다 바뀌면 칸 이름 줄로 굴리는 것이 엇나갑니다.
+        item(key = "compare") {
+            dayStrip?.let { strip ->
+                DayCompareStrip(
+                    strip = strip,
+                    onOpen = onOpenCompare,
+                    // 아래 칸 이름 줄은 바탕을 칠한 채 위에 붙으므로, 띠의 그림자가 잘리지 않게 아래를 넉넉히 둡니다.
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 14.dp)
+                )
+            }
         }
 
         // 이 자리를 `TAB_ROW_ITEM_INDEX`가 셉니다. 위에 줄을 더하면 함께 고칩니다.
@@ -310,10 +337,17 @@ fun HomeScreen(
                     when (tabs[page]) {
                         // 오늘 무엇부터 할지와 오늘 어땠는지. 매일 손이 가는 둘이라 첫 칸입니다.
                         HomeTab.TODAY -> {
+                            // 칸을 넘기면 카드가 차례로 떠오릅니다(은은한 빛과 깊이, 2026-11-27). 차례는 그려지는 카드끼리만 셉니다.
+                            var rise = 0
                             // 무엇을 향해 가는지가 오늘 무엇부터 할지보다 앞에 놓입니다(사용자가 정함, 2026-10-29).
                             // 목표 탭에 아무것도 없으면 자리를 내지 않습니다 — 적어 보라는 카드가 매일 뜨면 잔소리가 됩니다.
-                            goalLine?.let { line -> HomeGoalCard(line = line, onOpen = onOpenGoal) }
+                            goalLine?.let { line ->
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                    HomeGoalCard(line = line, onOpen = onOpenGoal)
+                                }
+                            }
                             dailyLoop?.let { progress ->
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
                                 DailyLoopCard(
                                     progress = progress,
                                     onOpenStep = { step ->
@@ -326,19 +360,27 @@ fun HomeScreen(
                                         }
                                     }
                                 )
+                                }
                             }
                             // 걸음 카드 바로 아래입니다(사용자가 고름, 2026-11-07). 걸음 수와 걷기 기록 시작이 한자리에 있습니다.
-                            walkCard?.invoke()
+                            walkCard?.let { card ->
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) { card() }
+                            }
                             // 3초짜리라 걸음 바로 아래에 둡니다. 오늘 무엇을 했는지 옆에 오늘 어땠는지가 나란히 놓입니다.
-                            TodayMoodCard(mood = todayMood, logs = todayMoodLogs, onPick = onPickMood, onClear = onClearMood)
+                            RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                TodayMoodCard(mood = todayMood, logs = todayMoodLogs, onPick = onPickMood, onClear = onClearMood)
+                            }
                             // 저녁의 마지막 차례라 오늘 칸 맨 아래입니다(사용자가 고름, 2026-11-19).
                             if (dayCloseDue) {
-                                DayCloseCard(doneLine = dayCloseLine, onOpen = onOpenDayClose)
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                    DayCloseCard(doneLine = dayCloseLine, onOpen = onOpenDayClose)
+                                }
                             }
                         }
 
                         // 코치가 보는 것은 오늘 칸의 걸음과 기분입니다. 그래서 바로 옆 칸입니다.
                         HomeTab.COACH -> coach?.let { state ->
+                            RiseIn(index = 0, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
                             DailyCoachCard(
                                 state = state,
                                 loading = coachLoading,
@@ -354,32 +396,45 @@ fun HomeScreen(
                                 onSeen = onCoachSeen,
                                 onReply = onReplyCoach
                             )
+                            }
                         }
 
                         // 앞에서부터 시간의 폭이 넓어집니다 — 오늘 점수, 요즘, 지난 이맘때, AI가 정리한 기간, 통계.
                         HomeTab.LOOK_BACK -> {
+                            var rise = 0
                             if (todayScore != null && scoreTrend != null) {
-                                DayScoreCard(
-                                    todayScore = todayScore,
-                                    trend = scoreTrend,
-                                    onOpenDay = onOpenDay
-                                )
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                    DayScoreCard(
+                                        todayScore = todayScore,
+                                        trend = scoreTrend,
+                                        onOpenDay = onOpenDay
+                                    )
+                                }
                             }
 
-                            // 하루 점수 바로 아래입니다(사용자가 고름, 2026-11-19). 한 일만 짚고, 두 날의 수는 눌러서 봅니다.
+                            // 하루 점수 바로 아래입니다(사용자가 고름, 2026-11-19). 한 일만 짚고, 두 날의 자세한 것은 어제와 오늘
+                            // 화면에서 봅니다(2026-11-27 — 작은 창 대신 화면).
                             dayComparison?.let { comparison ->
-                                DayComparisonCard(comparison = comparison, onOpenDay = onOpenDay)
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                    DayComparisonCard(comparison = comparison, onOpenCompare = onOpenCompare)
+                                }
                             }
 
-                            FeedbackCard(notes = notes)
+                            RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                FeedbackCard(notes = notes)
+                            }
 
                             // 없는 날이 대부분이라 있을 때만 자리를 냅니다. 빈 카드가 매일 있으면
                             // "오늘은 없음"을 매일 확인하게 됩니다.
                             if (memories.isNotEmpty()) {
-                                OnThisDayCard(memories = memories, onOpen = onOpenMemory)
+                                RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                    OnThisDayCard(memories = memories, onOpen = onOpenMemory)
+                                }
                             }
 
-                            GrowthTeaserCard(report = latestReport, onOpen = onOpenGrowth)
+                            RiseIn(index = rise++, key = tabs[page], shadowColor = cardGlow, shape = cardShape) {
+                                GrowthTeaserCard(report = latestReport, onOpen = onOpenGrowth)
+                            }
 
                             InsightsToggle(expanded = showInsights, onToggle = { showInsights = !showInsights })
 
@@ -781,8 +836,11 @@ private fun MoodPracticeCard(rows: List<MoodPracticeRow>) {
 /** 글귀 카드의 자리(날짜 줄 다음). 걸음의 "글귀 읽기"를 누르면 여기까지 올립니다. */
 private const val QUOTE_ITEM_INDEX = 1
 
-/** 칸 이름 줄의 자리(날짜 줄, 글귀 다음). 한마디 칸으로 데려갈 때 여기까지 굴려 칸 이름 줄을 맨 위에 붙입니다. */
-private const val TAB_ROW_ITEM_INDEX = 2
+/**
+ * 칸 이름 줄의 자리(날짜 줄, 글귀, 어제보다 띠 다음). 한마디 칸으로 데려갈 때 여기까지 굴려 칸 이름 줄을 맨 위에 붙입니다.
+ * 띠는 없는 날에도 빈 줄로 자리를 지킵니다.
+ */
+private const val TAB_ROW_ITEM_INDEX = 3
 
 /** 칸들이 놓인 자리(칸 이름 줄 다음). */
-private const val PAGES_ITEM_INDEX = 3
+private const val PAGES_ITEM_INDEX = 4
