@@ -19,3 +19,7 @@ server/attachments/
 server/web/update/*.apk
 server/web/update/latest.json
 server/web/update/latest.json.tmp
+# 게시할 때 다시 쓰는 배포 이력(다른 시스템에 넘기는 파일). 운영 서버 폴더에만 있습니다.
+server/web/update/releases.json
+server/web/update/releases.xml
+server/web/update/releases.*.tmp

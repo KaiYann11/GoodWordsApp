@@ -3614,6 +3614,8 @@ function contentType(filePath) {
       ".mjs": "text/javascript; charset=utf-8",
       ".svg": "image/svg+xml",
       ".json": "application/json; charset=utf-8",
+      // 다른 시스템에 넘기는 배포 이력(`/update/releases.xml`, `publish_update.mjs`가 씀).
+      ".xml": "application/xml; charset=utf-8",
       ".apk": "application/vnd.android.package-archive",
     }[extname(filePath).toLowerCase()] || "application/octet-stream"
   );
