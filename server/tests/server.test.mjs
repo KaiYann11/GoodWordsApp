@@ -1975,6 +1975,12 @@ describe("설치 파일 내주기", () => {
     await mkdir(join(webRoot, "update"), { recursive: true });
     await writeFile(join(webRoot, "index.html"), "<!doctype html><title>화면</title>", "utf8");
     await writeFile(join(webRoot, "update", fileName), apk);
+    await writeFile(join(webRoot, "update", "releases.json"), '{"formatVersion":1,"latestVersionCode":999,"releases":[]}\n', "utf8");
+    await writeFile(
+      join(webRoot, "update", "releases.xml"),
+      '<?xml version="1.0" encoding="UTF-8"?>\n<releaseHistory>\n  <latestVersionCode>999</latestVersionCode>\n</releaseHistory>\n',
+      "utf8",
+    );
     updateServer = await startServer({ APP_GOOD_WORDS_WEB_ROOT: webRoot });
   });
 
@@ -2036,6 +2042,19 @@ describe("설치 파일 내주기", () => {
 
     assert.equal(response.status, 416);
     assert.equal(response.headers.get("content-range"), `bytes */${apk.length}`);
+  });
+
+  it("배포 이력은 키 없이 JSON과 XML로 준다", async () => {
+    // 다른 시스템이 가져가는 파일입니다(`publish_update.mjs`가 게시마다 씀). latest.json처럼 키를 묻지 않습니다.
+    const json = await get("/update/releases.json");
+    assert.equal(json.status, 200);
+    assert.equal(json.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal((await json.json()).latestVersionCode, 999);
+
+    const xml = await get("/update/releases.xml");
+    assert.equal(xml.status, 200);
+    assert.equal(xml.headers.get("content-type"), "application/xml; charset=utf-8");
+    assert.match(await xml.text(), /<latestVersionCode>999<\/latestVersionCode>/);
   });
 
   it("없는 설치 파일은 화면 대신 404다", async () => {

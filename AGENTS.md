@@ -77,7 +77,9 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 2. 윈도우에서 그 커밋으로 `assembleDebug` — 서명 인증서 SHA-256이 지난 판과 같아야 덮어 설치됩니다(`apksigner verify --print-certs`).
 3. PR을 머지하고, 맥 `main`의 파일 트리가 빌드한 트리와 같은지 본 뒤 `node server/publish_update.mjs --apk <app-debug.apk>`
    (`output-metadata.json`이 APK 옆에 있어야 합니다). 게시 규칙은 이 파일 한 곳에 있습니다(`publish_update.ps1`은 부르기만).
-4. 휴대폰이 받는 길 그대로 `/update/latest.json`과 APK를 받아 **해시를 맞춰 보는 것까지**가 게시입니다.
+   같은 게시가 다른 시스템에 넘기는 배포 이력 `update/releases.json`·`releases.xml`도 다시 씁니다(`server/README.md` "배포 이력").
+4. 휴대폰이 받는 길 그대로 `/update/latest.json`과 APK를 받아 **해시를 맞춰 보는 것까지**가 게시입니다. `/update/releases.json`
+   맨 앞이 새 판인지도 봅니다.
 
 - **운영 서버에는 시험 데이터를 넣지 않습니다.** 서버 프로세스를 작업 세션의 자식으로 띄우지 않습니다(세션과 함께 죽습니다).
 - launchd는 PATH를 거의 비워 넘깁니다 — plist의 `PATH`·`run_server.sh`의 찾기·서버 `extraCliDirs`가 `node`와 CLI를 찾습니다.
@@ -170,6 +172,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 | **모델 이름은 앱에 박지 않습니다**(사용자가 정함, 2026-11-25) — 앱은 계열(`latest:sonnet`)을 저장하고 받아 온 목록에서 가장 새 것을 셉니다. 공급자를 더하면 앱 `AiProvider`(받지 못할 때의 `builtInModels`·칸 차례 `familyChoices`·기본 계열 `defaultFamily`·별칭 `familyAliases`) · 서버 `aiProviders`(`listModels`·CLI는 `answeredModel`) · 목록을 받는 길(앱 `AiFeedbackClient.listModels`·서버 `listAiModels`). OpenAI 글 모델 고르기는 앱 `AiModels.isOpenAiChatModel`과 서버 `isOpenAiChatModel`이 같아야 합니다(둘 다 열쇠로 목록을 받습니다). `builtInModels`를 고칠 때 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고 시험 서버 `/api/growth-feedback`로 불러 확인합니다(구독에서 막힌 계열은 CLI 칸에 넣지 않습니다) |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
+| 배포 이력 꼴(`update/releases.json`·`.xml`, 다른 시스템이 읽음) | `server/publish_update.mjs` `writeReleaseHistory`·`releaseHistoryXml` — 칸 이름을 바꾸거나 빼지 않고 더하기만 합니다. 바꿔야 하면 `formatVersion`을 올립니다. 판 한 줄의 칸은 `latest.json`과 같습니다 |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
 | 걸음 수·걷기 합치기 | 같은 날 걸음 수는 **걸음이 많은 쪽**이 남습니다(앱 `SyncDeduplicator`의 `winner` · 서버 `moreSteps`). 걷기는 시작한 밀리초가 같으면 같은 것입니다(`walkFingerprint`) |
 | 이은 줄(`recordLinks`) | 같은 두 기록이면 한 줄(방향 없음 — 앱 `RecordLinks.fingerprint`·서버 `recordLinkFingerprint`), 합치기로 기록이 줄면 끝을 남은 쪽으로 옮기고 제 자신을 잇게 된 줄은 버림(앱 `SyncDeduplicator`·서버 `deduplicate`, 같은 차례), 루틴 합치기(`AppRepository.mergeRoutines`), 이을 수 있는 종류(앱 `RecordKind`·서버 `recordKinds`) |
