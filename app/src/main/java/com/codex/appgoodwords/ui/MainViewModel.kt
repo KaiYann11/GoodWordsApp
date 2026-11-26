@@ -60,6 +60,7 @@ import com.codex.appgoodwords.data.DayClose
 import com.codex.appgoodwords.data.DayComparison
 import com.codex.appgoodwords.data.DayComparisons
 import com.codex.appgoodwords.data.DayDigest
+import com.codex.appgoodwords.data.DayPair
 import com.codex.appgoodwords.data.DayScore
 import com.codex.appgoodwords.data.DayScoreCalculator
 import com.codex.appgoodwords.data.HealthConnection
@@ -443,14 +444,21 @@ class MainViewModel(
     }
 
     /**
+     * 어제와 오늘 두 날(사용자가 고름, 2026-11-27). 홈 글귀 아래 띠와 어제와 오늘 화면이 씁니다. 카드와 달리 견줄 것이 적은
+     * 날에도 있습니다 — 띠는 늘 열려 있는 입구입니다([DayComparisons.strip]이 둘지 정함).
+     */
+    val dayPair: StateFlow<DayPair?> = combine(todayDigest, yesterdayDigest) { today, yesterday ->
+        // 오늘이 막 넘어가 두 날이 이어지지 않는 순간(어제의 "오늘"과 새 "어제")에는 견주지 않습니다.
+        if (yesterday.score.date != today.score.date.minusDays(1)) null else DayPair(today = today, yesterday = yesterday)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
      * 어제의 나와 비교 — 오늘 지금까지와 어제 하루 전체(사용자가 정함, 2026-11-19). 홈 돌아보기 칸의 "어제보다" 카드가 씁니다.
      * 견줄 것이 없는 날에는 null입니다([DayComparison.shown]).
      */
-    val dayComparison: StateFlow<DayComparison?> = combine(todayDigest, yesterdayDigest) { today, yesterday ->
-        // 오늘이 막 넘어가 두 날이 이어지지 않는 순간(어제의 "오늘"과 새 "어제")에는 견주지 않습니다.
-        if (yesterday.score.date != today.score.date.minusDays(1)) return@combine null
-        DayComparisons.of(today, yesterday).takeIf { it.shown }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val dayComparison: StateFlow<DayComparison?> = dayPair
+        .map { pair -> pair?.comparison?.takeIf { it.shown } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * 홈에 하루 마무리 카드를 둘 때(사용자가 정함, 2026-11-19 — 알림을 마무리로 + 홈). 마무리 시각(설정의 하루 마무리 알림,

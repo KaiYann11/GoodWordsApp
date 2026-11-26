@@ -36,7 +36,7 @@ class DayComparisonCardTest {
                         ComparedCount(ComparedKind.STEPS, today = 4_210, yesterday = 6_800)
                     )
                 ),
-                onOpenDay = {}
+                onOpenCompare = {}
             )
         }
 
@@ -49,8 +49,8 @@ class DayComparisonCardTest {
     }
 
     @Test
-    fun bothDaysAreSideBySideOnlyWhenAskedAndYesterdayOpensItsSummary() {
-        var opened: LocalDate? = null
+    fun withNothingAheadItSaysWhatBothDidAndTheButtonOpensTheCompareScreen() {
+        var opened = 0
         compose.setContent {
             DayComparisonCard(
                 comparison = DayComparison(
@@ -60,20 +60,15 @@ class DayComparisonCardTest {
                         ComparedCount(ComparedKind.STEPS, today = 4_210, yesterday = 6_800)
                     )
                 ),
-                onOpenDay = { opened = it }
+                onOpenCompare = { opened += 1 }
             )
         }
 
         // 앞선 것이 없으면 둘 다 한 것만 숫자 없이.
         compose.onNodeWithText("어제처럼 오늘도 루틴을 밟고 걸었습니다.").assertIsDisplayed()
+        compose.onNodeWithText("4,210", substring = true).assertDoesNotExist()
+        // 두 날의 자세한 것은 작은 창이 아니라 어제와 오늘 화면입니다(2026-11-27).
         compose.onNodeWithTag(dayComparisonOpenTag).performClick()
-        compose.onNodeWithTag(dayComparisonDialogTag).assertIsDisplayed()
-        compose.onNodeWithText("4번").assertIsDisplayed()
-        compose.onNodeWithText("6,800").assertIsDisplayed()
-        compose.onNodeWithText("4,210").assertIsDisplayed()
-
-        compose.onNodeWithTag(dayComparisonYesterdayTag).performClick()
-        assertEquals(today.minusDays(1), opened)
-        compose.onNodeWithTag(dayComparisonDialogTag).assertDoesNotExist()
+        assertEquals(1, opened)
     }
 }

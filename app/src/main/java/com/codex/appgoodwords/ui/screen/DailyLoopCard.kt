@@ -30,6 +30,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -138,8 +141,11 @@ fun DailyLoopCard(
  */
 @Composable
 private fun ProgressRing(progress: DailyProgress) {
+    // 처음 보일 때 빈 고리에서 차오릅니다(은은한 빛과 깊이, 2026-11-27). 그 뒤로는 걸음이 늘 때만 움직입니다.
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
     val ratio by animateFloatAsState(
-        targetValue = progress.ratio,
+        targetValue = if (appeared) progress.ratio else 0f,
         animationSpec = Motion.value(),
         label = "dailyLoopRatio"
     )
@@ -188,6 +194,18 @@ private fun ProgressRing(progress: DailyProgress) {
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = StrokeCap.Round)
             )
             if (ratio > 0f) {
+                // 빛 — 같은 호를 넓고 옅게 두 번 깔아 고리가 빛나며 차오르는 것처럼 보이게 합니다.
+                listOf(2.6f to 0.10f, 1.7f to 0.18f).forEach { (widen, glow) ->
+                    drawArc(
+                        color = accent.copy(alpha = glow),
+                        startAngle = -90f,
+                        sweepAngle = 360f * ratio,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke * widen, cap = StrokeCap.Round)
+                    )
+                }
                 drawArc(
                     color = accent,
                     startAngle = -90f,

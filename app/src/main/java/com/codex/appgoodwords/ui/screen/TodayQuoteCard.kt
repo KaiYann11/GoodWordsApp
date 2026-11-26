@@ -300,6 +300,8 @@ fun TodayQuoteCard(
                 .fillMaxWidth()
                 .onSizeChanged { cardWidth = it.width }
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
+                // 카드 아래 옅은 남색 그림자 — 앱을 열면 가장 먼저 떠 보이는 자리입니다(은은한 빛과 깊이, 2026-11-27).
+                .softShadow(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), MaterialTheme.shapes.large, elevation = 18.dp)
                 .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = ring), MaterialTheme.shapes.large)
                 .testTag(homeQuoteCardTag),
             shape = MaterialTheme.shapes.large,
@@ -309,9 +311,10 @@ fun TodayQuoteCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // 위쪽만 옅은 파랑으로 물들여 다른 카드와 갈라 보이게 합니다. 글자 뒤는 흰 바탕이라 읽기에 거슬리지 않습니다.
-                    .background(
-                        Brush.verticalGradient(
+                    // 위쪽만 옅은 파랑으로 물들이고, 그 위로 빛 세 덩이가 천천히 흐릅니다(사용자가 고름, 2026-11-27 — 은은한 빛과
+                    // 깊이). 빛은 위쪽에 모이고 옅어서 글자 뒤는 거의 흰 바탕입니다. 움직임을 끈 기기에서는 멈춘 그림입니다.
+                    .aurora(
+                        base = Brush.verticalGradient(
                             listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface)
                         )
                     )
