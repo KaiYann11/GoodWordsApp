@@ -169,6 +169,7 @@ node --test server/tests/server.test.mjs server/tests/transport.test.mjs server/
 | 같은 내용 합치기(기분 `moodLogFingerprint` 포함, 행복한 순간은 `itemFingerprint`에 `createdAt`까지) | 앱 `SyncDeduplicator` · 서버 `deduplicate()` (판정·승자가 어긋나면 두 기기가 끝없이 서로를 고칩니다). **판정을 바꾸면 `schemaVersion`도 올립니다** — 옛 앱이 새 기록을 옛 판정으로 합쳐 지웁니다(1.15.0 기분) |
 | 삭제 표식 보관 기간 | `SyncCoordinator.DELETION_RETENTION_DAYS` · 서버 `deletionRetentionDays` |
 | AI 공급자 · 모델 | **모델 이름은 앱에 박지 않습니다**(사용자가 정함, 2026-11-25) — 앱은 계열(`latest:sonnet`)을 저장하고 받아 온 목록에서 가장 새 것을 셉니다. 공급자를 더하면 앱 `AiProvider`(받지 못할 때의 `builtInModels`·칸 차례 `familyChoices`·기본 계열 `defaultFamily`·별칭 `familyAliases`) · 서버 `aiProviders`(`listModels`·CLI는 `answeredModel`) · 목록을 받는 길(앱 `AiFeedbackClient.listModels`·서버 `listAiModels`). OpenAI 글 모델 고르기는 앱 `AiModels.isOpenAiChatModel`과 서버 `isOpenAiChatModel`이 같아야 합니다(둘 다 열쇠로 목록을 받습니다). `builtInModels`를 고칠 때 이름은 Codex `~/.codex/models_cache.json`·공급자 문서에서 보고 시험 서버 `/api/growth-feedback`로 불러 확인합니다(구독에서 막힌 계열은 CLI 칸에 넣지 않습니다) |
+| 진도 머리 줄 `11월 9일 · 120쪽` | `BookNotes.entry`가 독후감에 쓰고 `ReviewQuotes`가 읽어 글귀의 쪽을 미리 채웁니다 — 꼴을 바꾸면 둘을 함께 |
 | 업데이트 매니페스트 꼴 | `server/publish_update.mjs` · 앱 `AppUpdateJson` |
 | 하루의 걸음 추가 | `DailyLoopCalculator.daysByStep` · `DayScoreCalculator`(`digest`·`trend`) · 홈 `onOpenStep` · `stepColors` · 설정 |
 | 걸음 수·걷기 합치기 | 같은 날 걸음 수는 **걸음이 많은 쪽**이 남습니다(앱 `SyncDeduplicator`의 `winner` · 서버 `moreSteps`). 걷기는 시작한 밀리초가 같으면 같은 것입니다(`walkFingerprint`) |

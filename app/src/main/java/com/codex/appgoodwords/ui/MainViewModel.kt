@@ -1404,6 +1404,14 @@ class MainViewModel(
         Unit
     }
 
+    /**
+     * 독후감을 알림 없이 저장합니다(사용자가 고름, 2026-11-28 — 저장 안 한 글 지키기). 화면을 떠나는 순간에도 불리므로 화면의
+     * 코루틴이 아니라 뷰모델에서 끝까지 돌립니다.
+     */
+    fun autoSaveBookReview(bookId: Long, review: String) {
+        viewModelScope.launch { runCatching { container.repository.saveBookReview(bookId, review) } }
+    }
+
     suspend fun extractQuoteFromBook(bookId: Long, body: String, page: Int): Result<Unit> = runCatching {
         container.repository.extractQuoteFromBook(bookId, body, page)
         Unit

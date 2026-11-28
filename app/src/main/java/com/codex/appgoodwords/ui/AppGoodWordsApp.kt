@@ -15,6 +15,7 @@ import com.codex.appgoodwords.ui.screen.rememberHaptics
 import com.codex.appgoodwords.ui.screen.animationsEnabled
 import com.codex.appgoodwords.ui.theme.Motion
 import com.codex.appgoodwords.data.DayComparisons
+import com.codex.appgoodwords.data.ReviewQuotes
 import com.codex.appgoodwords.ui.screen.DayCompareScreen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -2040,6 +2041,13 @@ fun AppGoodWordsApp(
                                 BookReviewScreen(
                                     modifier = Modifier.padding(innerPadding),
                                     book = book,
+                                    // 이 책에서 이미 뽑은 글귀 — 따옴표 후보에 ✓를 답니다(사용자가 고름, 2026-11-28).
+                                    savedQuotes = remember(allItems, book.syncId) {
+                                        allItems.filter { it.type == ContentType.QUOTE && it.bookSyncId == book.syncId }
+                                            .map { ReviewQuotes.normalized(it.body) }
+                                            .toSet()
+                                    },
+                                    onAutoSave = { review -> viewModel.autoSaveBookReview(book.id, review) },
                                     onSave = { review ->
                                         coroutineScope.launch {
                                             val result = viewModel.saveBookReview(book.id, review)
