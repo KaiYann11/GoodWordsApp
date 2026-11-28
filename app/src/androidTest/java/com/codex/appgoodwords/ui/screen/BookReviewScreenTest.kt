@@ -1,6 +1,10 @@
 package com.codex.appgoodwords.ui.screen
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -75,7 +79,7 @@ class BookReviewScreenTest {
         }
 
         compose.onNodeWithTag(bookReviewExtractTag).assertIsNotEnabled()
-        compose.onNodeWithText("글 안에서 문장을 길게 눌러 고르면", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("글 안을 길게 눌러 골라", substring = true).assertIsDisplayed()
     }
 
     @Test fun theSelectedSentenceGoesToTheLibraryWithTheCurrentPage() {
@@ -118,5 +122,112 @@ class BookReviewScreenTest {
         compose.onNodeWithTag(bookReviewQuoteSaveTag).performClick()
 
         assertEquals("습관은 정체성의 결과다", extracted?.first)
+    }
+
+    /* 글귀를 쉽게 뽑기와 저장 안 한 글 지키기(사용자가 고름, 2026-11-28). */
+
+    private val progressBook = book.copy(
+        review = "11월 9일 · 140쪽\n결국 사람들은 경험을 산다. 물건보다 이야기가 오래 남는다.\n“행복은 매일의 습관이다.”"
+    )
+
+    @Test fun tappingSentencesPicksThemAndThePageComesFromTheProgressHeader() {
+        var extracted: Pair<String, Int>? = null
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookReviewScreen(book = progressBook, onSave = {}, onExtractQuote = { body, page -> extracted = body to page })
+            }
+        }
+
+        compose.onNodeWithTag(bookReviewPickModeTag).performClick()
+        compose.onNodeWithTag(bookReviewSentenceTag(0)).performClick()
+        compose.onNodeWithTag(bookReviewSentenceTag(1)).performClick()
+        compose.onNodeWithTag(bookReviewPickBarTag).assertTextContains("2문장 · 140쪽", substring = true).performClick()
+        compose.onNodeWithTag(bookReviewQuoteBodyTag).assertTextContains("결국 사람들은 경험을 산다. 물건보다 이야기가 오래 남는다.")
+        compose.onNodeWithTag(bookReviewQuotePageTag).assertTextContains("140")
+        compose.onNodeWithTag(bookReviewQuoteSaveTag).performClick()
+
+        assertEquals("결국 사람들은 경험을 산다. 물건보다 이야기가 오래 남는다." to 140, extracted)
+        // 넣은 뒤에는 고른 것이 풀립니다.
+        compose.onNodeWithTag(bookReviewPickBarTag).assertDoesNotExist()
+    }
+
+    @Test fun tappingAPickedSentenceAgainLetsItGo() {
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookReviewScreen(book = progressBook, onSave = {}, onExtractQuote = { _, _ -> })
+            }
+        }
+
+        compose.onNodeWithTag(bookReviewPickModeTag).performClick()
+        compose.onNodeWithTag(bookReviewSentenceTag(1)).performClick()
+        compose.onNodeWithTag(bookReviewPickBarTag).assertTextContains("1문장", substring = true)
+        compose.onNodeWithTag(bookReviewSentenceTag(1)).performClick()
+        compose.onNodeWithTag(bookReviewPickBarTag).assertDoesNotExist()
+    }
+
+    @Test fun aQuotedSentenceIsOneTapAway() {
+        var extracted: Pair<String, Int>? = null
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookReviewScreen(book = progressBook, onSave = {}, onExtractQuote = { body, page -> extracted = body to page })
+            }
+        }
+
+        compose.onNodeWithTag(bookReviewCandidateTag(0)).assertTextContains("행복은 매일의 습관이다.", substring = true).performClick()
+        compose.onNodeWithTag(bookReviewQuotePageTag).assertTextContains("140")
+        compose.onNodeWithTag(bookReviewQuoteSaveTag).performClick()
+
+        assertEquals("행복은 매일의 습관이다." to 140, extracted)
+    }
+
+    @Test fun aCandidateAlreadyInTheLibraryIsTicked() {
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookReviewScreen(
+                    book = progressBook,
+                    savedQuotes = setOf("행복은 매일의 습관이다."),
+                    onSave = {},
+                    onExtractQuote = { _, _ -> }
+                )
+            }
+        }
+
+        compose.onNodeWithTag(bookReviewCandidateTag(0)).assertTextContains("✓", substring = true)
+    }
+
+    @Test fun whatIsTypedSavesItselfAfterAPause() {
+        var autoSaved: String? = null
+        compose.setContent {
+            AppGoodWordsTheme {
+                BookReviewScreen(book = book.copy(review = ""), onSave = {}, onExtractQuote = { _, _ -> }, onAutoSave = { autoSaved = it })
+            }
+        }
+
+        compose.onNodeWithTag(bookReviewFieldTag).performTextInput("읽다 만 생각")
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.waitForIdle()
+
+        assertEquals("읽다 만 생각", autoSaved)
+    }
+
+    @Test fun leavingTheScreenSavesWhatWasTyped() {
+        var autoSaved: String? = null
+        var shown by mutableStateOf(true)
+        compose.setContent {
+            AppGoodWordsTheme {
+                if (shown) {
+                    BookReviewScreen(book = book.copy(review = ""), onSave = {}, onExtractQuote = { _, _ -> }, onAutoSave = { autoSaved = it })
+                }
+            }
+        }
+
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag(bookReviewFieldTag).performTextInput("나가기 전에 친 글")
+        compose.mainClock.advanceTimeBy(100)
+        // 1.5초가 되기 전에 떠납니다(뒤로 가기나 다른 칸). 치다 만 글이 사라지면 안 됩니다.
+        shown = false
+        compose.mainClock.advanceTimeBy(100)
+
+        assertEquals("나가기 전에 친 글", autoSaved)
     }
 }
